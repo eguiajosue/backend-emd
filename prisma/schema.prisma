@@ -12,3 +12,122 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// Enums
+enum UserRole {
+  SUPERVISOR
+  RECEPTION
+  WORKSHOP
+}
+
+enum OrderStatus {
+  PENDING
+  IN_PROCESS
+  COMPLETED
+  CANCELLED
+}
+
+// Models
+model Companies {
+  company_id      Int    @id @default(autoincrement())
+  company_name    String
+  company_phone   String?
+  company_email   String?
+  company_address String?
+
+  Clients Clients[]
+}
+
+model Clients {
+  client_id  Int    @id @default(autoincrement())
+  company_id Int
+  name       String
+  phone      String?
+  email      String?
+  address    String?
+
+  Company Companies @relation(fields: [company_id], references: [company_id])
+  Orders  Orders[]
+}
+
+model Roles {
+  role_id   Int      @id @default(autoincrement())
+  role_name UserRole
+  Users     Users[]
+}
+
+model Users {
+  user_id    Int    @id @default(autoincrement())
+  role_id    Int
+  first_name String
+  last_name  String?
+  username   String @unique
+  password   String
+
+  Role   Roles    @relation(fields: [role_id], references: [role_id])
+  Orders Orders[]
+  Logs   Logs[]
+}
+
+model Orders {
+  order_id      Int         @id @default(autoincrement())
+  client_id     Int
+  user_id       Int
+  status        OrderStatus
+  description   String
+  creation_date DateTime
+  delivery_date DateTime?
+
+  Client         Clients           @relation(fields: [client_id], references: [client_id])
+  User           Users             @relation(fields: [user_id], references: [user_id])
+  OrderHistory   Order_History[]
+  OrderMaterials Order_Materials[]
+}
+
+model Order_History {
+  history_id      Int         @id @default(autoincrement())
+  order_id        Int
+  previous_status OrderStatus
+  new_status      OrderStatus
+  change_date     DateTime    @default(now())
+
+  Order Orders @relation(fields: [order_id], references: [order_id])
+}
+
+model Material_Types {
+  type_id   Int         @id @default(autoincrement())
+  type_name String
+  Inventory Inventory[]
+}
+
+model Inventory {
+  inventory_id Int      @id @default(autoincrement())
+  type_id      Int
+  name         String
+  quantity     Int
+  color        String
+  last_update  DateTime @updatedAt
+
+  MaterialType   Material_Types    @relation(fields: [type_id], references: [type_id])
+  OrderMaterials Order_Materials[]
+}
+
+model Order_Materials {
+  order_id      Int
+  inventory_id  Int
+  quantity_used Int
+
+  Order     Orders    @relation(fields: [order_id], references: [order_id])
+  Inventory Inventory @relation(fields: [inventory_id], references: [inventory_id])
+
+  @@id([order_id, inventory_id])
+}
+
+model Logs {
+  log_id   Int      @id @default(autoincrement())
+  user_id  Int
+  log_date DateTime @default(now())
+  action   String
+
+  User Users @relation(fields: [user_id], references: [user_id])
+}

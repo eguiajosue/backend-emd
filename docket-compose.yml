@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:latest
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 9cg43pqE
+      POSTGRES_DB: emd_database
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
