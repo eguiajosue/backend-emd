@@ -29,18 +29,19 @@ enum OrderStatus {
 
 // Models
 model Companies {
-  company_id      Int    @id @default(autoincrement())
-  company_name    String
-  company_phone   String?
-  company_email   String?
-  company_address String?
+  company_id       String  @id @default(cuid())
+  company_name     String  @unique
+  company_phone    String?
+  company_email    String?
+  company_address  String?
+  company_location String?
 
   Clients Clients[]
 }
 
 model Clients {
-  client_id  Int    @id @default(autoincrement())
-  company_id Int
+  client_id  String  @id @default(cuid())
+  company_id String
   name       String
   phone      String?
   email      String?
@@ -51,17 +52,17 @@ model Clients {
 }
 
 model Roles {
-  role_id   Int      @id @default(autoincrement())
+  role_id   String   @id @default(cuid())
   role_name UserRole
   Users     Users[]
 }
 
 model Users {
-  user_id    Int    @id @default(autoincrement())
-  role_id    Int
+  user_id    String  @id @default(cuid())
+  role_id    String
   first_name String
   last_name  String?
-  username   String @unique
+  username   String  @unique
   password   String
 
   Role   Roles    @relation(fields: [role_id], references: [role_id])
@@ -70,9 +71,9 @@ model Users {
 }
 
 model Orders {
-  order_id      Int         @id @default(autoincrement())
-  client_id     Int
-  user_id       Int
+  order_id      String      @id @default(cuid())
+  client_id     String
+  user_id       String
   status        OrderStatus
   description   String
   creation_date DateTime
@@ -85,8 +86,8 @@ model Orders {
 }
 
 model Order_History {
-  history_id      Int         @id @default(autoincrement())
-  order_id        Int
+  history_id      String      @id @default(cuid())
+  order_id        String
   previous_status OrderStatus
   new_status      OrderStatus
   change_date     DateTime    @default(now())
@@ -95,14 +96,14 @@ model Order_History {
 }
 
 model Material_Types {
-  type_id   Int         @id @default(autoincrement())
+  type_id   String      @id @default(cuid())
   type_name String
   Inventory Inventory[]
 }
 
 model Inventory {
-  inventory_id Int      @id @default(autoincrement())
-  type_id      Int
+  inventory_id String   @id @default(cuid())
+  type_id      String
   name         String
   quantity     Int
   color        String
@@ -113,8 +114,8 @@ model Inventory {
 }
 
 model Order_Materials {
-  order_id      Int
-  inventory_id  Int
+  order_id      String
+  inventory_id  String
   quantity_used Int
 
   Order     Orders    @relation(fields: [order_id], references: [order_id])
@@ -124,8 +125,8 @@ model Order_Materials {
 }
 
 model Logs {
-  log_id   Int      @id @default(autoincrement())
-  user_id  Int
+  log_id   String   @id @default(cuid())
+  user_id  String
   log_date DateTime @default(now())
   action   String
 

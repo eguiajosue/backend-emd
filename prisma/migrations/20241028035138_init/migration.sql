@@ -6,19 +6,20 @@ CREATE TYPE "OrderStatus" AS ENUM ('PENDING', 'IN_PROCESS', 'COMPLETED', 'CANCEL
 
 -- CreateTable
 CREATE TABLE "Companies" (
-    "company_id" SERIAL NOT NULL,
+    "company_id" TEXT NOT NULL,
     "company_name" TEXT NOT NULL,
     "company_phone" TEXT,
     "company_email" TEXT,
     "company_address" TEXT,
+    "company_location" TEXT,
 
     CONSTRAINT "Companies_pkey" PRIMARY KEY ("company_id")
 );
 
 -- CreateTable
 CREATE TABLE "Clients" (
-    "client_id" SERIAL NOT NULL,
-    "company_id" INTEGER NOT NULL,
+    "client_id" TEXT NOT NULL,
+    "company_id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "phone" TEXT,
     "email" TEXT,
@@ -29,7 +30,7 @@ CREATE TABLE "Clients" (
 
 -- CreateTable
 CREATE TABLE "Roles" (
-    "role_id" SERIAL NOT NULL,
+    "role_id" TEXT NOT NULL,
     "role_name" "UserRole" NOT NULL,
 
     CONSTRAINT "Roles_pkey" PRIMARY KEY ("role_id")
@@ -37,8 +38,8 @@ CREATE TABLE "Roles" (
 
 -- CreateTable
 CREATE TABLE "Users" (
-    "user_id" SERIAL NOT NULL,
-    "role_id" INTEGER NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "role_id" TEXT NOT NULL,
     "first_name" TEXT NOT NULL,
     "last_name" TEXT,
     "username" TEXT NOT NULL,
@@ -49,9 +50,9 @@ CREATE TABLE "Users" (
 
 -- CreateTable
 CREATE TABLE "Orders" (
-    "order_id" SERIAL NOT NULL,
-    "client_id" INTEGER NOT NULL,
-    "user_id" INTEGER NOT NULL,
+    "order_id" TEXT NOT NULL,
+    "client_id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
     "status" "OrderStatus" NOT NULL,
     "description" TEXT NOT NULL,
     "creation_date" TIMESTAMP(3) NOT NULL,
@@ -62,8 +63,8 @@ CREATE TABLE "Orders" (
 
 -- CreateTable
 CREATE TABLE "Order_History" (
-    "history_id" SERIAL NOT NULL,
-    "order_id" INTEGER NOT NULL,
+    "history_id" TEXT NOT NULL,
+    "order_id" TEXT NOT NULL,
     "previous_status" "OrderStatus" NOT NULL,
     "new_status" "OrderStatus" NOT NULL,
     "change_date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -73,7 +74,7 @@ CREATE TABLE "Order_History" (
 
 -- CreateTable
 CREATE TABLE "Material_Types" (
-    "type_id" SERIAL NOT NULL,
+    "type_id" TEXT NOT NULL,
     "type_name" TEXT NOT NULL,
 
     CONSTRAINT "Material_Types_pkey" PRIMARY KEY ("type_id")
@@ -81,8 +82,8 @@ CREATE TABLE "Material_Types" (
 
 -- CreateTable
 CREATE TABLE "Inventory" (
-    "inventory_id" SERIAL NOT NULL,
-    "type_id" INTEGER NOT NULL,
+    "inventory_id" TEXT NOT NULL,
+    "type_id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "quantity" INTEGER NOT NULL,
     "color" TEXT NOT NULL,
@@ -93,8 +94,8 @@ CREATE TABLE "Inventory" (
 
 -- CreateTable
 CREATE TABLE "Order_Materials" (
-    "order_id" INTEGER NOT NULL,
-    "inventory_id" INTEGER NOT NULL,
+    "order_id" TEXT NOT NULL,
+    "inventory_id" TEXT NOT NULL,
     "quantity_used" INTEGER NOT NULL,
 
     CONSTRAINT "Order_Materials_pkey" PRIMARY KEY ("order_id","inventory_id")
@@ -102,13 +103,16 @@ CREATE TABLE "Order_Materials" (
 
 -- CreateTable
 CREATE TABLE "Logs" (
-    "log_id" SERIAL NOT NULL,
-    "user_id" INTEGER NOT NULL,
+    "log_id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
     "log_date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "action" TEXT NOT NULL,
 
     CONSTRAINT "Logs_pkey" PRIMARY KEY ("log_id")
 );
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Companies_company_name_key" ON "Companies"("company_name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Users_username_key" ON "Users"("username");
