@@ -8,15 +8,8 @@ export class UsersService {
   constructor(private prisma: PrismaService) {}
   async create(createUserDto: CreateUserDto) {
     try {
-      // eslint-disable-next-line prefer-const
-      let { username, first_name, last_name } = createUserDto;
-
-      if (!username) {
-        username = `${first_name.substring(0, 1).toLowerCase()}${last_name.toLowerCase()}`;
-      }
-
       const existingUser = await this.prisma.users.findFirst({
-        where: { username },
+        where: { username: createUserDto.username },
       });
 
       if (existingUser) {
@@ -27,7 +20,7 @@ export class UsersService {
       }
 
       return this.prisma.users.create({
-        data: { ...createUserDto, username },
+        data: createUserDto,
       });
     } catch (error) {
       throw new BadRequestException(error.message);
@@ -48,15 +41,16 @@ export class UsersService {
     return new HttpException(foundUser, HttpStatus.FOUND);
   }
 
-  update(id: string, updateUserDto: UpdateUserDto) {
+  async update(id: string, updateUserDto: UpdateUserDto) {
     try {
-      const existingUser = this.prisma.users.findFirst({
+      const existingUser = await this.prisma.users.findFirst({
         where: { user_id: id },
       });
       if (!existingUser) {
         throw new HttpException('El usuario no existe', HttpStatus.NOT_FOUND);
       }
-      return this.prisma.users.update({
+
+      return await this.prisma.users.update({
         where: { user_id: id },
         data: { ...updateUserDto },
       });

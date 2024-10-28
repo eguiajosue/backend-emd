@@ -15,16 +15,18 @@ datasource db {
 
 // Enums
 enum UserRole {
+  ADMIN
   SUPERVISOR
-  RECEPTION
-  WORKSHOP
+  TALLER
+  RECEPCION
 }
 
 enum OrderStatus {
-  PENDING
-  IN_PROCESS
-  COMPLETED
-  CANCELLED
+  PENDIENTE
+  EN_PRUEBAS
+  EN_PROCESO
+  TERMINADO
+  ENTREGADO
 }
 
 // Models
@@ -74,7 +76,7 @@ model Orders {
   order_id      String      @id @default(cuid())
   client_id     String
   user_id       String
-  status        OrderStatus
+  status        OrderStatus @default(PENDIENTE)
   description   String
   creation_date DateTime
   delivery_date DateTime?

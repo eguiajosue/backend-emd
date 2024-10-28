@@ -1,8 +1,8 @@
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('SUPERVISOR', 'RECEPTION', 'WORKSHOP');
+CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'SUPERVISOR', 'TALLER', 'RECEPCION');
 
 -- CreateEnum
-CREATE TYPE "OrderStatus" AS ENUM ('PENDING', 'IN_PROCESS', 'COMPLETED', 'CANCELLED');
+CREATE TYPE "OrderStatus" AS ENUM ('PENDIENTE', 'EN_PRUEBAS', 'EN_PROCESO', 'TERMINADO', 'ENTREGADO');
 
 -- CreateTable
 CREATE TABLE "Companies" (
@@ -53,7 +53,7 @@ CREATE TABLE "Orders" (
     "order_id" TEXT NOT NULL,
     "client_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
-    "status" "OrderStatus" NOT NULL,
+    "status" "OrderStatus" NOT NULL DEFAULT 'PENDIENTE',
     "description" TEXT NOT NULL,
     "creation_date" TIMESTAMP(3) NOT NULL,
     "delivery_date" TIMESTAMP(3),

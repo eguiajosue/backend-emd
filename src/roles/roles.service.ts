@@ -7,19 +7,22 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class RolesService {
   constructor(private prisma: PrismaService) {}
   create(createRoleDto: CreateRoleDto) {
-    const existingRole = this.prisma.roles.findFirst({
-      where: { role_name: createRoleDto.role_name },
-    });
-
-    if (existingRole) {
-      throw new HttpException(
-        'El rol ya existe en la base de datos',
-        HttpStatus.BAD_REQUEST,
-      );
+    try {
+      const existingRole = this.prisma.roles.findFirst({
+        where: { role_name: createRoleDto.role_name },
+      });
+      if (!existingRole) {
+        throw new HttpException(
+          'El rol ya existe en la base de datos',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      return this.prisma.roles.create({
+        data: { ...createRoleDto },
+      });
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
     }
-    return this.prisma.roles.create({
-      data: { ...createRoleDto },
-    });
   }
 
   async findAll() {
