@@ -41,13 +41,13 @@ model Companies {
 
 model Clients {
   client_id  String  @id @default(cuid())
-  company_id String
+  company_id String?
   name       String
   phone      String?
   email      String?
   address    String?
 
-  Company Companies @relation(fields: [company_id], references: [company_id])
+  Company Companies? @relation(fields: [company_id], references: [company_id])
   Orders  Orders[]
 }
 

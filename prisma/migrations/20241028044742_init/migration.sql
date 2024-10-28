@@ -19,7 +19,7 @@ CREATE TABLE "Companies" (
 -- CreateTable
 CREATE TABLE "Clients" (
     "client_id" TEXT NOT NULL,
-    "company_id" TEXT NOT NULL,
+    "company_id" TEXT,
     "name" TEXT NOT NULL,
     "phone" TEXT,
     "email" TEXT,
@@ -118,7 +118,7 @@ CREATE UNIQUE INDEX "Companies_company_name_key" ON "Companies"("company_name");
 CREATE UNIQUE INDEX "Users_username_key" ON "Users"("username");
 
 -- AddForeignKey
-ALTER TABLE "Clients" ADD CONSTRAINT "Clients_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "Companies"("company_id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Clients" ADD CONSTRAINT "Clients_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "Companies"("company_id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Users" ADD CONSTRAINT "Users_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "Roles"("role_id") ON DELETE RESTRICT ON UPDATE CASCADE;
