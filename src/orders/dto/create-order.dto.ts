@@ -13,15 +13,17 @@
   OrderMaterials Order_Materials[]
  */
 
-import { IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { OrderStatus } from '@prisma/client';
 
 export class CreateOrderDto {
   @IsString()
   client_id: string;
   @IsString()
   user_id: string;
-  @IsString()
-  status: string;
+  @IsEnum(OrderStatus)
+  @IsOptional()
+  status?: OrderStatus = OrderStatus.PENDIENTE;
   @IsString()
   description: string;
   @IsString()
