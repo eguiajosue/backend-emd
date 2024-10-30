@@ -53,9 +53,7 @@ export class InventoryService {
         );
       }
       return this.prisma.inventory.update({
-        where: {
-          inventory_id: id,
-        },
+        where: { inventory_id: id },
         data: { ...updateInventoryDto },
       });
     } catch (error) {

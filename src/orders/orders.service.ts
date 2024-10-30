@@ -73,9 +73,7 @@ export class OrdersService {
       throw new HttpException('Order not found', HttpStatus.NOT_FOUND);
     }
     return await this.prisma.orders.update({
-      where: {
-        order_id: id,
-      },
+      where: { order_id: id },
       data: { ...updateOrderDto },
     });
   }

@@ -75,10 +75,8 @@ export class MaterialTypesService {
       }
 
       return await this.prisma.material_Types.update({
-        where: {
-          type_id: id,
-        },
-        data: updateMaterialTypeDto,
+        where: { type_id: id },
+        data: { ...updateMaterialTypeDto },
       });
     } catch (error) {
       return new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
