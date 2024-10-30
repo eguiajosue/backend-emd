@@ -7,8 +7,9 @@ import { UsersModule } from './users/users.module';
 import { OrdersModule } from './orders/orders.module';
 import { OrderHistoryModule } from './order_history/order_history.module';
 import { MaterialTypesModule } from './material-types/material-types.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
-  imports: [CompaniesModule, PrismaModule, ClientsModule, RolesModule, UsersModule, OrdersModule, OrderHistoryModule, MaterialTypesModule],
+  imports: [CompaniesModule, PrismaModule, ClientsModule, RolesModule, UsersModule, OrdersModule, OrderHistoryModule, MaterialTypesModule, InventoryModule],
 })
 export class AppModule {}
