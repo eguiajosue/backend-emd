@@ -6,7 +6,7 @@ import { CreateOrderHistoryDto } from './dto/create-order_history.dto';
 export class OrderHistoryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createHistory(createOrderHistoryDto: CreateOrderHistoryDto) {
+  async create(createOrderHistoryDto: CreateOrderHistoryDto) {
     try {
       return await this.prisma.order_History.create({
         data: createOrderHistoryDto,
@@ -16,7 +16,7 @@ export class OrderHistoryService {
     }
   }
 
-  async getHistoryByOrderId(orderId: string) {
+  async findOne(orderId: string) {
     try {
       return await this.prisma.order_History.findMany({
         where: { order_id: orderId },
@@ -27,7 +27,7 @@ export class OrderHistoryService {
     }
   }
 
-  async deleteHistory(orderId: string) {
+  async remove(orderId: string) {
     try {
       return await this.prisma.order_History.deleteMany({
         where: { order_id: orderId },
