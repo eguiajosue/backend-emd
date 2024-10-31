@@ -8,8 +8,9 @@ import { OrdersModule } from './orders/orders.module';
 import { OrderHistoryModule } from './order_history/order_history.module';
 import { MaterialTypesModule } from './material-types/material-types.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { OrderMaterialsModule } from './order-materials/order-materials.module';
 
 @Module({
-  imports: [CompaniesModule, PrismaModule, ClientsModule, RolesModule, UsersModule, OrdersModule, OrderHistoryModule, MaterialTypesModule, InventoryModule],
+  imports: [CompaniesModule, PrismaModule, ClientsModule, RolesModule, UsersModule, OrdersModule, OrderHistoryModule, MaterialTypesModule, InventoryModule, OrderMaterialsModule],
 })
 export class AppModule {}
