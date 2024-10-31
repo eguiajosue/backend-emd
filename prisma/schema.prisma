@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,124 +7,167 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Enums
-enum UserRole {
-  ADMIN
-  SUPERVISOR
-  TALLER
-  RECEPCION
+// Modelos
+
+// El modelo Company representa a las empresas con su información de contacto.
+model Company {
+  id       String  @id @default(cuid()) // Identificador único de la empresa.
+  name     String  @unique // Nombre de la empresa.
+  phone    String? // Número de teléfono de la empresa.
+  email    String? // Dirección de correo electrónico de la empresa.
+  address  String? // Dirección física de la empresa.
+  location String? // Ubicación de la empresa (por ejemplo, ciudad, estado).
+
+  clients Client[] // Relación uno a muchos con el modelo Client.
 }
 
-enum OrderStatus {
-  PENDIENTE
-  EN_PRUEBAS
-  EN_PROCESO
-  TERMINADO
-  ENTREGADO
+// El modelo Client representa a los clientes individuales asociados con una empresa quienes son los que realizan los pedidos.
+model Client {
+  id         String  @id @default(cuid()) // Identificador único del cliente.
+  companyId  String? // Clave foránea que referencia a Company.
+  first_name String // Nombre del cliente.
+  last_name  String // Apellido del cliente.
+  phone      String? // Número de teléfono del cliente.
+  email      String? // Dirección de correo electrónico del cliente.
+  address    String? // Dirección física del cliente.
+
+  company Company? @relation(fields: [companyId], references: [id]) // Relación con Company.
+  orders  Order[] // Relación uno a muchos con el modelo Order.
 }
 
-// Models
-model Companies {
-  company_id       String  @id @default(cuid())
-  company_name     String  @unique
-  company_phone    String?
-  company_email    String?
-  company_address  String?
-  company_location String?
-
-  Clients Clients[]
+// El modelo Role define los roles de usuario dentro del sistema.
+model Role {
+  id    String @id @default(cuid()) // Identificador único del rol.
+  name  String @unique // Nombre del rol (por ejemplo, Admin, User).
+  users User[] // Relación uno a muchos con el modelo User.
 }
 
-model Clients {
-  client_id  String  @id @default(cuid())
-  company_id String?
-  name       String
-  phone      String?
-  email      String?
-  address    String?
+// El modelo User representa a los usuarios del sistema.
+model User {
+  id        String  @id @default(cuid()) // Identificador único del usuario.
+  roleId    String // Clave foránea que referencia a Role.
+  firstName String // Nombre del usuario.
+  lastName  String? // Apellido del usuario.
+  username  String  @unique // Nombre de usuario único para iniciar sesión.
+  password  String // Contraseña del usuario.
 
-  Company Companies? @relation(fields: [company_id], references: [company_id])
-  Orders  Orders[]
+  role   Role    @relation(fields: [roleId], references: [id]) // Relación con Role.
+  orders Order[] // Relación uno a muchos con Order.
+  logs   Log[] // Relación uno a muchos con Log.
 }
 
-model Roles {
-  role_id   String   @id @default(cuid())
-  role_name UserRole
-  Users     Users[]
+// El modelo Status representa los posibles estados de una orden.
+model Status {
+  id                     String         @id @default(cuid()) // Identificador único del estado.
+  name                   String         @unique // Nombre del estado (por ejemplo, Pendiente).
+  orders                 Order[] // Relación uno a muchos con Order.
+  previousOrderHistories OrderHistory[] @relation("PreviousStatus") // Relación con OrderHistory donde este estado es el estado anterior.
+  newOrderHistories      OrderHistory[] @relation("NewStatus") // Relación con OrderHistory donde este estado es el nuevo estado.
 }
 
-model Users {
-  user_id    String  @id @default(cuid())
-  role_id    String
-  first_name String
-  last_name  String?
-  username   String  @unique
-  password   String
+// El modelo Order representa las órdenes realizadas por los clientes.
+model Order {
+  id           String    @id @default(cuid()) // Identificador único de la orden.
+  clientId     String // Clave foránea que referencia a Client.
+  userId       String // Clave foránea que referencia al User que creó la orden.
+  statusId     String // Clave foránea que referencia a Status.
+  description  String // Descripción de la orden.
+  creationDate DateTime // Fecha en que se creó la orden.
+  deliveryDate DateTime? // Fecha de entrega opcional.
 
-  Role   Roles    @relation(fields: [role_id], references: [role_id])
-  Orders Orders[]
-  Logs   Logs[]
+  client        Client         @relation(fields: [clientId], references: [id]) // Relación con Client.
+  user          User           @relation(fields: [userId], references: [id]) // Relación con User.
+  status        Status         @relation(fields: [statusId], references: [id]) // Relación con Status.
+  histories     OrderHistory[] // Relación uno a muchos con OrderHistory.
+  orderProducts OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
 }
 
-model Orders {
-  order_id      String      @id @default(cuid())
-  client_id     String
-  user_id       String
-  status        OrderStatus @default(PENDIENTE)
-  description   String
-  creation_date DateTime
-  delivery_date DateTime?
+// El modelo OrderHistory realiza un seguimiento de los cambios en el estado de una orden.
+model OrderHistory {
+  id               String   @id @default(cuid()) // Identificador único del registro de historial de la orden.
+  orderId          String // Clave foránea que referencia a Order.
+  previousStatusId String // Clave foránea que referencia al estado anterior en Status.
+  newStatusId      String // Clave foránea que referencia al nuevo estado en Status.
+  changeDate       DateTime @default(now()) // Fecha y hora en que ocurrió el cambio de estado.
 
-  Client         Clients           @relation(fields: [client_id], references: [client_id])
-  User           Users             @relation(fields: [user_id], references: [user_id])
-  OrderHistory   Order_History[]
-  OrderMaterials Order_Materials[]
+  order          Order  @relation(fields: [orderId], references: [id]) // Relación con Order.
+  previousStatus Status @relation("PreviousStatus", fields: [previousStatusId], references: [id]) // Relación con el estado anterior en Status.
+  newStatus      Status @relation("NewStatus", fields: [newStatusId], references: [id]) // Relación con el nuevo estado en Status.
 }
 
-model Order_History {
-  history_id      String      @id @default(cuid())
-  order_id        String
-  previous_status OrderStatus
-  new_status      OrderStatus
-  change_date     DateTime    @default(now())
+// El modelo ProductType representa los diferentes tipos de productos disponibles.
+model ProductType {
+  id   Int    @id @default(autoincrement()) // Identificador único del tipo de producto.
+  name String @unique // Nombre del tipo de producto (por ejemplo, Hilo, Polo).
 
-  Order Orders @relation(fields: [order_id], references: [order_id])
+  products Product[] // Relación uno a muchos con Product.
 }
 
-model Material_Types {
-  type_id   String      @id @default(cuid())
-  type_name String
-  Inventory Inventory[]
+// El modelo Color representa los colores que puede tener un producto.
+model Color {
+  id   Int    @id @default(autoincrement()) // Identificador único del color.
+  name String @unique // Nombre del color (por ejemplo, Rojo, Azul).
+
+  products Product[] // Relación uno a muchos con Product.
 }
 
-model Inventory {
-  inventory_id String   @id @default(cuid())
-  type_id      String
-  name         String
-  quantity     Int
-  color        String
-  last_update  DateTime @updatedAt
+// El modelo Size representa las tallas que puede tener un producto.
+model Size {
+  id   Int    @id @default(autoincrement()) // Identificador único de la talla.
+  name String @unique // Nombre de la talla (por ejemplo, S, M, L).
 
-  MaterialType   Material_Types    @relation(fields: [type_id], references: [type_id])
-  OrderMaterials Order_Materials[]
+  products Product[] // Relación uno a muchos con Product.
 }
 
-model Order_Materials {
-  order_id      String
-  inventory_id  String
-  quantity_used Int
+// El modelo Product representa los productos individuales en el inventario.
+model Product {
+  id            Int     @id @default(autoincrement()) // Identificador único del producto.
+  productTypeId Int // Clave foránea que referencia a ProductType.
+  colorId       Int? // Clave foránea opcional que referencia a Color.
+  sizeId        Int? // Clave foránea opcional que referencia a Size.
+  code          String? // Para hilos, puede ser nulo  // Código opcional del producto.
+  quantity      Int // Cantidad actual en el inventario.
 
-  Order     Orders    @relation(fields: [order_id], references: [order_id])
-  Inventory Inventory @relation(fields: [inventory_id], references: [inventory_id])
+  productType   ProductType            @relation(fields: [productTypeId], references: [id]) // Relación con ProductType.
+  color         Color?                 @relation(fields: [colorId], references: [id]) // Relación opcional con Color.
+  size          Size?                  @relation(fields: [sizeId], references: [id]) // Relación opcional con Size.
+  transactions  InventoryTransaction[] // Relación uno a muchos con InventoryTransaction.
+  orderProducts OrderProduct[] // Relación muchos a muchos con Order a través de OrderProduct.
 
-  @@id([order_id, inventory_id])
+  @@index([productTypeId]) // Índice para optimizar consultas en productTypeId.
+  @@index([colorId]) // Índice para optimizar consultas en colorId.
+  @@index([sizeId]) // Índice para optimizar consultas en sizeId.
 }
 
-model Logs {
-  log_id   String   @id @default(cuid())
-  user_id  String
-  log_date DateTime @default(now())
-  action   String
+// El modelo InventoryTransaction registra los cambios en el inventario de un producto.
+model InventoryTransaction {
+  id              Int      @id @default(autoincrement()) // Identificador único de la transacción.
+  productId       Int // Clave foránea que referencia a Product.
+  transactionDate DateTime // Fecha y hora de la transacción.
+  quantityChange  Int // Positivo o negativo        // Cantidad de cambio en el inventario.
+  notes           String? // Notas opcionales sobre la transacción.
 
-  User Users @relation(fields: [user_id], references: [user_id])
+  product Product @relation(fields: [productId], references: [id]) // Relación con Product.
+}
+
+// El modelo OrderProduct representa la relación muchos a muchos entre Orders y Products.
+model OrderProduct {
+  orderId   String // Clave foránea que referencia a Order.
+  productId Int // Clave foránea que referencia a Product.
+  quantity  Int // Cantidad del producto en la orden.
+
+  order   Order   @relation(fields: [orderId], references: [id]) // Relación con Order.
+  product Product @relation(fields: [productId], references: [id]) // Relación con Product.
+
+  @@id([orderId, productId]) // Clave primaria compuesta para garantizar unicidad.
+}
+
+// El modelo Log registra las acciones realizadas por los usuarios.
+model Log {
+  id      String   @id @default(cuid()) // Identificador único del registro.
+  userId  String // Clave foránea que referencia a User.
+  logDate DateTime @default(now()) // Fecha y hora en que se registró la acción.
+  action  String // Descripción de la acción realizada.
+
+  user User @relation(fields: [userId], references: [id]) // Relación con User.
 }
