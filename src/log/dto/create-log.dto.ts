@@ -1,9 +1,9 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsString } from 'class-validator';
 
 export class CreateLogDto {
-  @IsString()
+  @IsNumber()
   @IsNotEmpty()
-  userId: string;
+  userId: number;
   @IsString()
   @IsNotEmpty()
   action: string;

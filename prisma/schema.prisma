@@ -7,11 +7,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Modelos
-
-// El modelo Company representa a las empresas con su información de contacto.
 model Company {
-  id       String  @id @default(cuid()) // Identificador único de la empresa.
+  id       Int  @id @default(autoincrement()) // Identificador único de la empresa.
   name     String  @unique // Nombre de la empresa.
   phone    String? // Número de teléfono de la empresa.
   email    String? // Dirección de correo electrónico de la empresa.
@@ -21,10 +18,9 @@ model Company {
   clients Client[] // Relación uno a muchos con el modelo Client.
 }
 
-// El modelo Client representa a los clientes individuales asociados con una empresa quienes son los que realizan los pedidos.
 model Client {
-  id         String  @id @default(cuid()) // Identificador único del cliente.
-  companyId  String? // Clave foránea que referencia a Company.
+  id         Int  @id @default(autoincrement()) // Identificador único del cliente.
+  companyId  Int? // Clave foránea que referencia a Company.
   first_name String // Nombre del cliente.
   last_name  String // Apellido del cliente.
   phone      String? // Número de teléfono del cliente.
@@ -35,17 +31,15 @@ model Client {
   orders  Order[] // Relación uno a muchos con el modelo Order.
 }
 
-// El modelo Role define los roles de usuario dentro del sistema.
 model Role {
-  id    String @id @default(cuid()) // Identificador único del rol.
+  id    Int  @id @default(autoincrement()) // Identificador único del rol.
   name  String @unique // Nombre del rol (por ejemplo, Admin, User).
   users User[] // Relación uno a muchos con el modelo User.
 }
 
-// El modelo User representa a los usuarios del sistema.
 model User {
-  id        String  @id @default(cuid()) // Identificador único del usuario.
-  roleId    String // Clave foránea que referencia a Role.
+  id        Int  @id @default(autoincrement()) // Identificador único del usuario.
+  roleId    Int // Clave foránea que referencia a Role.
   firstName String // Nombre del usuario.
   lastName  String? // Apellido del usuario.
   username  String  @unique // Nombre de usuario único para iniciar sesión.
@@ -56,21 +50,19 @@ model User {
   logs   Log[] // Relación uno a muchos con Log.
 }
 
-// El modelo Status representa los posibles estados de una orden.
 model Status {
-  id                     String         @id @default(cuid()) // Identificador único del estado.
+  id                     Int         @id @default(autoincrement()) // Identificador único del estado.
   name                   String         @unique // Nombre del estado (por ejemplo, Pendiente).
   orders                 Order[] // Relación uno a muchos con Order.
   previousOrderHistories OrderHistory[] @relation("PreviousStatus") // Relación con OrderHistory donde este estado es el estado anterior.
   newOrderHistories      OrderHistory[] @relation("NewStatus") // Relación con OrderHistory donde este estado es el nuevo estado.
 }
 
-// El modelo Order representa las órdenes realizadas por los clientes.
 model Order {
-  id           String    @id @default(cuid()) // Identificador único de la orden.
-  clientId     String // Clave foránea que referencia a Client.
-  userId       String // Clave foránea que referencia al User que creó la orden.
-  statusId     String // Clave foránea que referencia a Status.
+  id           Int    @id @default(autoincrement()) // Identificador único de la orden.
+  clientId     Int // Clave foránea que referencia a Client.
+  userId       Int // Clave foránea que referencia al User que creó la orden.
+  statusId     Int // Clave foránea que referencia a Status.
   description  String // Descripción de la orden.
   creationDate DateTime // Fecha en que se creó la orden.
   deliveryDate DateTime? // Fecha de entrega opcional.
@@ -82,12 +74,11 @@ model Order {
   orderProducts OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
 }
 
-// El modelo OrderHistory realiza un seguimiento de los cambios en el estado de una orden.
 model OrderHistory {
-  id               String   @id @default(cuid()) // Identificador único del registro de historial de la orden.
-  orderId          String // Clave foránea que referencia a Order.
-  previousStatusId String // Clave foránea que referencia al estado anterior en Status.
-  newStatusId      String // Clave foránea que referencia al nuevo estado en Status.
+  id               Int   @id @default(autoincrement()) // Identificador único del registro de historial de la orden.
+  orderId          Int // Clave foránea que referencia a Order.
+  previousStatusId Int // Clave foránea que referencia al estado anterior en Status.
+  newStatusId      Int // Clave foránea que referencia al nuevo estado en Status.
   changeDate       DateTime @default(now()) // Fecha y hora en que ocurrió el cambio de estado.
 
   order          Order  @relation(fields: [orderId], references: [id]) // Relación con Order.
@@ -95,7 +86,6 @@ model OrderHistory {
   newStatus      Status @relation("NewStatus", fields: [newStatusId], references: [id]) // Relación con el nuevo estado en Status.
 }
 
-// El modelo ProductType representa los diferentes tipos de productos disponibles.
 model ProductType {
   id   Int    @id @default(autoincrement()) // Identificador único del tipo de producto.
   name String @unique // Nombre del tipo de producto (por ejemplo, Hilo, Polo).
@@ -103,7 +93,6 @@ model ProductType {
   products Product[] // Relación uno a muchos con Product.
 }
 
-// El modelo Color representa los colores que puede tener un producto.
 model Color {
   id   Int    @id @default(autoincrement()) // Identificador único del color.
   name String @unique // Nombre del color (por ejemplo, Rojo, Azul).
@@ -111,7 +100,6 @@ model Color {
   products Product[] // Relación uno a muchos con Product.
 }
 
-// El modelo Size representa las tallas que puede tener un producto.
 model Size {
   id   Int    @id @default(autoincrement()) // Identificador único de la talla.
   name String @unique // Nombre de la talla (por ejemplo, S, M, L).
@@ -119,7 +107,6 @@ model Size {
   products Product[] // Relación uno a muchos con Product.
 }
 
-// El modelo Product representa los productos individuales en el inventario.
 model Product {
   id            Int     @id @default(autoincrement()) // Identificador único del producto.
   productTypeId Int // Clave foránea que referencia a ProductType.
@@ -139,7 +126,6 @@ model Product {
   @@index([sizeId]) // Índice para optimizar consultas en sizeId.
 }
 
-// El modelo InventoryTransaction registra los cambios en el inventario de un producto.
 model InventoryTransaction {
   id              Int      @id @default(autoincrement()) // Identificador único de la transacción.
   productId       Int // Clave foránea que referencia a Product.
@@ -150,9 +136,8 @@ model InventoryTransaction {
   product Product @relation(fields: [productId], references: [id]) // Relación con Product.
 }
 
-// El modelo OrderProduct representa la relación muchos a muchos entre Orders y Products.
 model OrderProduct {
-  orderId   String // Clave foránea que referencia a Order.
+  orderId   Int // Clave foránea que referencia a Order.
   productId Int // Clave foránea que referencia a Product.
   quantity  Int // Cantidad del producto en la orden.
 
@@ -162,10 +147,9 @@ model OrderProduct {
   @@id([orderId, productId]) // Clave primaria compuesta para garantizar unicidad.
 }
 
-// El modelo Log registra las acciones realizadas por los usuarios.
 model Log {
-  id      String   @id @default(cuid()) // Identificador único del registro.
-  userId  String // Clave foránea que referencia a User.
+  id      Int   @id @default(autoincrement()) // Identificador único del registro.
+  userId  Int // Clave foránea que referencia a User.
   logDate DateTime @default(now()) // Fecha y hora en que se registró la acción.
   action  String // Descripción de la acción realizada.
 

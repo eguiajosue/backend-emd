@@ -21,16 +21,16 @@ class OrderProductDto {
 
 export class CreateOrderDto {
   @IsNotEmpty()
-  @IsString()
-  clientId: string;
+  @IsNumber()
+  clientId: number;
 
   @IsNotEmpty()
-  @IsString()
-  userId: string;
+  @IsNumber()
+  userId: number;
 
   @IsNotEmpty()
-  @IsString()
-  statusId: string;
+  @IsNumber()
+  statusId: number;
 
   @IsNotEmpty()
   @IsString()

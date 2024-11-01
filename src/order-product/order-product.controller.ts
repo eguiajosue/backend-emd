@@ -30,7 +30,7 @@ export class OrderProductController {
     @Param('orderId') orderId: string,
     @Param('productId') productId: string,
   ) {
-    return this.orderProductService.findOne(orderId, +productId);
+    return this.orderProductService.findOne(+orderId, +productId);
   }
 
   @Patch(':orderId/:productId')
@@ -40,8 +40,8 @@ export class OrderProductController {
     @Body() updateOrderProductDto: UpdateOrderProductDto,
   ) {
     return this.orderProductService.update(
-      orderId,
-      productId,
+      +orderId,
+      +productId,
       updateOrderProductDto,
     );
   }
@@ -51,6 +51,6 @@ export class OrderProductController {
     @Param('orderId') orderId: string,
     @Param('productId') productId: string,
   ) {
-    return this.orderProductService.remove(orderId, +productId);
+    return this.orderProductService.remove(+orderId, +productId);
   }
 }

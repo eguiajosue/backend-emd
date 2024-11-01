@@ -95,7 +95,7 @@ export class OrderService {
     }
   }
 
-  async findOne(id: string) {
+  async findOne(id: number) {
     try {
       const order = await this.prisma.order.findUnique({
         where: { id },
@@ -125,7 +125,7 @@ export class OrderService {
     }
   }
 
-  async update(id: string, updateOrderDto: UpdateOrderDto) {
+  async update(id: number, updateOrderDto: UpdateOrderDto) {
     try {
       const {
         clientId,
@@ -201,7 +201,7 @@ export class OrderService {
     }
   }
 
-  async remove(id: string) {
+  async remove(id: number) {
     try {
       await this.prisma.order.delete({
         where: { id },

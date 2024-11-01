@@ -32,7 +32,7 @@ export class CompanyService {
     }
   }
 
-  async findOne(id: string) {
+  async findOne(id: number) {
     try {
       const company = await this.prisma.company.findUnique({
         where: { id },
@@ -49,7 +49,7 @@ export class CompanyService {
     }
   }
 
-  async update(id: string, updateCompanyDto: UpdateCompanyDto) {
+  async update(id: number, updateCompanyDto: UpdateCompanyDto) {
     try {
       const company = await this.prisma.company.update({
         where: { id },
@@ -70,7 +70,7 @@ export class CompanyService {
     }
   }
 
-  async remove(id: string) {
+  async remove(id: number) {
     try {
       await this.prisma.company.delete({
         where: { id },

@@ -1,6 +1,6 @@
 -- CreateTable
 CREATE TABLE "Company" (
-    "id" TEXT NOT NULL,
+    "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
     "phone" TEXT,
     "email" TEXT,
@@ -12,8 +12,8 @@ CREATE TABLE "Company" (
 
 -- CreateTable
 CREATE TABLE "Client" (
-    "id" TEXT NOT NULL,
-    "companyId" TEXT,
+    "id" SERIAL NOT NULL,
+    "companyId" INTEGER,
     "first_name" TEXT NOT NULL,
     "last_name" TEXT NOT NULL,
     "phone" TEXT,
@@ -25,7 +25,7 @@ CREATE TABLE "Client" (
 
 -- CreateTable
 CREATE TABLE "Role" (
-    "id" TEXT NOT NULL,
+    "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
 
     CONSTRAINT "Role_pkey" PRIMARY KEY ("id")
@@ -33,8 +33,8 @@ CREATE TABLE "Role" (
 
 -- CreateTable
 CREATE TABLE "User" (
-    "id" TEXT NOT NULL,
-    "roleId" TEXT NOT NULL,
+    "id" SERIAL NOT NULL,
+    "roleId" INTEGER NOT NULL,
     "firstName" TEXT NOT NULL,
     "lastName" TEXT,
     "username" TEXT NOT NULL,
@@ -45,7 +45,7 @@ CREATE TABLE "User" (
 
 -- CreateTable
 CREATE TABLE "Status" (
-    "id" TEXT NOT NULL,
+    "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
 
     CONSTRAINT "Status_pkey" PRIMARY KEY ("id")
@@ -53,10 +53,10 @@ CREATE TABLE "Status" (
 
 -- CreateTable
 CREATE TABLE "Order" (
-    "id" TEXT NOT NULL,
-    "clientId" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "statusId" TEXT NOT NULL,
+    "id" SERIAL NOT NULL,
+    "clientId" INTEGER NOT NULL,
+    "userId" INTEGER NOT NULL,
+    "statusId" INTEGER NOT NULL,
     "description" TEXT NOT NULL,
     "creationDate" TIMESTAMP(3) NOT NULL,
     "deliveryDate" TIMESTAMP(3),
@@ -66,10 +66,10 @@ CREATE TABLE "Order" (
 
 -- CreateTable
 CREATE TABLE "OrderHistory" (
-    "id" TEXT NOT NULL,
-    "orderId" TEXT NOT NULL,
-    "previousStatusId" TEXT NOT NULL,
-    "newStatusId" TEXT NOT NULL,
+    "id" SERIAL NOT NULL,
+    "orderId" INTEGER NOT NULL,
+    "previousStatusId" INTEGER NOT NULL,
+    "newStatusId" INTEGER NOT NULL,
     "changeDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "OrderHistory_pkey" PRIMARY KEY ("id")
@@ -124,7 +124,7 @@ CREATE TABLE "InventoryTransaction" (
 
 -- CreateTable
 CREATE TABLE "OrderProduct" (
-    "orderId" TEXT NOT NULL,
+    "orderId" INTEGER NOT NULL,
     "productId" INTEGER NOT NULL,
     "quantity" INTEGER NOT NULL,
 
@@ -133,8 +133,8 @@ CREATE TABLE "OrderProduct" (
 
 -- CreateTable
 CREATE TABLE "Log" (
-    "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
+    "id" SERIAL NOT NULL,
+    "userId" INTEGER NOT NULL,
     "logDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "action" TEXT NOT NULL,
 

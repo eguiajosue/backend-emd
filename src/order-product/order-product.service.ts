@@ -62,7 +62,7 @@ export class OrderProductService {
     }
   }
 
-  async findOne(orderId: string, productId: number) {
+  async findOne(orderId: number, productId: number) {
     try {
       const orderProduct = await this.prisma.orderProduct.findUnique({
         where: {
@@ -92,7 +92,7 @@ export class OrderProductService {
   }
 
   async update(
-    orderId: string,
+    orderId: number,
     productId: number,
     updateOrderProductDto: UpdateOrderProductDto,
   ) {
@@ -136,7 +136,7 @@ export class OrderProductService {
     });
   }
 
-  async remove(orderId: string, productId: number) {
+  async remove(orderId: number, productId: number) {
     return this.prisma.$transaction(async (prisma) => {
       const orderProduct = await prisma.orderProduct.findUnique({
         where: { orderId_productId: { orderId, productId } },

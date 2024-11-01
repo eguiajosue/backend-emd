@@ -1,11 +1,11 @@
-import { IsNotEmpty, IsOptional, IsString, IsEmail } from 'class-validator';
+// create-client.dto.ts
+
+import { IsString, IsOptional, IsNumber } from 'class-validator';
 
 export class CreateClientDto {
-  @IsNotEmpty()
   @IsString()
   first_name: string;
 
-  @IsNotEmpty()
   @IsString()
   last_name: string;
 
@@ -14,14 +14,14 @@ export class CreateClientDto {
   phone?: string;
 
   @IsOptional()
-  @IsEmail()
+  @IsString()
   email?: string;
 
   @IsOptional()
   @IsString()
   address?: string;
 
+  @IsNumber()
   @IsOptional()
-  @IsString()
-  companyId?: string; // Opcional, en caso de que el cliente esté asociado a una empresa
+  companyId?: number;
 }

@@ -2,21 +2,21 @@ import {
   IsNotEmpty,
   IsOptional,
   IsDateString,
-  IsString,
+  IsNumber,
 } from 'class-validator';
 
 export class CreateOrderHistoryDto {
   @IsNotEmpty()
-  @IsString()
-  orderId: string;
+  @IsNumber()
+  orderId: number;
 
   @IsNotEmpty()
-  @IsString()
-  previousStatusId: string;
+  @IsNumber()
+  previousStatusId: number;
 
   @IsNotEmpty()
-  @IsString()
-  newStatusId: string;
+  @IsNumber()
+  newStatusId: number;
 
   @IsOptional()
   @IsDateString()

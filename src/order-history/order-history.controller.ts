@@ -27,7 +27,7 @@ export class OrderHistoryController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.orderHistoryService.findOne(id);
+    return this.orderHistoryService.findOne(+id);
   }
 
   @Patch(':id')
@@ -35,11 +35,11 @@ export class OrderHistoryController {
     @Param('id') id: string,
     @Body() updateOrderHistoryDto: UpdateOrderHistoryDto,
   ) {
-    return this.orderHistoryService.update(id, updateOrderHistoryDto);
+    return this.orderHistoryService.update(+id, updateOrderHistoryDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.orderHistoryService.remove(id);
+    return this.orderHistoryService.remove(+id);
   }
 }

@@ -67,7 +67,7 @@ export class OrderHistoryService {
     }
   }
 
-  async findOne(id: string) {
+  async findOne(id: number) {
     try {
       const orderHistory = await this.prisma.orderHistory.findUnique({
         where: { id },
@@ -95,7 +95,7 @@ export class OrderHistoryService {
     }
   }
 
-  async update(id: string, updateOrderHistoryDto: UpdateOrderHistoryDto) {
+  async update(id: number, updateOrderHistoryDto: UpdateOrderHistoryDto) {
     try {
       const { orderId, previousStatusId, newStatusId, changeDate } =
         updateOrderHistoryDto;
@@ -151,7 +151,7 @@ export class OrderHistoryService {
     }
   }
 
-  async remove(id: string) {
+  async remove(id: number) {
     try {
       await this.prisma.orderHistory.delete({
         where: { id },
