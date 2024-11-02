@@ -8,6 +8,7 @@ import { GenerateUsernameMiddleware } from './generate-username/generate-usernam
   imports: [PrismaModule],
   controllers: [UserController],
   providers: [UserService],
+  exports: [UserService],
 })
 export class UserModule {
   configure(consumer) {

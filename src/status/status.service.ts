@@ -43,7 +43,7 @@ export class StatusService {
     }
   }
 
-  async findOne(id: string) {
+  async findOne(id: number) {
     try {
       const status = await this.prisma.status.findUnique({
         where: { id },
@@ -66,7 +66,7 @@ export class StatusService {
     }
   }
 
-  async update(id: string, updateStatusDto: UpdateStatusDto) {
+  async update(id: number, updateStatusDto: UpdateStatusDto) {
     try {
       const status = await this.prisma.status.update({
         where: { id },
@@ -92,7 +92,7 @@ export class StatusService {
     }
   }
 
-  async remove(id: string) {
+  async remove(id: number) {
     try {
       await this.prisma.status.delete({
         where: { id },

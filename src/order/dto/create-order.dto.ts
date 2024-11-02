@@ -30,7 +30,7 @@ export class CreateOrderDto {
 
   @IsNotEmpty()
   @IsNumber()
-  statusId: number;
+  statusId: number = 1;
 
   @IsNotEmpty()
   @IsString()

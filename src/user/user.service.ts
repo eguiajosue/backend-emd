@@ -82,6 +82,20 @@ export class UserService {
     }
   }
 
+  async findOneByUsername(username: string) {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { username },
+        include: {
+          role: true,
+        },
+      });
+      return user || null;
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   async update(id: number, updateUserDto: UpdateUserDto) {
     try {
       const { roleId, password, ...rest } = updateUserDto;
