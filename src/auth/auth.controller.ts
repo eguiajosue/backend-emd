@@ -25,6 +25,7 @@ export class AuthController {
   }
 
   @Post('register')
+  @Auth(Role.ADMIN)
   register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }

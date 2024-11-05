@@ -10,7 +10,10 @@ import {
 import { SizeService } from './size.service';
 import { CreateSizeDto } from './dto/create-size.dto';
 import { UpdateSizeDto } from './dto/update-size.dto';
+import { Auth } from 'src/common/decorators/auth.decorator';
+import { Role } from 'src/common/enums/roles.enum';
 
+@Auth(Role.ADMIN)
 @Controller('sizes')
 export class SizeController {
   constructor(private readonly sizeService: SizeService) {}
