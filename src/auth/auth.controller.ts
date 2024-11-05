@@ -5,18 +5,15 @@ import {
   HttpCode,
   HttpStatus,
   Post,
-  Req,
-  UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from 'src/auth/dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { AuthGuard } from './guard/auth.guard';
 import { Request } from 'express';
-import { Roles } from 'src/decorators/roles.decorator';
-import { Role } from 'src/enums/roles.enum';
-import { RolesGuard } from 'src/guards/roles.guard';
-import { Auth } from 'src/decorators/auth.decorator';
+import { Auth } from 'src/common/decorators/auth.decorator';
+import { Role } from 'src/common/enums/roles.enum';
+import { ActiveUser } from 'src/common/decorators/active-user.decorator';
+import { ActiveUserInterface } from 'src/common/interfaces/active-user.interface';
 
 interface UserData extends Request {
   user: {
@@ -43,7 +40,7 @@ export class AuthController {
 
   @Get('profile')
   @Auth(Role.ADMIN)
-  profile(@Req() request: UserData) {
-    return this.authService.profile(request.user);
+  profile(@ActiveUser() user: ActiveUserInterface) {
+    return this.authService.profile(user);
   }
 }
