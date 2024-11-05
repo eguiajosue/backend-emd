@@ -13,6 +13,10 @@ import { RegisterDto } from 'src/auth/dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthGuard } from './guard/auth.guard';
 import { Request } from 'express';
+import { Roles } from 'src/decorators/roles.decorator';
+import { Role } from 'src/enums/roles.enum';
+import { RolesGuard } from 'src/guards/roles.guard';
+import { Auth } from 'src/decorators/auth.decorator';
 
 interface UserData extends Request {
   user: {
@@ -38,8 +42,8 @@ export class AuthController {
   }
 
   @Get('profile')
-  @UseGuards(AuthGuard)
-  profile(@Req() req: UserData) {
-    return req.user;
+  @Auth(Role.ADMIN)
+  profile(@Req() request: UserData) {
+    return this.authService.profile(request.user);
   }
 }

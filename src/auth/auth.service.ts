@@ -54,4 +54,9 @@ export class AuthService {
 
     return await this.userService.create(registerDto);
   }
+
+  async profile(user) {
+    const userData = await this.userService.findOneByUsername(user.username);
+    return userData;
+  }
 }
