@@ -9,19 +9,10 @@ import {
 import { AuthService } from './auth.service';
 import { RegisterDto } from 'src/auth/dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { Request } from 'express';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { ActiveUserInterface } from 'src/common/interfaces/active-user.interface';
-
-interface UserData extends Request {
-  user: {
-    username: string;
-    sub: number;
-    role: string;
-  };
-}
 
 @Controller('auth')
 export class AuthController {
