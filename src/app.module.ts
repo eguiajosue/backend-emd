@@ -15,6 +15,7 @@ import { InventoryTransactionModule } from './inventory-transaction/inventory-tr
 import { OrderProductModule } from './order-product/order-product.module';
 import { LogModule } from './log/log.module';
 import { AuthModule } from './auth/auth.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { AuthModule } from './auth/auth.module';
     OrderProductModule,
     LogModule,
     AuthModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
