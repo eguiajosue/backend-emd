@@ -4,6 +4,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import * as bcryptjs from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
+import { first } from 'rxjs';
 
 @Injectable()
 export class AuthService {
@@ -42,6 +43,9 @@ export class AuthService {
     return {
       token: token,
       username: user.username,
+      first_name: user.firstName,
+      last_name: user.lastName,
+      role: user.role.name,
     };
   }
 
