@@ -13,7 +13,7 @@ import { UpdateSizeDto } from './dto/update-size.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 
-@Auth(Role.ADMIN)
+@Auth(Role.ADMIN, Role.RECEPCION)
 @Controller('sizes')
 export class SizeController {
   constructor(private readonly sizeService: SizeService) {}

@@ -98,7 +98,19 @@ export class UserService {
 
   async update(id: number, updateUserDto: UpdateUserDto) {
     try {
-      const { roleId, password, ...rest } = updateUserDto;
+      const { roleId, password, firstName, lastName, ...rest } = updateUserDto;
+
+      // Obtiene el usuario actual si firstName o lastName no están definidos
+      let currentUser;
+      if (!firstName || !lastName) {
+        currentUser = await this.prisma.user.findUnique({ where: { id } });
+        if (!currentUser) {
+          throw new HttpException(
+            'Usuario no encontrado',
+            HttpStatus.NOT_FOUND,
+          );
+        }
+      }
 
       let hashedPassword;
       if (password) {
@@ -107,6 +119,8 @@ export class UserService {
 
       const data: Prisma.UserUpdateInput = {
         ...rest,
+        firstName: firstName ?? currentUser.firstName,
+        lastName: lastName ?? currentUser.lastName,
         ...(hashedPassword && { password: hashedPassword }),
         ...(roleId && {
           role: {
@@ -122,18 +136,15 @@ export class UserService {
       return user;
     } catch (error) {
       if (error.code === 'P2025') {
-        // Registro no encontrado
         throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
       }
       if (error.code === 'P2002') {
-        // Violación de restricción única (por ejemplo, username ya existe)
         throw new HttpException(
           'El nombre de usuario ya existe',
           HttpStatus.BAD_REQUEST,
         );
       }
       if (error.code === 'P2003') {
-        // Fallo en restricción de clave foránea (roleId inválido)
         throw new HttpException('ID de rol inválido', HttpStatus.BAD_REQUEST);
       }
       throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
@@ -142,13 +153,19 @@ export class UserService {
 
   async remove(id: number) {
     try {
+      // Primero, elimina las órdenes asociadas al usuario
+      await this.prisma.order.deleteMany({
+        where: { userId: id },
+      });
+
+      // Luego, elimina el usuario
       await this.prisma.user.delete({
         where: { id },
       });
+
       return { message: 'Usuario eliminado correctamente' };
     } catch (error) {
       if (error.code === 'P2025') {
-        // Registro no encontrado
         throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
       }
       throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);

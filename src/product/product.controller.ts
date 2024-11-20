@@ -23,6 +23,7 @@ export class ProductController {
     return this.productService.create(createProductDto);
   }
 
+  @Auth(Role.TALLER, Role.RECEPCION)
   @Get()
   findAll() {
     return this.productService.findAll();
