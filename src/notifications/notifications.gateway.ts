@@ -11,9 +11,17 @@ import { Server, Socket } from 'socket.io';
 import * as jwt from 'jsonwebtoken';
 import { Logger } from '@nestjs/common';
 
+interface OrderNotificationPayload {
+  id: number | string;
+  clientName?: string;
+  createdBy?: string;
+  status?: string;
+}
+
 @WebSocketGateway({
   cors: {
-    origin: '*', // Configurar correctamente según tu entorno
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
   },
 })
 export class NotificationsGateway
@@ -24,7 +32,7 @@ export class NotificationsGateway
 
   private logger: Logger = new Logger('NotificationsGateway');
 
-  afterInit(server: Server) {
+  afterInit() {
     this.logger.log('WebSocket Gateway initialized');
   }
 
@@ -59,7 +67,7 @@ export class NotificationsGateway
   }
 
   @SubscribeMessage('newOrderNotification')
-  notifyNewOrderToAdmin(@MessageBody() order: any) {
+  notifyNewOrderToAdmin(@MessageBody() order: OrderNotificationPayload) {
     this.logger.debug('Order data received for notification:', order);
 
     if (order && order.id && order.clientName && order.createdBy) {
@@ -71,7 +79,7 @@ export class NotificationsGateway
   }
 
   @SubscribeMessage('orderStatusChangeNotification')
-  notifyOrderStatusChange(@MessageBody() order: any) {
+  notifyOrderStatusChange(@MessageBody() order: OrderNotificationPayload) {
     if (order && order.id && order.status) {
       this.server.emit('orderStatusChangeNotification', order);
       this.logger.log(

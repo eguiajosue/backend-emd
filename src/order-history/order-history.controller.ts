@@ -10,7 +10,10 @@ import {
 import { OrderHistoryService } from './order-history.service';
 import { CreateOrderHistoryDto } from './dto/create-order-history.dto';
 import { UpdateOrderHistoryDto } from './dto/update-order-history.dto';
+import { Auth } from 'src/common/decorators/auth.decorator';
+import { Role } from 'src/common/enums/roles.enum';
 
+@Auth(Role.ADMIN, Role.RECEPCION)
 @Controller('order-histories')
 export class OrderHistoryController {
   constructor(private readonly orderHistoryService: OrderHistoryService) {}

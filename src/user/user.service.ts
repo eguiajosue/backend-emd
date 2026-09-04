@@ -19,7 +19,6 @@ export class UserService {
   async create(createUserDto: CreateUserDto) {
     try {
       const { roleId, password, ...rest } = createUserDto;
-      //TODO: Hashear el campo password del usuario
       const hashedPassword = await bcryptjs.hash(password, 10);
 
       const data: Prisma.UserCreateInput = {

@@ -23,6 +23,7 @@ export class OrderController {
     return this.orderService.create(createOrderDto);
   }
 
+  @Auth(Role.RECEPCION)
   @Get()
   findAll() {
     return this.orderService.findAll();
