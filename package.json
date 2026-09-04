@@ -12,6 +12,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
+    "start:prod:seeded": "prisma migrate deploy && prisma db seed && node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -27,6 +28,7 @@
     "@nestjs/mapped-types": "*",
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/platform-socket.io": "^10.4.7",
+    "@nestjs/throttler": "^6.5.0",
     "@nestjs/websockets": "^10.4.7",
     "@prisma/client": "^5.21.1",
     "bcryptjs": "^2.4.3",
@@ -70,6 +72,9 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1"
+    },
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
@@ -78,5 +83,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   }
 }
