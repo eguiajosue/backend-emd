@@ -1,4 +1,5 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthGuard } from './auth.guard';
 
@@ -17,7 +18,10 @@ describe('AuthGuard', () => {
     jwtService = {
       verifyAsync: jest.fn(),
     } as unknown as jest.Mocked<JwtService>;
-    guard = new AuthGuard(jwtService);
+    const configService = {
+      get: jest.fn().mockReturnValue('test-secret'),
+    } as unknown as ConfigService;
+    guard = new AuthGuard(jwtService, configService);
   });
 
   it('should throw UnauthorizedException when no token is provided', async () => {
@@ -31,6 +35,18 @@ describe('AuthGuard', () => {
 
     await expect(
       guard.canActivate(createContext('Bearer bad-token')),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('should reject a refresh token used as an access token', async () => {
+    jwtService.verifyAsync.mockResolvedValue({
+      sub: 1,
+      username: 'admin',
+      type: 'refresh',
+    });
+
+    await expect(
+      guard.canActivate(createContext('Bearer refresh-token')),
     ).rejects.toThrow(UnauthorizedException);
   });
 

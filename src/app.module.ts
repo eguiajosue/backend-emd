@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
@@ -18,15 +19,26 @@ import { OrderProductModule } from './order-product/order-product.module';
 import { LogModule } from './log/log.module';
 import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { HealthModule } from './health/health.module';
+import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { validateEnv } from './config/env.validation';
 
 @Module({
   imports: [
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 60,
-      },
-    ]),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      cache: true,
+      validate: validateEnv,
+    }),
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        {
+          ttl: config.get<number>('THROTTLE_TTL'),
+          limit: config.get<number>('THROTTLE_LIMIT'),
+        },
+      ],
+    }),
     PrismaModule,
     CompanyModule,
     ClientModule,
@@ -44,6 +56,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     LogModule,
     AuthModule,
     NotificationsModule,
+    HealthModule,
   ],
   providers: [
     {
@@ -52,4 +65,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import * as jwt from 'jsonwebtoken';
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 interface OrderNotificationPayload {
   id: number | string;
@@ -32,6 +33,8 @@ export class NotificationsGateway
 
   private logger: Logger = new Logger('NotificationsGateway');
 
+  constructor(private readonly configService: ConfigService) {}
+
   afterInit() {
     this.logger.log('WebSocket Gateway initialized');
   }
@@ -48,7 +51,7 @@ export class NotificationsGateway
     try {
       const decoded = jwt.verify(
         token.replace('Bearer ', '').trim(),
-        process.env.JWT_SECRET,
+        this.configService.get<string>('JWT_SECRET'),
       ) as jwt.JwtPayload & { roles: string[]; username: string };
 
       const roles = decoded.roles ?? [];
