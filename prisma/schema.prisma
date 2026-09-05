@@ -34,18 +34,17 @@ model Client {
 model Role {
   id    Int  @id @default(autoincrement()) // Identificador único del rol.
   name  String @unique // Nombre del rol (por ejemplo, Admin, User).
-  users User[] // Relación uno a muchos con el modelo User.
+  users User[] // Relación muchos a muchos con el modelo User.
 }
 
 model User {
   id        Int  @id @default(autoincrement()) // Identificador único del usuario.
-  roleId    Int // Clave foránea que referencia a Role.
   firstName String // Nombre del usuario.
   lastName  String? // Apellido del usuario.
   username  String  @unique // Nombre de usuario único para iniciar sesión.
   password  String // Contraseña del usuario.
 
-  role   Role    @relation(fields: [roleId], references: [id]) // Relación con Role.
+  roles  Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
   orders Order[] // Relación uno a muchos con Order.
   logs   Log[] // Relación uno a muchos con Log.
 }

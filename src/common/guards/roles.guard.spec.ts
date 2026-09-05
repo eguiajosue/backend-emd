@@ -7,12 +7,12 @@ describe('RolesGuard', () => {
   let guard: RolesGuard;
   let reflector: jest.Mocked<Reflector>;
 
-  const createContext = (role: string): ExecutionContext =>
+  const createContext = (...roles: string[]): ExecutionContext =>
     ({
       getHandler: jest.fn(),
       getClass: jest.fn(),
       switchToHttp: () => ({
-        getRequest: () => ({ user: { role: { name: role } } }),
+        getRequest: () => ({ user: { roles } }),
       }),
     }) as unknown as ExecutionContext;
 
@@ -39,5 +39,13 @@ describe('RolesGuard', () => {
     reflector.getAllAndOverride.mockReturnValue([Role.ADMIN]);
 
     expect(guard.canActivate(createContext(Role.TALLER))).toBe(false);
+  });
+
+  it('should allow access when the user has at least one of several required roles (OR)', () => {
+    reflector.getAllAndOverride.mockReturnValue([Role.ADMIN, Role.BORDADO]);
+
+    expect(guard.canActivate(createContext(Role.TALLER, Role.BORDADO))).toBe(
+      true,
+    );
   });
 });

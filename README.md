@@ -49,7 +49,7 @@ $ npm run start:prod
 
 This project ships a Prisma seed script (`prisma/seed.ts`) that idempotently creates:
 
-- The base roles used by `@Auth(...)` in the controllers (`admin`, `taller`, `recepcion`, `superuser`).
+- The base roles used by `@Auth(...)` in the controllers (`admin`, `taller`, `recepcion`, `superuser`, `dtf`, `bordado`, `diseno`, `laser`, `impresiones`). A user can hold multiple roles at once (many-to-many `User` <-> `Role`); the JWT payload carries `roles: string[]` and `RolesGuard` grants access if the user has at least one of the roles required by the route.
 - An `admin` user with the password `Admin123!` (override it by setting the `SEED_ADMIN_PASSWORD` env var before seeding).
 
 Run it manually with:

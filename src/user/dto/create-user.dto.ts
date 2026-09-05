@@ -1,6 +1,7 @@
 import {
+  ArrayNotEmpty,
+  IsInt,
   IsNotEmpty,
-  IsNumber,
   IsOptional,
   IsString,
   MinLength,
@@ -24,7 +25,7 @@ export class CreateUserDto {
   @MinLength(6)
   password: string;
 
-  @IsNotEmpty()
-  @IsNumber()
-  roleId: number;
+  @ArrayNotEmpty()
+  @IsInt({ each: true })
+  roleIds: number[];
 }

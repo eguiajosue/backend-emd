@@ -49,11 +49,12 @@ export class NotificationsGateway
       const decoded = jwt.verify(
         token.replace('Bearer ', '').trim(),
         process.env.JWT_SECRET,
-      ) as jwt.JwtPayload & { role: { name: string }; username: string };
+      ) as jwt.JwtPayload & { roles: string[]; username: string };
 
-      client.join(decoded.role.name);
+      const roles = decoded.roles ?? [];
+      roles.forEach((role) => client.join(role));
       this.logger.log(
-        `Client connected: ${decoded.username} with role ${decoded.role.name}`,
+        `Client connected: ${decoded.username} with roles ${roles.join(', ')}`,
       );
     } catch (error) {
       this.logger.error(`Client disconnected: Invalid token`, error.message);

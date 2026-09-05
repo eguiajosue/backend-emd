@@ -4,7 +4,17 @@ import * as bcryptjs from 'bcryptjs';
 const prisma = new PrismaClient();
 
 // Nombres de roles usados en los controllers via @Auth(...) (ver src/common/enums/roles.enum.ts)
-const ROLE_NAMES = ['admin', 'taller', 'recepcion', 'superuser'];
+const ROLE_NAMES = [
+  'admin',
+  'taller',
+  'recepcion',
+  'superuser',
+  'dtf',
+  'bordado',
+  'diseno',
+  'laser',
+  'impresiones',
+];
 
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
@@ -33,7 +43,7 @@ async function main() {
     await prisma.user.update({
       where: { username: ADMIN_USERNAME },
       data: {
-        roleId: roles['admin'].id,
+        roles: { connect: [{ id: roles['admin'].id }] },
       },
     });
     console.log(`  admin user already existed, role ensured (id=${existingAdmin.id})`);
@@ -44,7 +54,7 @@ async function main() {
         lastName: 'User',
         username: ADMIN_USERNAME,
         password: hashedPassword,
-        roleId: roles['admin'].id,
+        roles: { connect: [{ id: roles['admin'].id }] },
       },
     });
     console.log(`  admin user created (id=${admin.id})`);

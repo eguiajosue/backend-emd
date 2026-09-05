@@ -15,7 +15,7 @@ describe('AuthService', () => {
     password: '',
     firstName: 'Admin',
     lastName: 'User',
-    role: { id: 1, name: 'admin' },
+    roles: [{ id: 1, name: 'admin' }],
   };
 
   beforeAll(async () => {
@@ -47,14 +47,14 @@ describe('AuthService', () => {
       expect(jwtService.signAsync).toHaveBeenCalledWith({
         username: mockUser.username,
         sub: mockUser.id,
-        role: mockUser.role,
+        roles: ['admin'],
       });
       expect(result).toEqual({
         token: 'signed-jwt-token',
         username: mockUser.username,
         first_name: mockUser.firstName,
         last_name: mockUser.lastName,
-        role: mockUser.role.name,
+        roles: ['admin'],
       });
     });
 

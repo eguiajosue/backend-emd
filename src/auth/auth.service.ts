@@ -31,10 +31,12 @@ export class AuthService {
       );
     }
 
+    const roleNames = user.roles.map((role) => role.name);
+
     const payload = {
       username: user.username,
       sub: user.id,
-      role: user.role,
+      roles: roleNames,
     };
 
     const token = await this.jwtService.signAsync(payload);
@@ -44,7 +46,7 @@ export class AuthService {
       username: user.username,
       first_name: user.firstName,
       last_name: user.lastName,
-      role: user.role.name,
+      roles: roleNames,
     };
   }
 
