@@ -13,7 +13,17 @@ import { UpdateOrderHistoryDto } from './dto/update-order-history.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 
-@Auth(Role.ADMIN, Role.RECEPCION)
+@Auth(
+  Role.ADMIN,
+  Role.RECEPCION,
+  Role.SUPERUSER,
+  Role.TALLER,
+  Role.DTF,
+  Role.BORDADO,
+  Role.DISENO,
+  Role.LASER,
+  Role.IMPRESIONES,
+)
 @Controller('order-histories')
 export class OrderHistoryController {
   constructor(private readonly orderHistoryService: OrderHistoryService) {}
