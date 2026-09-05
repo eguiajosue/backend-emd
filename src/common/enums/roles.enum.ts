@@ -3,4 +3,9 @@ export enum Role {
   TALLER = 'taller',
   RECEPCION = 'recepcion',
   SUPERUSER = 'superuser',
+  DTF = 'dtf',
+  BORDADO = 'bordado',
+  DISENO = 'diseno',
+  LASER = 'laser',
+  IMPRESIONES = 'impresiones',
 }

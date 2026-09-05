@@ -10,7 +10,10 @@ import {
 import { ProductTypeService } from './product-type.service';
 import { CreateProductTypeDto } from './dto/create-product-type.dto';
 import { UpdateProductTypeDto } from './dto/update-product-type.dto';
+import { Auth } from 'src/common/decorators/auth.decorator';
+import { Role } from 'src/common/enums/roles.enum';
 
+@Auth(Role.ADMIN, Role.RECEPCION)
 @Controller('product-types')
 export class ProductTypeController {
   constructor(private readonly productTypeService: ProductTypeService) {}

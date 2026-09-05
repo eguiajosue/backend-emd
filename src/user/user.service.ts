@@ -18,15 +18,14 @@ export class UserService {
 
   async create(createUserDto: CreateUserDto) {
     try {
-      const { roleId, password, ...rest } = createUserDto;
-      //TODO: Hashear el campo password del usuario
+      const { roleIds, password, ...rest } = createUserDto;
       const hashedPassword = await bcryptjs.hash(password, 10);
 
       const data: Prisma.UserCreateInput = {
         ...rest,
         password: hashedPassword,
-        role: {
-          connect: { id: roleId },
+        roles: {
+          connect: roleIds.map((id) => ({ id })),
         },
       };
 
@@ -54,7 +53,7 @@ export class UserService {
     try {
       return await this.prisma.user.findMany({
         include: {
-          role: true,
+          roles: true,
         },
       });
     } catch (error) {
@@ -67,7 +66,7 @@ export class UserService {
       const user = await this.prisma.user.findUnique({
         where: { id },
         include: {
-          role: true,
+          roles: true,
         },
       });
       if (!user) {
@@ -87,7 +86,7 @@ export class UserService {
       const user = await this.prisma.user.findUnique({
         where: { username },
         include: {
-          role: true,
+          roles: true,
         },
       });
       return user || null;
@@ -98,7 +97,7 @@ export class UserService {
 
   async update(id: number, updateUserDto: UpdateUserDto) {
     try {
-      const { roleId, password, firstName, lastName, ...rest } = updateUserDto;
+      const { roleIds, password, firstName, lastName, ...rest } = updateUserDto;
 
       // Obtiene el usuario actual si firstName o lastName no están definidos
       let currentUser;
@@ -122,9 +121,9 @@ export class UserService {
         firstName: firstName ?? currentUser.firstName,
         lastName: lastName ?? currentUser.lastName,
         ...(hashedPassword && { password: hashedPassword }),
-        ...(roleId && {
-          role: {
-            connect: { id: roleId },
+        ...(roleIds && {
+          roles: {
+            set: roleIds.map((id) => ({ id })),
           },
         }),
       };

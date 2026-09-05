@@ -4,7 +4,6 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import * as bcryptjs from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
-import { first } from 'rxjs';
 
 @Injectable()
 export class AuthService {
@@ -25,14 +24,6 @@ export class AuthService {
       user.password,
     );
 
-    const payload = {
-      username: user.username,
-      sub: user.id,
-      role: user.role,
-    };
-
-    const token = await this.jwtService.signAsync(payload);
-
     if (!isValidPassword) {
       return new HttpException(
         'Credenciales incorrectas',
@@ -40,12 +31,22 @@ export class AuthService {
       );
     }
 
+    const roleNames = user.roles.map((role) => role.name);
+
+    const payload = {
+      username: user.username,
+      sub: user.id,
+      roles: roleNames,
+    };
+
+    const token = await this.jwtService.signAsync(payload);
+
     return {
       token: token,
       username: user.username,
       first_name: user.firstName,
       last_name: user.lastName,
-      role: user.role.name,
+      roles: roleNames,
     };
   }
 

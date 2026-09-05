@@ -23,18 +23,49 @@ export class OrderController {
     return this.orderService.create(createOrderDto);
   }
 
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
   @Get()
   findAll() {
     return this.orderService.findAll();
   }
 
-  @Auth(Role.RECEPCION)
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.orderService.findOne(+id);
   }
 
-  @Auth(Role.RECEPCION)
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateOrderDto: UpdateOrderDto) {
     return this.orderService.update(+id, updateOrderDto);

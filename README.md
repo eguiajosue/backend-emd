@@ -45,6 +45,29 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Database seed
+
+This project ships a Prisma seed script (`prisma/seed.ts`) that idempotently creates:
+
+- The base roles used by `@Auth(...)` in the controllers (`admin`, `taller`, `recepcion`, `superuser`, `dtf`, `bordado`, `diseno`, `laser`, `impresiones`). A user can hold multiple roles at once (many-to-many `User` <-> `Role`); the JWT payload carries `roles: string[]` and `RolesGuard` grants access if the user has at least one of the roles required by the route.
+- An `admin` user with the password `Admin123!` (override it by setting the `SEED_ADMIN_PASSWORD` env var before seeding).
+
+Run it manually with:
+
+```bash
+npx prisma db seed
+```
+
+### Render deploy configuration
+
+For a fresh database (or after adding new roles), Render's **Start Command** should run migrations and the seed before starting the server. Instead of the current `node dist/main` / `npm run start:prod`, configure Render's Start Command to:
+
+```bash
+npm run start:prod:seeded
+```
+
+This runs `prisma migrate deploy && prisma db seed && node dist/main`, so every deploy makes sure the base roles and the admin user exist without duplicating them on subsequent deploys. This change must be made manually in the Render dashboard (Settings → Start Command); it is not applied automatically by this repository.
+
 ## Run tests
 
 ```bash
