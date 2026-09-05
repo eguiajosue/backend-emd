@@ -16,7 +16,7 @@ export class AuthService {
     const user = await this.userService.findOneByUsername(loginDto.username);
 
     if (!user) {
-      return new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
+      throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
     }
 
     const isValidPassword = await bcryptjs.compare(
@@ -25,7 +25,7 @@ export class AuthService {
     );
 
     if (!isValidPassword) {
-      return new HttpException(
+      throw new HttpException(
         'Credenciales incorrectas',
         HttpStatus.UNAUTHORIZED,
       );
@@ -54,7 +54,7 @@ export class AuthService {
     const user = await this.userService.findOneByUsername(registerDto.username);
 
     if (user) {
-      return new HttpException('El usuario ya existe', HttpStatus.CONFLICT);
+      throw new HttpException('El usuario ya existe', HttpStatus.CONFLICT);
     }
 
     return await this.userService.create(registerDto);

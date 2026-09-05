@@ -43,10 +43,11 @@ async function main() {
     await prisma.user.update({
       where: { username: ADMIN_USERNAME },
       data: {
+        password: hashedPassword,
         roles: { connect: [{ id: roles['admin'].id }] },
       },
     });
-    console.log(`  admin user already existed, role ensured (id=${existingAdmin.id})`);
+    console.log(`  admin user already existed, password and role reset (id=${existingAdmin.id})`);
   } else {
     const admin = await prisma.user.create({
       data: {
