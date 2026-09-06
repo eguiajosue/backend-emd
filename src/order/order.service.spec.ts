@@ -143,9 +143,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
         userId: 7,
         roles: [role],
       });
-      const visibleAreas = new Set(
-        (result as any[]).map((o: any) => o.area),
-      );
+      const visibleAreas = new Set((result as any[]).map((o: any) => o.area));
       for (const area of visibleAreas) {
         expect(area).toBe(role);
       }

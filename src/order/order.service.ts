@@ -1342,9 +1342,7 @@ export class OrderService {
       );
     }
 
-    const statusId = await this.resolveStatusIdByName(
-      STATUS_NAME_AUTORIZADO,
-    );
+    const statusId = await this.resolveStatusIdByName(STATUS_NAME_AUTORIZADO);
 
     const [revision] = await this.prisma.$transaction([
       this.prisma.designRevision.update({

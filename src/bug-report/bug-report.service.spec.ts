@@ -26,7 +26,9 @@ describe('BugReportService', () => {
     sendMock.mockReset();
 
     configService = {
-      get: jest.fn().mockReturnValue('fake-resend-api-key'),
+      get: jest.fn((key: string) =>
+        key === 'RESEND_API_KEY' ? 'fake-resend-api-key' : undefined,
+      ),
     } as unknown as jest.Mocked<ConfigService>;
 
     userService = {
@@ -43,7 +45,7 @@ describe('BugReportService', () => {
   });
 
   it('devuelve 503 si no está configurada RESEND_API_KEY', async () => {
-    configService.get.mockReturnValue(undefined);
+    configService.get.mockImplementation(() => undefined);
 
     await expect(
       service.create({ description: 'algo falló' }, activeUser),
@@ -60,7 +62,7 @@ describe('BugReportService', () => {
       activeUser,
     );
 
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, id: 'email-1' });
     expect(sendMock).toHaveBeenCalledTimes(1);
     const call = sendMock.mock.calls[0][0];
     expect(call.to).toBe('eguiajosue@gmail.com');
@@ -69,7 +71,7 @@ describe('BugReportService', () => {
     expect(call.text).toContain('el botón X no funciona');
   });
 
-  it('devuelve un mensaje genérico si Resend responde con error', async () => {
+  it('falla (no reporta éxito) y expone el error real si Resend responde con error', async () => {
     sendMock.mockResolvedValue({
       data: null,
       error: { message: 'API key inválida', name: 'validation_error' },
@@ -77,14 +79,46 @@ describe('BugReportService', () => {
 
     await expect(
       service.create({ description: 'algo falló' }, activeUser),
-    ).rejects.toBeInstanceOf(HttpException);
+    ).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringContaining('API key inválida'),
+    });
   });
 
-  it('devuelve un mensaje genérico si Resend lanza una excepción', async () => {
+  it('usa BUG_REPORT_RECIPIENT y BUG_REPORT_FROM cuando están configurados', async () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'RESEND_API_KEY') return 'fake-resend-api-key';
+      if (key === 'BUG_REPORT_RECIPIENT') return 'soporte@emd.com';
+      if (key === 'BUG_REPORT_FROM') return 'EMD <bugs@emd.com>';
+      return undefined;
+    });
+    sendMock.mockResolvedValue({ data: { id: 'email-2' }, error: null });
+
+    await service.create({ description: 'x' }, activeUser);
+
+    const call = sendMock.mock.calls[0][0];
+    expect(call.to).toBe('soporte@emd.com');
+    expect(call.from).toBe('EMD <bugs@emd.com>');
+  });
+
+  it('escapa el HTML de la descripción', async () => {
+    sendMock.mockResolvedValue({ data: { id: 'email-3' }, error: null });
+
+    await service.create(
+      { description: '<script>alert(1)</script>' },
+      activeUser,
+    );
+
+    expect(sendMock.mock.calls[0][0].html).not.toContain('<script>');
+  });
+
+  it('falla y expone el error real si Resend lanza una excepción', async () => {
     sendMock.mockRejectedValue(new Error('network down'));
 
-    await expect(
-      service.create({ description: 'algo falló' }, activeUser),
-    ).rejects.toBeInstanceOf(HttpException);
+    const promise = service.create({ description: 'algo falló' }, activeUser);
+    await expect(promise).rejects.toBeInstanceOf(HttpException);
+    await expect(promise).rejects.toMatchObject({
+      message: expect.stringContaining('network down'),
+    });
   });
 });

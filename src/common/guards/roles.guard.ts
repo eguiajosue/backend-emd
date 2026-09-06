@@ -1,4 +1,9 @@
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
@@ -19,6 +24,16 @@ export class RolesGuard implements CanActivate {
     const { user } = context.switchToHttp().getRequest();
     const userRoles: string[] = user?.roles ?? [];
 
-    return requiredRoles.some((role) => userRoles.includes(role));
+    const allowed = requiredRoles.some((role) => userRoles.includes(role));
+    if (!allowed) {
+      // Devolver false haría que Nest lance un ForbiddenException genérico con
+      // el mensaje en inglés "Forbidden resource", que el frontend muestra tal
+      // cual al usuario. Lanzamos un mensaje propio, en español.
+      throw new ForbiddenException(
+        'No tenés permisos para acceder a esta sección',
+      );
+    }
+
+    return true;
   }
 }

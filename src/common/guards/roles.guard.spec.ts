@@ -1,4 +1,4 @@
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { RolesGuard } from './roles.guard';
 import { Role } from '../enums/roles.enum';
@@ -38,7 +38,23 @@ describe('RolesGuard', () => {
   it('should deny access when the user does not have a required role', () => {
     reflector.getAllAndOverride.mockReturnValue([Role.ADMIN]);
 
-    expect(guard.canActivate(createContext(Role.TALLER))).toBe(false);
+    expect(() => guard.canActivate(createContext(Role.TALLER))).toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('nunca expone el mensaje crudo en inglés "Forbidden resource"', () => {
+    reflector.getAllAndOverride.mockReturnValue([Role.ADMIN]);
+
+    try {
+      guard.canActivate(createContext(Role.TALLER));
+      throw new Error('debería haber lanzado');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ForbiddenException);
+      const message = (error as ForbiddenException).message;
+      expect(message).not.toContain('Forbidden');
+      expect(message).toBe('No tenés permisos para acceder a esta sección');
+    }
   });
 
   it('should allow access when the user has at least one of several required roles (OR)', () => {
@@ -63,9 +79,7 @@ describe('RolesGuard', () => {
     ]);
 
     expect(
-      guard.canActivate(
-        createContext(Role.DISENO, Role.BORDADO, Role.DTF),
-      ),
+      guard.canActivate(createContext(Role.DISENO, Role.BORDADO, Role.DTF)),
     ).toBe(true);
   });
 
@@ -80,6 +94,6 @@ describe('RolesGuard', () => {
       }),
     } as unknown as ExecutionContext;
 
-    expect(guard.canActivate(context)).toBe(false);
+    expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
   });
 });

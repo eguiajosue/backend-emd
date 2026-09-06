@@ -11,6 +11,7 @@ import { OrderProductService } from './order-product.service';
 import { CreateOrderProductDto } from './dto/create-order-product.dto';
 import { UpdateOrderProductDto } from './dto/update-order-product.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
+import { ORDER_VIEWING_ROLES } from 'src/common/constants/order-viewing-roles';
 import { Role } from 'src/common/enums/roles.enum';
 import { ApiTags } from '@nestjs/swagger';
 
@@ -26,13 +27,13 @@ export class OrderProductController {
   }
 
   @Get()
-  @Auth(Role.ADMIN, Role.RECEPCION)
+  @Auth(...ORDER_VIEWING_ROLES)
   findAll() {
     return this.orderProductService.findAll();
   }
 
   @Get(':orderId/:productId')
-  @Auth(Role.ADMIN, Role.RECEPCION)
+  @Auth(...ORDER_VIEWING_ROLES)
   findOne(
     @Param('orderId') orderId: string,
     @Param('productId') productId: string,
