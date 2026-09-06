@@ -480,9 +480,17 @@ export class OrderService {
             connect: { id: userId },
           },
         }),
-        // assignedUserId es escalar opcional: si viene explícito en el body
-        // (incluso `null` para desasignar) lo aplicamos tal cual.
-        ...(hasAssignedUserId && { assignedUserId: assignedUserId ?? null }),
+        // assignedUserId tiene una relación declarada (assignedUser), así que
+        // Prisma exige la sintaxis de relación (connect/disconnect) en el
+        // UpdateInput "checked" en vez del escalar crudo — asignarlo directo
+        // como campo plano compila (TS no chequea el excess-property en un
+        // spread) pero explota en runtime con PrismaClientValidationError.
+        ...(hasAssignedUserId && {
+          assignedUser:
+            assignedUserId != null
+              ? { connect: { id: assignedUserId } }
+              : { disconnect: true },
+        }),
         ...(statusId && {
           status: {
             connect: { id: statusId },
