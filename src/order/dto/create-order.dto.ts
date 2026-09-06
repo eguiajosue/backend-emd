@@ -64,6 +64,11 @@ export class CreateOrderDto {
   @IsPositive()
   userId: number;
 
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  assignedUserId?: number;
+
   @IsNotEmpty()
   @IsInt()
   @IsPositive()

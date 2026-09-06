@@ -13,6 +13,19 @@ import {
 /** Tamaño máximo (en bytes, ya decodificado) para la hoja de autorización. */
 const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Selección liviana del usuario asignado: solo lo necesario para mostrarlo
+ * en listados/detalle, sin exponer roles ni otros datos sensibles del User.
+ */
+const ASSIGNED_USER_SELECT = {
+  select: {
+    id: true,
+    firstName: true,
+    lastName: true,
+    username: true,
+  },
+} satisfies { select: Prisma.UserSelect };
+
 @Injectable()
 export class OrderService {
   constructor(
@@ -36,6 +49,7 @@ export class OrderService {
       const {
         clientId,
         userId,
+        assignedUserId,
         statusId,
         description,
         deliveryDate,
@@ -64,6 +78,11 @@ export class OrderService {
         user: {
           connect: { id: userId },
         },
+        ...(assignedUserId && {
+          assignedUser: {
+            connect: { id: assignedUserId },
+          },
+        }),
         status: {
           connect: { id: statusId },
         },
@@ -89,6 +108,7 @@ export class OrderService {
         include: {
           client: true,
           user: true,
+          assignedUser: ASSIGNED_USER_SELECT,
           status: true,
           orderProducts: {
             include: {
@@ -152,6 +172,7 @@ export class OrderService {
         id: true,
         clientId: true,
         userId: true,
+        assignedUserId: true,
         statusId: true,
         description: true,
         creationDate: true,
@@ -159,6 +180,7 @@ export class OrderService {
         authorizationFileName: true,
         client: true,
         user: true,
+        assignedUser: ASSIGNED_USER_SELECT,
         status: true,
         orderProducts: {
           include: {
@@ -209,6 +231,7 @@ export class OrderService {
         include: {
           client: true,
           user: true,
+          assignedUser: ASSIGNED_USER_SELECT,
           status: true,
           orderProducts: {
             include: {
@@ -259,6 +282,8 @@ export class OrderService {
         orderProducts,
         authorizationFile,
       } = updateOrderDto;
+      const hasAssignedUserId = 'assignedUserId' in updateOrderDto;
+      const { assignedUserId } = updateOrderDto;
 
       if (authorizationFile) {
         this.assertAuthorizationFileSize(authorizationFile);
@@ -289,6 +314,9 @@ export class OrderService {
             connect: { id: userId },
           },
         }),
+        // assignedUserId es escalar opcional: si viene explícito en el body
+        // (incluso `null` para desasignar) lo aplicamos tal cual.
+        ...(hasAssignedUserId && { assignedUserId: assignedUserId ?? null }),
         ...(statusId && {
           status: {
             connect: { id: statusId },
@@ -318,6 +346,7 @@ export class OrderService {
         include: {
           client: true,
           user: true,
+          assignedUser: ASSIGNED_USER_SELECT,
           status: true,
           orderProducts: {
             include: {
