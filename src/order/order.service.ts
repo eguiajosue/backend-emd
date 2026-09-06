@@ -26,6 +26,8 @@ import { Role } from 'src/common/enums/roles.enum';
 export interface RequestingUser {
   userId: number;
   roles: string[];
+  /** Usado sólo para armar el texto de la notificación genérica a Recepción (Feature 2). */
+  username?: string;
 }
 
 /** Tamaño máximo (en bytes, ya decodificado) para la hoja de autorización. */
@@ -130,12 +132,20 @@ export class OrderService {
    * - admin/superuser/recepcion: ven todo, sin cambios.
    * - Roles puramente operativos: se filtra DIRECTO por `order.area` (el
    *   área del pedido coincide textualmente con el nombre del rol, ya no
-   *   se mapea contra el status). Para cada rol operativo del usuario:
-   *   si su AreaVisibilitySetting.generalViewEnabled es true, todos los
-   *   pedidos de esa área quedan visibles; si es false, solo quedan
-   *   visibles los pedidos de esa área sin asignar (assignedUserId null) o
-   *   asignados al propio usuario. Pedidos con `area: null` (datos viejos
+   *   se mapea contra el status). Cualquier usuario con un rol operativo
+   *   que alcance esa área ve y puede trabajar TODOS los pedidos de esa
+   *   área, estén o no asignados a él específicamente: el trabajo dentro
+   *   de una misma área es colaborativo (ej. cualquier diseñador puede
+   *   tomar cualquier pedido de Diseño). El filtro cruzado entre áreas
+   *   distintas se mantiene: un usuario operativo nunca ve pedidos de un
+   *   área que no le corresponde. Pedidos con `area: null` (datos viejos
    *   sin migrar) no son visibles para roles operativos.
+   *
+   * `AreaVisibilitySetting.generalViewEnabled` ya NO restringe esta
+   * visibilidad intra-área (decisión de producto: la asignación individual
+   * es solo informativa/de seguimiento, no debe bloquear la colaboración
+   * dentro de la propia área). El endpoint/tabla se deja intacto por si se
+   * reutiliza para otro propósito en el futuro.
    */
   private async filterOrdersForUser<
     T extends { area: string | null; assignedUserId: number | null },
@@ -143,7 +153,7 @@ export class OrderService {
     if (!requestingUser) {
       return orders;
     }
-    const { userId, roles } = requestingUser;
+    const { roles } = requestingUser;
 
     if (isFullVisibilityRole(roles)) {
       return orders;
@@ -155,33 +165,12 @@ export class OrderService {
       return [];
     }
 
-    const settings = await this.areaVisibilityService.findAll();
-    const generalViewByRole = new Map(
-      settings.map((s) => [s.role, s.generalViewEnabled]),
-    );
-
-    // Áreas donde el usuario tiene vista general habilitada.
-    const generalViewAreas = new Set<string>();
-    // Todas las áreas alcanzables por los roles del usuario (con o sin vista general).
+    // Todas las áreas alcanzables por los roles operativos del usuario.
     const allUserAreas = new Set<string>(userOperationalRoles);
-    for (const role of userOperationalRoles) {
-      if (generalViewByRole.get(role) !== false) {
-        generalViewAreas.add(role);
-      }
-    }
 
     return orders.filter((order) => {
       const area = order.area;
-      if (!area || !allUserAreas.has(area)) {
-        return false;
-      }
-      if (generalViewAreas.has(area)) {
-        return true;
-      }
-      // Área con vista general deshabilitada para todos los roles del
-      // usuario que la alcanzan: solo visible si no está asignada o está
-      // asignada a este usuario.
-      return order.assignedUserId == null || order.assignedUserId === userId;
+      return !!area && allUserAreas.has(area);
     });
   }
 
@@ -669,6 +658,61 @@ export class OrderService {
     }
   }
 
+  /**
+   * Etiquetas legibles de los campos auditados, para armar el resumen de la
+   * notificación genérica a Recepción (Feature 2).
+   */
+  private static readonly AUDIT_FIELD_LABELS: Record<string, string> = {
+    description: 'la descripción',
+    deliveryDate: 'la fecha de entrega',
+    assignedUserId: 'la asignación',
+    statusId: 'el estado',
+    area: 'el área',
+    productionArea: 'el área de producción',
+    requiresDesign: 'si requiere diseño',
+    clientId: 'el cliente',
+    clientNameOverride: 'el nombre del cliente',
+  };
+
+  /**
+   * Notifica (persistente + WS) a todos los usuarios con rol `recepcion`
+   * que un usuario de un área operativa modificó un pedido. Feature 2:
+   * visibilidad general para Recepción de cualquier cambio hecho por un
+   * usuario de área, más allá de las notificaciones puntuales ya existentes
+   * del flujo de diseño.
+   */
+  private async notifyAreaUserUpdatedOrder(
+    orderId: number,
+    requestingUser: RequestingUser,
+    auditChanges: Record<string, { before: unknown; after: unknown }>,
+  ) {
+    const changedLabels = Object.keys(auditChanges).map(
+      (field) => OrderService.AUDIT_FIELD_LABELS[field] ?? field,
+    );
+    const summary = changedLabels.join(', ');
+    const updatedByUsername = requestingUser.username ?? 'Un usuario';
+    const title = `${updatedByUsername} actualizó el pedido #${orderId}`;
+    const body = `${updatedByUsername} modificó ${summary} del pedido #${orderId}`;
+
+    const recepcionUserIds =
+      await this.notificationService.userIdsForArea('recepcion');
+    await this.notificationService.createNotificationForUsers(
+      recepcionUserIds,
+      {
+        type: 'area_user_updated_order',
+        title,
+        body,
+        orderId,
+      },
+    );
+
+    this.notificationsGateway.notifyAreaUserUpdatedOrder({
+      orderId,
+      updatedByUsername,
+      summary,
+    });
+  }
+
   async update(
     id: number,
     updateOrderDto: UpdateOrderDto,
@@ -878,6 +922,24 @@ export class OrderService {
             user: { connect: { id: requestingUserId } },
           },
         });
+      }
+
+      // Feature: notificación genérica a Recepción cuando un usuario de un
+      // área operativa (rol puramente operativo, no admin/superuser/
+      // recepcion) cambia un campo relevante del pedido. No duplica las
+      // notificaciones puntuales del flujo de diseño (montaje/feedback/
+      // autorizado), que siguen teniendo su propio tipo/evento.
+      if (
+        Object.keys(auditChanges).length > 0 &&
+        requestingUser &&
+        !isFullVisibilityRole(requestingUser.roles) &&
+        operationalRolesOf(requestingUser.roles).length > 0
+      ) {
+        await this.notifyAreaUserUpdatedOrder(
+          updatedOrder.id,
+          requestingUser,
+          auditChanges,
+        );
       }
 
       return updatedOrder;

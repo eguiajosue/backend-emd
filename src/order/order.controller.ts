@@ -176,6 +176,7 @@ export class OrderController {
     return this.orderService.update(+id, updateOrderDto, user.sub, {
       userId: user.sub,
       roles: user.roles,
+      username: user.username,
     });
   }
 

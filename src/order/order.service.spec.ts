@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
 import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
+import { NotificationService } from 'src/notification/notification.service';
 
 describe('OrderService - visibilidad por área (findAll)', () => {
   let orderService: OrderService;
@@ -54,6 +55,11 @@ describe('OrderService - visibilidad por área (findAll)', () => {
       { notifyNewOrderToAdmin: jest.fn() } as unknown as NotificationsGateway,
       areaVisibilityService,
       { ensureExists: jest.fn() } as unknown as OrderProductPresetService,
+      {
+        createNotification: jest.fn(),
+        createNotificationForUsers: jest.fn(),
+        userIdsForArea: jest.fn().mockResolvedValue([]),
+      } as unknown as NotificationService,
     );
   });
 
@@ -79,72 +85,41 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     expect(result as any[]).toHaveLength(orders.length);
   });
 
-  it('rol operativo con generalViewEnabled=true: ve todos los pedidos de su área', async () => {
-    areaVisibilityService.findAll.mockResolvedValue([
-      { id: 1, role: 'taller', generalViewEnabled: true },
-    ]);
-
+  it('rol operativo: ve todos los pedidos de su área, asignados o no, sin consultar AreaVisibilitySetting', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
       roles: ['taller'],
     });
 
-    // Solo pedidos del área "taller" (ids 1, 2 y 3)
+    // Todos los pedidos del área "taller" (ids 1, 2 y 3), incluido el
+    // asignado a otro usuario (id 2): la colaboración intra-área no se
+    // bloquea por asignación individual.
     expect((result as any[]).map((o: any) => o.id).sort()).toEqual([1, 2, 3]);
+    expect(areaVisibilityService.findAll).not.toHaveBeenCalled();
   });
 
-  it('rol operativo con generalViewEnabled=false: solo ve pedidos sin asignar o asignados a sí mismo', async () => {
-    areaVisibilityService.findAll.mockResolvedValue([
-      { id: 1, role: 'taller', generalViewEnabled: false },
-    ]);
-
-    const result = await orderService.findAll(undefined, {
-      userId: 7,
-      roles: ['taller'],
-    });
-
-    // id 1 (sin asignar) y 3 (asignado al propio usuario) sí, id 2 (asignado a otro) no.
-    expect((result as any[]).map((o: any) => o.id).sort()).toEqual([1, 3]);
-  });
-
-  it('rol operativo no incluye pedidos de áreas que no le corresponden ni sin área', async () => {
-    areaVisibilityService.findAll.mockResolvedValue([
-      { id: 1, role: 'diseno', generalViewEnabled: false },
-    ]);
-
+  it('diseñador: ve cualquier pedido de "diseno", esté o no asignado a él', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
       roles: ['diseno'],
     });
 
-    // Solo el área "diseno" (id 4), que no tiene assignedUserId -> visible.
-    // id 5 (area: null) queda fuera aunque no esté asignado.
+    // Solo el área "diseno" (id 4). id 5 (area: null) queda fuera.
     expect((result as any[]).map((o: any) => o.id)).toEqual([4]);
   });
 
-  it('usuario con múltiples roles operativos: vista general de uno alcanza para ver toda su área', async () => {
-    areaVisibilityService.findAll.mockResolvedValue([
-      { id: 1, role: 'taller', generalViewEnabled: true },
-      { id: 2, role: 'diseno', generalViewEnabled: false },
-    ]);
-
+  it('usuario con múltiples roles operativos: ve todos los pedidos de todas sus áreas', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
       roles: ['taller', 'diseno'],
     });
 
-    // taller: vista general -> ve todo (1, 2, 3). diseno: sin vista general,
-    // pero id 4 no está asignado -> visible también.
     expect((result as any[]).map((o: any) => o.id).sort()).toEqual([
       1, 2, 3, 4,
     ]);
   });
 
   it('pedidos con area null no son visibles para roles operativos', async () => {
-    areaVisibilityService.findAll.mockResolvedValue([
-      { id: 1, role: 'taller', generalViewEnabled: true },
-    ]);
-
     const result = await orderService.findAll(undefined, {
       userId: 7,
       roles: ['taller'],

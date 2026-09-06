@@ -41,6 +41,13 @@ interface OrderNoteNotificationPayload {
   createdAt: Date;
 }
 
+/** Payload de la notificación genérica a Recepción por cambios de un usuario de área. */
+interface AreaUserUpdatedOrderPayload {
+  orderId: number;
+  updatedByUsername: string;
+  summary: string;
+}
+
 // El decorador se evalúa al cargar el módulo, antes de que exista el
 // ConfigService inyectable, por eso leemos process.env directamente acá
 // (mismo valor que consume ConfigService, con el mismo default).
@@ -176,5 +183,19 @@ export class NotificationsGateway
       this.server.to(target.area).emit('orderNoteAdded', note);
     }
     this.logger.log(`Note notification sent: Order ID ${note.orderId}`);
+  }
+
+  /**
+   * Notificación genérica a Recepción cuando un usuario de un área
+   * operativa modifica un campo relevante de un pedido (status manual,
+   * descripción, fecha de entrega, asignación). No reemplaza las
+   * notificaciones puntuales del flujo de diseño (montaje/feedback/
+   * autorizado), que mantienen sus propios eventos.
+   */
+  notifyAreaUserUpdatedOrder(payload: AreaUserUpdatedOrderPayload) {
+    this.server.to('recepcion').emit('areaUserUpdatedOrder', payload);
+    this.logger.log(
+      `Area user update notification sent to recepcion: Order ID ${payload.orderId}`,
+    );
   }
 }
