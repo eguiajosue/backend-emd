@@ -53,16 +53,38 @@ export class OrderProductDto {
   quantity: number;
 }
 
+/** Áreas/departamentos operativos válidos para un pedido. Coincide 1:1 con
+ * los roles operativos (ver Role en roles.enum.ts) y con
+ * AreaVisibilitySetting.role. */
+export const ORDER_AREAS = [
+  'taller',
+  'dtf',
+  'bordado',
+  'diseno',
+  'laser',
+  'impresiones',
+] as const;
+
 export class CreateOrderDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsInt()
   @IsPositive()
-  clientId: number;
+  clientId?: number;
+
+  @TrimString()
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  clientNameOverride?: string;
 
   @IsNotEmpty()
   @IsInt()
   @IsPositive()
   userId: number;
+
+  @IsNotEmpty()
+  @IsIn(ORDER_AREAS)
+  area: (typeof ORDER_AREAS)[number];
 
   @IsOptional()
   @IsInt()

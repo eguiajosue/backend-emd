@@ -12,27 +12,27 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     {
       id: 1,
       assignedUserId: null,
-      status: { id: 3, name: 'en proceso' },
+      area: 'taller',
     },
     {
       id: 2,
       assignedUserId: 42, // asignado a otro usuario
-      status: { id: 3, name: 'en proceso' },
+      area: 'taller',
     },
     {
       id: 3,
       assignedUserId: 7, // asignado al usuario que consulta
-      status: { id: 3, name: 'en proceso' },
+      area: 'taller',
     },
     {
       id: 4,
       assignedUserId: null,
-      status: { id: 2, name: 'en pruebas' },
+      area: 'diseno',
     },
     {
       id: 5,
       assignedUserId: null,
-      status: { id: 1, name: 'pendiente' },
+      area: null, // pedido viejo sin migrar, sin área
     },
   ];
 
@@ -77,7 +77,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     expect(result as any[]).toHaveLength(orders.length);
   });
 
-  it('rol operativo con generalViewEnabled=true: ve todos los pedidos de su etapa', async () => {
+  it('rol operativo con generalViewEnabled=true: ve todos los pedidos de su área', async () => {
     areaVisibilityService.findAll.mockResolvedValue([
       { id: 1, role: 'taller', generalViewEnabled: true },
     ]);
@@ -87,7 +87,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
       roles: ['taller'],
     });
 
-    // Solo pedidos de la etapa "en proceso" (ids 1, 2 y 3)
+    // Solo pedidos del área "taller" (ids 1, 2 y 3)
     expect((result as any[]).map((o: any) => o.id).sort()).toEqual([1, 2, 3]);
   });
 
@@ -105,7 +105,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     expect((result as any[]).map((o: any) => o.id).sort()).toEqual([1, 3]);
   });
 
-  it('rol operativo sin generalViewEnabled=false no incluye etapas de otros roles', async () => {
+  it('rol operativo no incluye pedidos de áreas que no le corresponden ni sin área', async () => {
     areaVisibilityService.findAll.mockResolvedValue([
       { id: 1, role: 'diseno', generalViewEnabled: false },
     ]);
@@ -115,23 +115,40 @@ describe('OrderService - visibilidad por área (findAll)', () => {
       roles: ['diseno'],
     });
 
-    // Solo la etapa "en pruebas" (id 4), que no tiene assignedUserId -> visible.
+    // Solo el área "diseno" (id 4), que no tiene assignedUserId -> visible.
+    // id 5 (area: null) queda fuera aunque no esté asignado.
     expect((result as any[]).map((o: any) => o.id)).toEqual([4]);
   });
 
-  it('usuario con múltiples roles operativos: vista general de uno alcanza para ver toda la etapa compartida', async () => {
+  it('usuario con múltiples roles operativos: vista general de uno alcanza para ver toda su área', async () => {
     areaVisibilityService.findAll.mockResolvedValue([
-      { id: 1, role: 'taller', generalViewEnabled: false },
-      { id: 2, role: 'dtf', generalViewEnabled: true },
+      { id: 1, role: 'taller', generalViewEnabled: true },
+      { id: 2, role: 'diseno', generalViewEnabled: false },
     ]);
 
     const result = await orderService.findAll(undefined, {
       userId: 7,
-      roles: ['taller', 'dtf'],
+      roles: ['taller', 'diseno'],
     });
 
-    // "en proceso" es la etapa de ambos roles; dtf tiene vista general -> se ve todo.
-    expect((result as any[]).map((o: any) => o.id).sort()).toEqual([1, 2, 3]);
+    // taller: vista general -> ve todo (1, 2, 3). diseno: sin vista general,
+    // pero id 4 no está asignado -> visible también.
+    expect((result as any[]).map((o: any) => o.id).sort()).toEqual([
+      1, 2, 3, 4,
+    ]);
+  });
+
+  it('pedidos con area null no son visibles para roles operativos', async () => {
+    areaVisibilityService.findAll.mockResolvedValue([
+      { id: 1, role: 'taller', generalViewEnabled: true },
+    ]);
+
+    const result = await orderService.findAll(undefined, {
+      userId: 7,
+      roles: ['taller'],
+    });
+
+    expect((result as any[]).map((o: any) => o.id)).not.toContain(5);
   });
 
   it('usuario sin ningún rol operativo ni de visibilidad total no ve pedidos', async () => {

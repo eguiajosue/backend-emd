@@ -63,10 +63,12 @@ model Status {
 
 model Order {
   id           Int    @id @default(autoincrement()) // Identificador único de la orden.
-  clientId     Int // Clave foránea que referencia a Client.
+  clientId     Int? // Clave foránea que referencia a Client (opcional: puede haber cliente libre por nombre).
+  clientNameOverride String? // Nombre de cliente escrito a mano cuando no se selecciona un cliente registrado.
   userId       Int // Clave foránea que referencia al User que creó la orden.
   assignedUserId Int? // Clave foránea que referencia al User asignado para trabajar la orden.
-  statusId     Int // Clave foránea que referencia a Status.
+  statusId     Int // Clave foránea que referencia a Status (flujo: pendiente→en pruebas→en proceso→terminado→entregado).
+  area         String? // Departamento al que pertenece el pedido: taller | dtf | bordado | diseno | laser | impresiones.
   description  String // Descripción de la orden.
   creationDate DateTime // Fecha en que se creó la orden.
   deliveryDate DateTime? // Fecha de entrega opcional.
@@ -75,7 +77,7 @@ model Order {
   authorizationFileName String? // Nombre de archivo original de la hoja de autorización.
   authorizationFileMime String? // Mime type de la hoja de autorización (image/png, image/jpeg, application/pdf).
 
-  client        Client         @relation(fields: [clientId], references: [id]) // Relación con Client.
+  client        Client?        @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
   user          User           @relation(fields: [userId], references: [id]) // Relación con User (creador).
   assignedUser  User?          @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
   status        Status         @relation(fields: [statusId], references: [id]) // Relación con Status.
@@ -88,6 +90,7 @@ model Order {
   @@index([assignedUserId])
   @@index([deliveryDate])
   @@index([creationDate])
+  @@index([area])
 }
 
 model OrderHistory {

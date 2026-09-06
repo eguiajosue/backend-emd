@@ -22,25 +22,6 @@ export const FULL_VISIBILITY_ROLES: Role[] = [
   Role.RECEPCION,
 ];
 
-/**
- * Mapea cada rol operativo a los nombres de Status (ver Status.name en la DB)
- * que le corresponden. Portado 1:1 desde
- * frontend-emd/src/lib/roleTaskMapping.ts (que usa statusId sobre los 5
- * estados sembrados en prisma/seed.ts: 1=pendiente, 2=en pruebas,
- * 3=en proceso, 4=terminado, 5=entregado).
- *
- * Se usa el nombre del status (no el id) para no depender de que los ids
- * autoincrementales coincidan entre entornos.
- */
-export const roleStageMapping: Record<string, string[]> = {
-  [Role.TALLER]: ['en proceso'],
-  [Role.DTF]: ['en proceso'],
-  [Role.BORDADO]: ['en proceso'],
-  [Role.DISENO]: ['en pruebas'],
-  [Role.LASER]: ['en proceso'],
-  [Role.IMPRESIONES]: ['en proceso'],
-};
-
 export function isFullVisibilityRole(roles: string[] | undefined): boolean {
   if (!roles) return false;
   return roles.some((r) => FULL_VISIBILITY_ROLES.includes(r as Role));

@@ -10,11 +10,7 @@ import {
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
-import {
-  isFullVisibilityRole,
-  operationalRolesOf,
-  roleStageMapping,
-} from './role-stage-mapping';
+import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -50,15 +46,17 @@ export class OrderService {
    * Filtra los pedidos según el área/rol del usuario autenticado.
    *
    * - admin/superuser/recepcion: ven todo, sin cambios.
-   * - Roles puramente operativos: por cada rol operativo del usuario, si su
-   *   AreaVisibilitySetting.generalViewEnabled es true, todos los pedidos de
-   *   la(s) etapa(s) de ese rol quedan visibles. Si es false, de esa etapa
-   *   solo quedan visibles los pedidos sin asignar (assignedUserId null) o
-   *   asignados al propio usuario. Un pedido cuya etapa no corresponde a
-   *   ningún rol del usuario no se incluye.
+   * - Roles puramente operativos: se filtra DIRECTO por `order.area` (el
+   *   área del pedido coincide textualmente con el nombre del rol, ya no
+   *   se mapea contra el status). Para cada rol operativo del usuario:
+   *   si su AreaVisibilitySetting.generalViewEnabled es true, todos los
+   *   pedidos de esa área quedan visibles; si es false, solo quedan
+   *   visibles los pedidos de esa área sin asignar (assignedUserId null) o
+   *   asignados al propio usuario. Pedidos con `area: null` (datos viejos
+   *   sin migrar) no son visibles para roles operativos.
    */
   private async filterOrdersForUser<
-    T extends { status: { name: string }; assignedUserId: number | null },
+    T extends { area: string | null; assignedUserId: number | null },
   >(orders: T[], requestingUser?: RequestingUser): Promise<T[]> {
     if (!requestingUser) {
       return orders;
@@ -80,29 +78,25 @@ export class OrderService {
       settings.map((s) => [s.role, s.generalViewEnabled]),
     );
 
-    // Etapas (nombres de status) donde el usuario tiene vista general habilitada.
-    const generalViewStages = new Set<string>();
-    // Todas las etapas alcanzables por los roles del usuario (con o sin vista general).
-    const allUserStages = new Set<string>();
+    // Áreas donde el usuario tiene vista general habilitada.
+    const generalViewAreas = new Set<string>();
+    // Todas las áreas alcanzables por los roles del usuario (con o sin vista general).
+    const allUserAreas = new Set<string>(userOperationalRoles);
     for (const role of userOperationalRoles) {
-      const stages = roleStageMapping[role] || [];
-      stages.forEach((stage) => {
-        allUserStages.add(stage);
-        if (generalViewByRole.get(role) !== false) {
-          generalViewStages.add(stage);
-        }
-      });
+      if (generalViewByRole.get(role) !== false) {
+        generalViewAreas.add(role);
+      }
     }
 
     return orders.filter((order) => {
-      const stage = order.status?.name;
-      if (!stage || !allUserStages.has(stage)) {
+      const area = order.area;
+      if (!area || !allUserAreas.has(area)) {
         return false;
       }
-      if (generalViewStages.has(stage)) {
+      if (generalViewAreas.has(area)) {
         return true;
       }
-      // Etapa con vista general deshabilitada para todos los roles del
+      // Área con vista general deshabilitada para todos los roles del
       // usuario que la alcanzan: solo visible si no está asignada o está
       // asignada a este usuario.
       return order.assignedUserId == null || order.assignedUserId === userId;
@@ -124,18 +118,28 @@ export class OrderService {
     try {
       const {
         clientId,
+        clientNameOverride,
         userId,
         assignedUserId,
         statusId,
+        area,
         description,
         deliveryDate,
         orderProducts,
         authorizationFile,
       } = createOrderDto;
 
-      if (!clientId || !userId || !statusId) {
+      if (!userId || !statusId) {
         throw new HttpException(
-          'Datos faltantes: clientId, userId o statusId',
+          'Datos faltantes: userId o statusId',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const trimmedClientNameOverride = clientNameOverride?.trim();
+      if (!clientId && !trimmedClientNameOverride) {
+        throw new HttpException(
+          'Debe indicar un cliente registrado o escribir el nombre del cliente',
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -146,11 +150,17 @@ export class OrderService {
 
       const data: Prisma.OrderCreateInput = {
         description,
+        area,
         creationDate: new Date(),
         deliveryDate: deliveryDate ? new Date(deliveryDate) : undefined,
-        client: {
-          connect: { id: clientId },
-        },
+        ...(clientId
+          ? {
+              client: {
+                connect: { id: clientId },
+              },
+            }
+          : undefined),
+        clientNameOverride: trimmedClientNameOverride || undefined,
         user: {
           connect: { id: userId },
         },
@@ -195,17 +205,19 @@ export class OrderService {
       });
 
       // Validar que los datos de la orden son correctos antes de enviarlos al gateway
+      const clientNameForNotification =
+        order?.client?.first_name || order?.clientNameOverride;
+
       if (
         order &&
-        order.client &&
+        clientNameForNotification &&
         order.user &&
-        order.client.first_name &&
         order.user.username
       ) {
         const adminNotificationData = {
           id: order.id,
           description: order.description,
-          clientName: order.client.first_name,
+          clientName: clientNameForNotification,
           createdBy: order.user.username,
           creationDate: order.creationDate,
           deliveryDate: order.deliveryDate,
@@ -247,9 +259,11 @@ export class OrderService {
       const select = {
         id: true,
         clientId: true,
+        clientNameOverride: true,
         userId: true,
         assignedUserId: true,
         statusId: true,
+        area: true,
         description: true,
         creationDate: true,
         deliveryDate: true,
@@ -358,8 +372,10 @@ export class OrderService {
     try {
       const {
         clientId,
+        clientNameOverride,
         userId,
         statusId,
+        area,
         description,
         deliveryDate,
         orderProducts,
@@ -386,12 +402,14 @@ export class OrderService {
 
       const data: Prisma.OrderUpdateInput = {
         ...(description && { description }),
+        ...(area && { area }),
         ...(deliveryDate && { deliveryDate: new Date(deliveryDate) }),
         ...(clientId && {
           client: {
             connect: { id: clientId },
           },
         }),
+        ...(clientNameOverride !== undefined && { clientNameOverride }),
         ...(userId && {
           user: {
             connect: { id: userId },
