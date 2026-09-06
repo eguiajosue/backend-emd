@@ -69,6 +69,10 @@ model Order {
   creationDate DateTime // Fecha en que se creó la orden.
   deliveryDate DateTime? // Fecha de entrega opcional.
 
+  authorizationFileData String? // Contenido en base64 (sin prefijo data:) de la hoja de autorización.
+  authorizationFileName String? // Nombre de archivo original de la hoja de autorización.
+  authorizationFileMime String? // Mime type de la hoja de autorización (image/png, image/jpeg, application/pdf).
+
   client        Client         @relation(fields: [clientId], references: [id]) // Relación con Client.
   user          User           @relation(fields: [userId], references: [id]) // Relación con User.
   status        Status         @relation(fields: [statusId], references: [id]) // Relación con Status.

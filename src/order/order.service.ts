@@ -1,6 +1,6 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, AuthorizationFileDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Prisma } from '@prisma/client';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
@@ -10,12 +10,26 @@ import {
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
 
+/** Tamaño máximo (en bytes, ya decodificado) para la hoja de autorización. */
+const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
+
 @Injectable()
 export class OrderService {
   constructor(
     private prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
   ) {}
+
+  /** Valida el tamaño decodificado del archivo de autorización. */
+  private assertAuthorizationFileSize(file: AuthorizationFileDto) {
+    const sizeInBytes = Buffer.byteLength(file.data, 'base64');
+    if (sizeInBytes > MAX_AUTHORIZATION_FILE_BYTES) {
+      throw new HttpException(
+        'El archivo no puede superar 5MB',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
 
   async create(createOrderDto: CreateOrderDto) {
     try {
@@ -26,6 +40,7 @@ export class OrderService {
         description,
         deliveryDate,
         orderProducts,
+        authorizationFile,
       } = createOrderDto;
 
       if (!clientId || !userId || !statusId) {
@@ -33,6 +48,10 @@ export class OrderService {
           'Datos faltantes: clientId, userId o statusId',
           HttpStatus.BAD_REQUEST,
         );
+      }
+
+      if (authorizationFile) {
+        this.assertAuthorizationFileSize(authorizationFile);
       }
 
       const data: Prisma.OrderCreateInput = {
@@ -58,6 +77,11 @@ export class OrderService {
               })),
             }
           : undefined,
+        ...(authorizationFile && {
+          authorizationFileData: authorizationFile.data,
+          authorizationFileName: authorizationFile.filename,
+          authorizationFileMime: authorizationFile.mimeType,
+        }),
       };
 
       const order = await this.prisma.order.create({
@@ -117,9 +141,22 @@ export class OrderService {
   /**
    * Paginación OPT-IN: sin `page`/`limit` devuelve el array plano de siempre.
    */
+  /**
+   * Listado: NO trae `authorizationFileData` de la DB (es potencialmente
+   * pesado en base64 y rompería el rendimiento del listado). En su lugar
+   * expone un booleano `hasAuthorizationFile` calculado.
+   */
   async findAll(query?: PaginationQueryDto) {
     try {
-      const include = {
+      const select = {
+        id: true,
+        clientId: true,
+        userId: true,
+        statusId: true,
+        description: true,
+        creationDate: true,
+        deliveryDate: true,
+        authorizationFileName: true,
         client: true,
         user: true,
         status: true,
@@ -128,16 +165,28 @@ export class OrderService {
             product: true,
           },
         },
-      };
+      } satisfies Prisma.OrderSelect;
       const { enabled, page, limit, skip } = resolvePagination(query);
 
+      const toListItem = (order: {
+        authorizationFileName: string | null;
+        [key: string]: unknown;
+      }) => {
+        const { authorizationFileName, ...rest } = order;
+        return {
+          ...rest,
+          hasAuthorizationFile: authorizationFileName != null,
+        };
+      };
+
       if (!enabled) {
-        return await this.prisma.order.findMany({ include });
+        const orders = await this.prisma.order.findMany({ select });
+        return orders.map(toListItem);
       }
 
       const [data, total] = await this.prisma.$transaction([
         this.prisma.order.findMany({
-          include,
+          select,
           skip,
           take: limit,
           orderBy: { id: 'desc' },
@@ -145,7 +194,7 @@ export class OrderService {
         this.prisma.order.count(),
       ]);
 
-      return buildPaginatedResult(data, total, page, limit);
+      return buildPaginatedResult(data.map(toListItem), total, page, limit);
     } catch (error) {
       // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
       // detalles internos (Prisma, stack) al cliente en producción.
@@ -171,7 +220,24 @@ export class OrderService {
       if (!order) {
         throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
       }
-      return order;
+
+      const {
+        authorizationFileData,
+        authorizationFileName,
+        authorizationFileMime,
+        ...rest
+      } = order;
+
+      return {
+        ...rest,
+        authorizationFile: authorizationFileData
+          ? {
+              filename: authorizationFileName,
+              mimeType: authorizationFileMime,
+              dataUrl: `data:${authorizationFileMime};base64,${authorizationFileData}`,
+            }
+          : null,
+      };
     } catch (error) {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
@@ -191,7 +257,12 @@ export class OrderService {
         description,
         deliveryDate,
         orderProducts,
+        authorizationFile,
       } = updateOrderDto;
+
+      if (authorizationFile) {
+        this.assertAuthorizationFileSize(authorizationFile);
+      }
 
       // Obtener la orden actual antes de actualizar
       const existingOrder = await this.prisma.order.findUnique({
@@ -233,6 +304,11 @@ export class OrderService {
               },
             })),
           },
+        }),
+        ...(authorizationFile && {
+          authorizationFileData: authorizationFile.data,
+          authorizationFileName: authorizationFile.filename,
+          authorizationFileMime: authorizationFile.mimeType,
         }),
       };
 

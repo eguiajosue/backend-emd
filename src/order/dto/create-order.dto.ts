@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsDateString,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -16,6 +17,29 @@ import {
   EmptyToUndefined,
   TrimString,
 } from 'src/common/transformers/empty-to-undefined';
+
+/** Mime types permitidos para la hoja de autorización del pedido. */
+export const AUTHORIZATION_FILE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'application/pdf',
+] as const;
+
+export class AuthorizationFileDto {
+  /** Contenido del archivo en base64, SIN el prefijo `data:...;base64,`. */
+  @IsNotEmpty()
+  @IsString()
+  data: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(255)
+  filename: string;
+
+  @IsNotEmpty()
+  @IsIn(AUTHORIZATION_FILE_MIME_TYPES)
+  mimeType: string;
+}
 
 export class OrderProductDto {
   @IsNotEmpty()
@@ -62,4 +86,9 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => OrderProductDto)
   orderProducts?: OrderProductDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AuthorizationFileDto)
+  authorizationFile?: AuthorizationFileDto;
 }
