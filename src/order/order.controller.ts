@@ -16,6 +16,11 @@ import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { CreateOrderNoteDto } from './dto/create-order-note.dto';
+import {
+  CreateDesignRevisionDto,
+  AddDesignFeedbackDto,
+  ApproveDesignRevisionDto,
+} from './dto/design-revision.dto';
 import { OrderExportQueryDto } from './dto/order-export-query.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
@@ -168,7 +173,10 @@ export class OrderController {
     @Body() updateOrderDto: UpdateOrderDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.orderService.update(+id, updateOrderDto, user.sub);
+    return this.orderService.update(+id, updateOrderDto, user.sub, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
   @Auth(Role.SUPERUSER)
@@ -246,5 +254,119 @@ export class OrderController {
       { userId: user.sub, roles: user.roles },
       query,
     );
+  }
+
+  /** Diseño arma una nueva ronda de montaje y la manda a Recepción. */
+  @Auth(Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Post(':id/design-revisions')
+  createDesignRevision(
+    @Param('id') id: string,
+    @Body() dto: CreateDesignRevisionDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.createDesignRevision(+id, dto, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
+  /** Cualquiera con acceso al pedido puede ver el historial de rondas. */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/design-revisions')
+  getDesignRevisions(
+    @Param('id') id: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.getDesignRevisions(+id, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/design-revisions/:revisionId/montage')
+  getDesignRevisionMontage(
+    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.getDesignRevisionMontageFile(+id, +revisionId, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/design-revisions/:revisionId/feedback-file')
+  getDesignRevisionFeedbackFile(
+    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.getDesignRevisionFeedbackFile(
+      +id,
+      +revisionId,
+      { userId: user.sub, roles: user.roles },
+    );
+  }
+
+  /** Recepción carga el feedback del cliente sobre una ronda de montaje. */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Patch(':id/design-revisions/:revisionId/feedback')
+  addDesignFeedback(
+    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
+    @Body() dto: AddDesignFeedbackDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.addDesignFeedback(+id, +revisionId, dto, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
+  /** Recepción marca que el cliente autorizó el montaje. */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Patch(':id/design-revisions/:revisionId/approve')
+  approveDesignRevision(
+    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
+    @Body() dto: ApproveDesignRevisionDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.approveDesignRevision(+id, +revisionId, dto, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 }

@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -71,6 +72,16 @@ export const ORDER_AREAS = [
   'impresiones',
 ] as const;
 
+/** Áreas de producción válidas como destino final de un pedido: ORDER_AREAS
+ * sin 'diseno' (Diseño es una fase previa, no un destino de producción). */
+export const PRODUCTION_AREAS = [
+  'taller',
+  'dtf',
+  'bordado',
+  'laser',
+  'impresiones',
+] as const;
+
 export class CreateOrderDto {
   @IsOptional()
   @IsInt()
@@ -127,4 +138,17 @@ export class CreateOrderDto {
   @ValidateNested()
   @Type(() => AuthorizationFileDto)
   authorizationFile?: AuthorizationFileDto;
+
+  // Si el pedido pasa por la fase de Diseño antes de producción. Default
+  // true (comportamiento nuevo); Recepción puede desmarcarlo para ir
+  // directo a producción (comportamiento anterior, intacto).
+  @IsOptional()
+  @IsBoolean()
+  requiresDesign?: boolean = true;
+
+  // Área de producción destino una vez autorizado el diseño. Puede venir
+  // vacía al crear (se define después, por Recepción o por Diseño).
+  @IsOptional()
+  @IsIn(PRODUCTION_AREAS)
+  productionArea?: (typeof PRODUCTION_AREAS)[number];
 }

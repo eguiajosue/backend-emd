@@ -14,7 +14,13 @@ import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
 import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
 import { OrderProductDto } from './dto/create-order.dto';
 import { CreateOrderNoteDto } from './dto/create-order-note.dto';
+import {
+  CreateDesignRevisionDto,
+  AddDesignFeedbackDto,
+  ApproveDesignRevisionDto,
+} from './dto/design-revision.dto';
 import { NotificationService } from 'src/notification/notification.service';
+import { Role } from 'src/common/enums/roles.enum';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -31,6 +37,26 @@ const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
  * DELIVERED_STATUS_ID en frontend-emd/src/lib/orderStatus.ts.
  */
 const DELIVERED_STATUS_ID = 5;
+
+/**
+ * Nombres de los estados nuevos del flujo de Diseño, sembrados al final de
+ * STATUS_NAMES en prisma/seed.ts (ids 6+ en una DB existente). A diferencia
+ * de DELIVERED_STATUS_ID, estos se resuelven por NOMBRE en runtime (ver
+ * `resolveStatusIdByName`) y nunca se hardcodea su id, porque en otra DB
+ * donde el seed corra en otro orden esos ids podrían diferir.
+ */
+const STATUS_NAME_EN_DISENO = 'en diseño';
+const STATUS_NAME_ESPERANDO_AUTORIZACION = 'esperando autorización';
+const STATUS_NAME_CAMBIOS_SOLICITADOS = 'cambios solicitados';
+const STATUS_NAME_AUTORIZADO = 'autorizado';
+
+/** Roles que pueden editar `productionArea` en un pedido, además de RECEPCION/ADMIN/SUPERUSER. */
+const PRODUCTION_AREA_EDITOR_ROLES = [
+  Role.RECEPCION,
+  Role.ADMIN,
+  Role.SUPERUSER,
+  Role.DISENO,
+];
 
 /** Selección liviana del historial, solo lo necesario para calcular `deliveredAt`. */
 const HISTORY_SELECT_FOR_DELIVERED_AT = {
@@ -57,6 +83,9 @@ const ASSIGNED_USER_SELECT = {
 
 @Injectable()
 export class OrderService {
+  /** Cache en memoria de id de Status por nombre (ver `resolveStatusIdByName`). */
+  private statusIdByNameCache = new Map<string, number>();
+
   constructor(
     private prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
@@ -187,13 +216,52 @@ export class OrderService {
     return order;
   }
 
-  /** Valida el tamaño decodificado del archivo de autorización. */
+  /** Valida el tamaño decodificado del archivo de autorización (y, reusado, del montaje/feedback de diseño). */
   private assertAuthorizationFileSize(file: AuthorizationFileDto) {
     const sizeInBytes = Buffer.byteLength(file.data, 'base64');
     if (sizeInBytes > MAX_AUTHORIZATION_FILE_BYTES) {
       throw new HttpException(
         'El archivo no puede superar 5MB',
         HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  /**
+   * Resuelve el id de un `Status` por su nombre exacto, con cache en
+   * memoria (los estados no cambian en runtime). Usado para los estados del
+   * flujo de Diseño, sembrados al final de STATUS_NAMES con ids no
+   * hardcodeables (ver comentario sobre STATUS_NAME_* arriba).
+   */
+  private async resolveStatusIdByName(name: string): Promise<number> {
+    const cached = this.statusIdByNameCache.get(name);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const status = await this.prisma.status.findUnique({ where: { name } });
+    if (!status) {
+      throw new HttpException(
+        `El estado "${name}" no existe. Corré el seed (prisma/seed.ts) para crearlo.`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+    this.statusIdByNameCache.set(name, status.id);
+    return status.id;
+  }
+
+  /**
+   * Verifica que el usuario autenticado pueda editar `productionArea`
+   * (recepcion/admin/superuser, o diseño). Lanza 403 si no.
+   */
+  private assertCanEditProductionArea(requestingUser?: RequestingUser) {
+    const roles = requestingUser?.roles ?? [];
+    const allowed = roles.some((r) =>
+      PRODUCTION_AREA_EDITOR_ROLES.includes(r as Role),
+    );
+    if (!allowed) {
+      throw new HttpException(
+        'No tenés permiso para editar el área de producción',
+        HttpStatus.FORBIDDEN,
       );
     }
   }
@@ -207,11 +275,18 @@ export class OrderService {
         assignedUserId,
         statusId,
         area,
+        productionArea,
+        requiresDesign,
         description,
         deliveryDate,
         orderProducts,
         authorizationFile,
       } = createOrderDto;
+
+      // Default true: si no viene explícito, el pedido pasa por Diseño
+      // (comportamiento nuevo). Recepción puede desmarcarlo para ir directo
+      // a producción (comportamiento anterior, intacto).
+      const needsDesign = requiresDesign !== false;
 
       if (!userId || !statusId) {
         throw new HttpException(
@@ -235,9 +310,21 @@ export class OrderService {
       this.assertOrderProductsValid(orderProducts);
       await this.registerCustomNamePresets(orderProducts);
 
+      // Si requiere Diseño: el pedido arranca EN Diseño (area='diseno',
+      // estado 'en diseño') sin importar qué `area`/`statusId` mandó
+      // Recepción; `productionArea` queda guardado como destino futuro
+      // (puede venir vacío, se define/corrige más adelante). Si no requiere
+      // Diseño, comportamiento anterior intacto.
+      const resolvedArea = needsDesign ? 'diseno' : area;
+      const resolvedStatusId = needsDesign
+        ? await this.resolveStatusIdByName(STATUS_NAME_EN_DISENO)
+        : statusId;
+
       const data: Prisma.OrderCreateInput = {
         description,
-        area,
+        area: resolvedArea,
+        requiresDesign: needsDesign,
+        productionArea: productionArea ?? undefined,
         creationDate: new Date(),
         deliveryDate: deliveryDate ? new Date(deliveryDate) : undefined,
         ...(clientId
@@ -257,7 +344,7 @@ export class OrderService {
           },
         }),
         status: {
-          connect: { id: statusId },
+          connect: { id: resolvedStatusId },
         },
         orderProducts: orderProducts
           ? {
@@ -400,6 +487,8 @@ export class OrderService {
       assignedUserId: true,
       statusId: true,
       area: true,
+      requiresDesign: true,
+      productionArea: true,
       description: true,
       creationDate: true,
       deliveryDate: true,
@@ -584,6 +673,7 @@ export class OrderService {
     id: number,
     updateOrderDto: UpdateOrderDto,
     requestingUserId?: number,
+    requestingUser?: RequestingUser,
   ) {
     try {
       const {
@@ -592,6 +682,8 @@ export class OrderService {
         userId,
         statusId,
         area,
+        productionArea,
+        requiresDesign,
         description,
         deliveryDate,
         orderProducts,
@@ -599,6 +691,16 @@ export class OrderService {
       } = updateOrderDto;
       const hasAssignedUserId = 'assignedUserId' in updateOrderDto;
       const { assignedUserId } = updateOrderDto;
+
+      // `productionArea`/`requiresDesign` solo los puede tocar
+      // recepcion/admin/superuser o diseño (ver PRODUCTION_AREA_EDITOR_ROLES),
+      // aunque el endpoint PATCH /orders/:id sea accesible por más roles.
+      if (
+        (productionArea !== undefined || requiresDesign !== undefined) &&
+        requestingUser
+      ) {
+        this.assertCanEditProductionArea(requestingUser);
+      }
 
       if (authorizationFile) {
         this.assertAuthorizationFileSize(authorizationFile);
@@ -649,6 +751,20 @@ export class OrderService {
       if (area !== undefined) {
         noteChange('area', existingOrder.area, area);
       }
+      if (productionArea !== undefined) {
+        noteChange(
+          'productionArea',
+          existingOrder.productionArea,
+          productionArea,
+        );
+      }
+      if (requiresDesign !== undefined) {
+        noteChange(
+          'requiresDesign',
+          existingOrder.requiresDesign,
+          requiresDesign,
+        );
+      }
       if (clientId !== undefined) {
         noteChange('clientId', existingOrder.clientId, clientId);
       }
@@ -663,6 +779,8 @@ export class OrderService {
       const data: Prisma.OrderUpdateInput = {
         ...(description && { description }),
         ...(area && { area }),
+        ...(productionArea !== undefined && { productionArea }),
+        ...(requiresDesign !== undefined && { requiresDesign }),
         ...(deliveryDate && { deliveryDate: new Date(deliveryDate) }),
         ...(clientId && {
           client: {
@@ -878,6 +996,351 @@ export class OrderService {
     ]);
 
     return buildPaginatedResult(data, total, page, limit);
+  }
+
+  /** Select liviano de una `DesignRevision`, sin los blobs base64 de archivo. */
+  private designRevisionListSelect() {
+    return {
+      id: true,
+      orderId: true,
+      round: true,
+      montageFileName: true,
+      montageFileMime: true,
+      sentAt: true,
+      sentByUserId: true,
+      feedbackText: true,
+      feedbackFileName: true,
+      feedbackFileMime: true,
+      feedbackAt: true,
+      feedbackByUserId: true,
+      approved: true,
+      approvedAt: true,
+      approvedByUserId: true,
+      createdAt: true,
+    } satisfies Prisma.DesignRevisionSelect;
+  }
+
+  private toDesignRevisionListItem(revision: {
+    montageFileName: string | null;
+    feedbackFileName: string | null;
+    [key: string]: unknown;
+  }) {
+    return {
+      ...revision,
+      hasMontageFile: revision.montageFileName != null,
+      hasFeedbackFile: revision.feedbackFileName != null,
+    };
+  }
+
+  /** Trae el pedido (o lanza 404), validando acceso del usuario. */
+  private async getOrderOrThrow(orderId: number) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
+    }
+    return order;
+  }
+
+  /** Trae una `DesignRevision` de un pedido puntual (o lanza 404). */
+  private async getDesignRevisionOrThrow(orderId: number, revisionId: number) {
+    const revision = await this.prisma.designRevision.findUnique({
+      where: { id: revisionId },
+    });
+    if (!revision || revision.orderId !== orderId) {
+      throw new HttpException(
+        'Ronda de diseño no encontrada',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return revision;
+  }
+
+  /**
+   * POST /orders/:id/design-revisions — Diseño arma una nueva ronda (montaje)
+   * y el pedido pasa a "esperando autorización". Notifica a Recepción.
+   */
+  async createDesignRevision(
+    orderId: number,
+    dto: CreateDesignRevisionDto,
+    requestingUser: RequestingUser,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    this.assertAuthorizationFileSize(dto.montageFile);
+
+    const last = await this.prisma.designRevision.findFirst({
+      where: { orderId },
+      orderBy: { round: 'desc' },
+    });
+    const round = (last?.round ?? 0) + 1;
+    const statusId = await this.resolveStatusIdByName(
+      STATUS_NAME_ESPERANDO_AUTORIZACION,
+    );
+
+    const [revision] = await this.prisma.$transaction([
+      this.prisma.designRevision.create({
+        data: {
+          round,
+          montageFileData: dto.montageFile.data,
+          montageFileName: dto.montageFile.filename,
+          montageFileMime: dto.montageFile.mimeType,
+          sentAt: new Date(),
+          order: { connect: { id: orderId } },
+          sentByUser: { connect: { id: requestingUser.userId } },
+        },
+      }),
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: { status: { connect: { id: statusId } } },
+      }),
+      this.prisma.orderAuditLog.create({
+        data: {
+          action: 'design_montage_sent',
+          changes: { round, statusId } as Prisma.InputJsonValue,
+          order: { connect: { id: orderId } },
+          user: { connect: { id: requestingUser.userId } },
+        },
+      }),
+    ]);
+
+    const recepcionUserIds =
+      await this.notificationService.userIdsForArea('recepcion');
+    await this.notificationService.createNotificationForUsers(
+      recepcionUserIds,
+      {
+        type: 'design_montage_sent',
+        title: 'Montaje listo para enviar al cliente',
+        body: `Pedido #${orderId}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
+        orderId,
+      },
+    );
+    this.notificationsGateway.notifyNewOrderToArea('recepcion', {
+      orderId,
+      description: `Montaje ronda ${round} listo para enviar al cliente`,
+      area: 'recepcion',
+      deliveryDate: null,
+    });
+
+    const created = await this.prisma.designRevision.findUnique({
+      where: { id: revision.id },
+      select: this.designRevisionListSelect(),
+    });
+    return this.toDesignRevisionListItem(created);
+  }
+
+  /**
+   * PATCH /orders/:id/design-revisions/:revisionId/feedback — Recepción
+   * carga lo que dijo el cliente. El pedido vuelve a "cambios solicitados"
+   * y a área 'diseno'. Notifica a Diseño.
+   */
+  async addDesignFeedback(
+    orderId: number,
+    revisionId: number,
+    dto: AddDesignFeedbackDto,
+    requestingUser: RequestingUser,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    await this.getDesignRevisionOrThrow(orderId, revisionId);
+    if (dto.feedbackFile) {
+      this.assertAuthorizationFileSize(dto.feedbackFile);
+    }
+
+    const statusId = await this.resolveStatusIdByName(
+      STATUS_NAME_CAMBIOS_SOLICITADOS,
+    );
+
+    const [revision] = await this.prisma.$transaction([
+      this.prisma.designRevision.update({
+        where: { id: revisionId },
+        data: {
+          feedbackText: dto.feedbackText,
+          feedbackAt: new Date(),
+          feedbackByUser: { connect: { id: requestingUser.userId } },
+          ...(dto.feedbackFile && {
+            feedbackFileData: dto.feedbackFile.data,
+            feedbackFileName: dto.feedbackFile.filename,
+            feedbackFileMime: dto.feedbackFile.mimeType,
+          }),
+        },
+      }),
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          area: 'diseno',
+          status: { connect: { id: statusId } },
+        },
+      }),
+      this.prisma.orderAuditLog.create({
+        data: {
+          action: 'design_feedback_added',
+          changes: {
+            revisionId,
+            statusId,
+            feedbackText: dto.feedbackText,
+          } as Prisma.InputJsonValue,
+          order: { connect: { id: orderId } },
+          user: { connect: { id: requestingUser.userId } },
+        },
+      }),
+    ]);
+
+    const disenoUserIds =
+      await this.notificationService.userIdsForArea('diseno');
+    await this.notificationService.createNotificationForUsers(disenoUserIds, {
+      type: 'design_feedback_added',
+      title: 'El cliente pidió cambios',
+      body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
+      orderId,
+    });
+    this.notificationsGateway.notifyNewOrderToArea('diseno', {
+      orderId,
+      description: 'El cliente pidió cambios sobre el montaje',
+      area: 'diseno',
+      deliveryDate: null,
+    });
+
+    const updated = await this.prisma.designRevision.findUnique({
+      where: { id: revision.id },
+      select: this.designRevisionListSelect(),
+    });
+    return this.toDesignRevisionListItem(updated);
+  }
+
+  /**
+   * PATCH /orders/:id/design-revisions/:revisionId/approve — Recepción marca
+   * que el cliente autorizó. El pedido pasa a "autorizado" y su `area` se
+   * mueve a `productionArea` (del body, o ya fijada en el pedido).
+   */
+  async approveDesignRevision(
+    orderId: number,
+    revisionId: number,
+    dto: ApproveDesignRevisionDto,
+    requestingUser: RequestingUser,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    await this.getDesignRevisionOrThrow(orderId, revisionId);
+    const order = await this.getOrderOrThrow(orderId);
+
+    const productionArea = dto.productionArea ?? order.productionArea;
+    if (!productionArea) {
+      throw new HttpException(
+        'Definí el área de producción antes de autorizar',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const statusId = await this.resolveStatusIdByName(
+      STATUS_NAME_AUTORIZADO,
+    );
+
+    const [revision] = await this.prisma.$transaction([
+      this.prisma.designRevision.update({
+        where: { id: revisionId },
+        data: {
+          approved: true,
+          approvedAt: new Date(),
+          approvedByUser: { connect: { id: requestingUser.userId } },
+        },
+      }),
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          area: productionArea,
+          productionArea,
+          status: { connect: { id: statusId } },
+        },
+      }),
+      this.prisma.orderAuditLog.create({
+        data: {
+          action: 'design_approved',
+          changes: {
+            revisionId,
+            statusId,
+            productionArea,
+          } as Prisma.InputJsonValue,
+          order: { connect: { id: orderId } },
+          user: { connect: { id: requestingUser.userId } },
+        },
+      }),
+    ]);
+
+    const productionAreaUserIds =
+      await this.notificationService.userIdsForArea(productionArea);
+    await this.notificationService.createNotificationForUsers(
+      productionAreaUserIds,
+      {
+        type: 'design_approved',
+        title: 'Diseño autorizado, listo para producción',
+        body: `Pedido #${orderId}: diseño autorizado, pasa a ${productionArea}`,
+        orderId,
+      },
+    );
+    this.notificationsGateway.notifyNewOrderToArea(productionArea, {
+      orderId,
+      description: `Diseño autorizado, pedido listo para producción en ${productionArea}`,
+      area: productionArea,
+      deliveryDate: null,
+    });
+
+    const updated = await this.prisma.designRevision.findUnique({
+      where: { id: revision.id },
+      select: this.designRevisionListSelect(),
+    });
+    return this.toDesignRevisionListItem(updated);
+  }
+
+  /** GET /orders/:id/design-revisions — rondas ordenadas asc, sin blobs. */
+  async getDesignRevisions(orderId: number, requestingUser: RequestingUser) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    const revisions = await this.prisma.designRevision.findMany({
+      where: { orderId },
+      select: this.designRevisionListSelect(),
+      orderBy: { round: 'asc' },
+    });
+    return revisions.map((r) => this.toDesignRevisionListItem(r));
+  }
+
+  /** GET /orders/:id/design-revisions/:revisionId/montage */
+  async getDesignRevisionMontageFile(
+    orderId: number,
+    revisionId: number,
+    requestingUser: RequestingUser,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    const revision = await this.getDesignRevisionOrThrow(orderId, revisionId);
+    if (!revision.montageFileData) {
+      throw new HttpException(
+        'Esta ronda no tiene montaje cargado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return {
+      filename: revision.montageFileName,
+      mimeType: revision.montageFileMime,
+      dataUrl: `data:${revision.montageFileMime};base64,${revision.montageFileData}`,
+    };
+  }
+
+  /** GET /orders/:id/design-revisions/:revisionId/feedback-file */
+  async getDesignRevisionFeedbackFile(
+    orderId: number,
+    revisionId: number,
+    requestingUser: RequestingUser,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    const revision = await this.getDesignRevisionOrThrow(orderId, revisionId);
+    if (!revision.feedbackFileData) {
+      throw new HttpException(
+        'Esta ronda no tiene archivo de feedback',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return {
+      filename: revision.feedbackFileName,
+      mimeType: revision.feedbackFileMime,
+      dataUrl: `data:${revision.feedbackFileMime};base64,${revision.feedbackFileData}`,
+    };
   }
 
   /**

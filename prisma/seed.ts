@@ -34,12 +34,23 @@ const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
 // Orden exacto requerido por el frontend (frontend-emd/src/lib/orderStatus.ts):
 // en una DB nueva, Prisma autoincrementa el id según el orden de creación,
 // por lo que sembrando en este orden quedan mapeados 1-5 correctamente.
+// Los primeros 5 son 1-5 en una DB nueva y están hardcodeados en varios
+// lugares (ver DELIVERED_STATUS_ID en order.service.ts y
+// frontend-emd/src/lib/orderStatus.ts) -- NO reordenar ni renombrar. Los
+// nuevos del flujo de diseño se agregan siempre al final (upsert por
+// nombre, así que en una DB existente entran con ids 6+ sin tocar los
+// anteriores) y se resuelven por nombre en runtime, nunca por id
+// hardcodeado (ver resolveStatusIdByName en order.service.ts).
 const STATUS_NAMES = [
   'pendiente',
   'en pruebas',
   'en proceso',
   'terminado',
   'entregado',
+  'en diseño',
+  'esperando autorización',
+  'cambios solicitados',
+  'autorizado',
 ];
 
 const DEMO_COMPANIES = [
