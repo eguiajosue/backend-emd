@@ -53,15 +53,37 @@ export class UserController {
     return this.userService.create(createUserDto);
   }
 
-  // Lectura abierta a admin/superuser/recepcion: recepción necesita listar
-  // usuarios para el selector "Asignar a" al crear un pedido.
-  @Auth(Role.ADMIN, Role.SUPERUSER, Role.RECEPCION)
+  // Lectura abierta a todos los roles que pueden ver pedidos: recepción
+  // necesita listar usuarios para el selector "Asignar a" al crear un
+  // pedido, y la pantalla de "Pedidos" (también para roles operativos)
+  // usa este listado para el filtro "Asignado a".
+  @Auth(
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.RECEPCION,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
   @Get()
   findAll() {
     return this.userService.findAll();
   }
 
-  @Auth(Role.ADMIN, Role.SUPERUSER, Role.RECEPCION)
+  @Auth(
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.RECEPCION,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.userService.findOne(+id);

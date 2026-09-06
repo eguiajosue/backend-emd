@@ -48,4 +48,38 @@ describe('RolesGuard', () => {
       true,
     );
   });
+
+  it('should allow access for a user holding multiple operational roles (diseno+bordado+dtf)', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      Role.RECEPCION,
+      Role.ADMIN,
+      Role.SUPERUSER,
+      Role.TALLER,
+      Role.DTF,
+      Role.BORDADO,
+      Role.DISENO,
+      Role.LASER,
+      Role.IMPRESIONES,
+    ]);
+
+    expect(
+      guard.canActivate(
+        createContext(Role.DISENO, Role.BORDADO, Role.DTF),
+      ),
+    ).toBe(true);
+  });
+
+  it('should deny access when the request user has no roles at all', () => {
+    reflector.getAllAndOverride.mockReturnValue([Role.ADMIN]);
+
+    const context = {
+      getHandler: jest.fn(),
+      getClass: jest.fn(),
+      switchToHttp: () => ({
+        getRequest: () => ({ user: {} }),
+      }),
+    } as unknown as ExecutionContext;
+
+    expect(guard.canActivate(context)).toBe(false);
+  });
 });

@@ -128,6 +128,41 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     expect((result as any[]).map((o: any) => o.id)).not.toContain(5);
   });
 
+  it('superuser: ve todos los pedidos sin filtrar', async () => {
+    const result = await orderService.findAll(undefined, {
+      userId: 99,
+      roles: ['superuser'],
+    });
+    expect(result as any[]).toHaveLength(orders.length);
+  });
+
+  it.each(['taller', 'dtf', 'bordado', 'diseno', 'laser', 'impresiones'])(
+    'rol operativo "%s" no ve pedidos de otras áreas',
+    async (role) => {
+      const result = await orderService.findAll(undefined, {
+        userId: 7,
+        roles: [role],
+      });
+      const visibleAreas = new Set(
+        (result as any[]).map((o: any) => o.area),
+      );
+      for (const area of visibleAreas) {
+        expect(area).toBe(role);
+      }
+    },
+  );
+
+  it('usuario con roles diseno+bordado+dtf (caso reportado) ve las órdenes de esas áreas sin ser bloqueado', async () => {
+    const result = await orderService.findAll(undefined, {
+      userId: 7,
+      roles: ['diseno', 'bordado', 'dtf'],
+    });
+
+    // Sólo hay pedidos de "diseno" en el fixture (id 4); no debe lanzar ni
+    // devolver pedidos de áreas que no le corresponden.
+    expect((result as any[]).map((o: any) => o.id)).toEqual([4]);
+  });
+
   it('usuario sin ningún rol operativo ni de visibilidad total no ve pedidos', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
