@@ -41,6 +41,11 @@ export const envSchema = z.object({
   // Envío de reportes de bugs por email (Resend). Opcional: si no está
   // configurada, el endpoint de reportes responde 503 en vez de fallar.
   RESEND_API_KEY: z.string().optional(),
+  // Destinatario y remitente de los reportes de bug. Ver .env.example: el
+  // remitente por defecto (onboarding@resend.dev) sólo entrega al email dueño
+  // de la cuenta de Resend.
+  BUG_REPORT_RECIPIENT: z.string().optional(),
+  BUG_REPORT_FROM: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -33,13 +33,36 @@ export class ClientController {
     return this.clientService.create(createClientDto);
   }
 
-  @Auth(Role.ADMIN, Role.RECEPCION)
+  // Lectura abierta a todos los roles que pueden ver pedidos: la pantalla de
+  // "Pedidos" (incluidos los roles operativos) necesita el listado de
+  // clientes para el filtro y para mostrar el nombre del cliente.
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
   @Get()
   findAll(@Query() query: PaginationQueryDto) {
     return this.clientService.findAll(query);
   }
 
-  @Auth(Role.ADMIN, Role.RECEPCION)
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.clientService.findOne(+id);

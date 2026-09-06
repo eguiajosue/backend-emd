@@ -31,26 +31,26 @@ const OPERATIONAL_ROLE_NAMES = [
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
 
-// Orden exacto requerido por el frontend (frontend-emd/src/lib/orderStatus.ts):
-// en una DB nueva, Prisma autoincrementa el id según el orden de creación,
-// por lo que sembrando en este orden quedan mapeados 1-5 correctamente.
-// Los primeros 5 son 1-5 en una DB nueva y están hardcodeados en varios
-// lugares (ver DELIVERED_STATUS_ID en order.service.ts y
-// frontend-emd/src/lib/orderStatus.ts) -- NO reordenar ni renombrar. Los
-// nuevos del flujo de diseño se agregan siempre al final (upsert por
-// nombre, así que en una DB existente entran con ids 6+ sin tocar los
-// anteriores) y se resuelven por nombre en runtime, nunca por id
-// hardcodeado (ver resolveStatusIdByName en order.service.ts).
-const STATUS_NAMES = [
-  'pendiente',
-  'en pruebas',
-  'en proceso',
-  'terminado',
-  'entregado',
-  'en diseño',
-  'esperando autorización',
-  'cambios solicitados',
-  'autorizado',
+// Estados con id EXPLÍCITO: varios ids están hardcodeados en el código
+// (ver DELIVERED_STATUS_ID en order.service.ts y
+// frontend-emd/src/lib/orderStatus.ts), así que no pueden depender del
+// orden de creación / del autoincremento. Sembrar con id explícito
+// mantiene los mismos ids en una DB nueva y en una existente.
+//
+// El id 2 ("en pruebas") quedó RETIRADO del flujo (ver la migración
+// 20260906140000_remove_en_pruebas_status): no se vuelve a usar, y los ids
+// posteriores se conservan tal cual para no romper nada. Los estados del
+// flujo de diseño (6-9) además se resuelven por nombre en runtime (ver
+// resolveStatusIdByName en order.service.ts).
+const STATUS_SEEDS: { id: number; name: string }[] = [
+  { id: 1, name: 'pendiente' },
+  { id: 3, name: 'en proceso' },
+  { id: 4, name: 'terminado' },
+  { id: 5, name: 'entregado' },
+  { id: 6, name: 'en diseño' },
+  { id: 7, name: 'esperando autorización' },
+  { id: 8, name: 'cambios solicitados' },
+  { id: 9, name: 'autorizado' },
 ];
 
 const DEMO_COMPANIES = [
@@ -168,15 +168,21 @@ async function main() {
 
   console.log('Seeding statuses...');
   const statuses: Record<string, { id: number }> = {};
-  for (const name of STATUS_NAMES) {
+  for (const { id, name } of STATUS_SEEDS) {
     const status = await prisma.status.upsert({
       where: { name },
       update: {},
-      create: { name },
+      create: { id, name },
     });
     statuses[name] = status;
     console.log(`  status "${name}" ready (id=${status.id})`);
   }
+  // Al insertar ids explícitos la secuencia del autoincremento no avanza:
+  // la reposicionamos para que un futuro insert sin id no choque con una PK
+  // ya usada.
+  await prisma.$executeRawUnsafe(
+    `SELECT setval(pg_get_serial_sequence('"Status"', 'id'), (SELECT COALESCE(MAX("id"), 1) FROM "Status"))`,
+  );
 
   console.log('Seeding area visibility settings...');
   for (const role of OPERATIONAL_ROLE_NAMES) {
@@ -256,7 +262,7 @@ async function main() {
         },
         {
           clientId: clients[1].id,
-          statusId: statuses['en pruebas'].id,
+          statusId: statuses['en proceso'].id,
           description: DEMO_ORDER_DESCRIPTIONS[1],
           creationDate: now,
           deliveryDate: addDays(now, 4), // dentro de 3-4 días

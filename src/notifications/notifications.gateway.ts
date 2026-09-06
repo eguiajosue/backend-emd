@@ -41,6 +41,26 @@ interface OrderNoteNotificationPayload {
   createdAt: Date;
 }
 
+/** Payload de la notificación específica a Recepción por cambio de estado de un pedido. */
+export interface OrderStatusChangedPayload {
+  orderId: number;
+  changedByUsername: string;
+  previousStatus: string;
+  newStatus: string;
+  changedAt: Date;
+}
+
+/** Payload de un mensaje de chat entregado en vivo. */
+interface ChatMessagePayload {
+  id: number;
+  conversationId: number;
+  body: string;
+  createdAt: Date;
+  senderId: number;
+  senderUsername: string;
+  senderName: string;
+}
+
 /** Payload de la notificación genérica a Recepción por cambios de un usuario de área. */
 interface AreaUserUpdatedOrderPayload {
   orderId: number;
@@ -74,7 +94,14 @@ export class NotificationsGateway
   }
 
   handleConnection(client: Socket) {
-    const token = client.handshake.headers.authorization;
+    // El cliente manda el token de dos formas: `extraHeaders.authorization`
+    // (sólo viaja con el transporte polling) y `auth.token` (el único que
+    // llega cuando el navegador usa `transports: ["websocket"]`, porque el
+    // WebSocket del browser no admite cabeceras propias). Se aceptan las dos.
+    const authPayload = client.handshake.auth as { token?: unknown } | undefined;
+    const token =
+      (typeof authPayload?.token === 'string' ? authPayload.token : undefined) ??
+      client.handshake.headers.authorization;
 
     if (!token) {
       this.logger.warn(`Client disconnected: No token provided`);
@@ -196,6 +223,35 @@ export class NotificationsGateway
     this.server.to('recepcion').emit('areaUserUpdatedOrder', payload);
     this.logger.log(
       `Area user update notification sent to recepcion: Order ID ${payload.orderId}`,
+    );
+  }
+
+  /**
+   * Cambio de estado de un pedido, con su propio evento/tipo para que el
+   * panel de notificaciones lo muestre con una etiqueta distinguible
+   * ("Cambio de estado"). Se emite a Recepción (misma room que
+   * `notifyAreaUserUpdatedOrder`) y al usuario asignado, si lo hay.
+   */
+  notifyOrderStatusChangedToRecepcion(payload: OrderStatusChangedPayload) {
+    this.server.to('recepcion').emit('orderStatusChanged', payload);
+    this.logger.log(
+      `Order status change notification sent to recepcion: Order ID ${payload.orderId} (${payload.previousStatus} -> ${payload.newStatus})`,
+    );
+  }
+
+  /**
+   * Mensaje de chat en vivo. Los destinatarios los calcula `ChatService` en
+   * el servidor a partir de la membresía de la conversación (nunca del
+   * cliente), y se emiten a la room individual `user:<id>` que cada cliente
+   * une en `handleConnection` tras validar su JWT: por eso no hace falta —
+   * ni se permite — que el cliente se una a rooms de conversación.
+   */
+  emitChatMessage(userIds: number[], message: ChatMessagePayload) {
+    userIds.forEach((userId) => {
+      this.server.to(`user:${userId}`).emit('chatMessage', message);
+    });
+    this.logger.log(
+      `Chat message ${message.id} emitted to ${userIds.length} member(s) of conversation ${message.conversationId}`,
     );
   }
 }

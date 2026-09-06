@@ -11,6 +11,7 @@ import { ColorService } from './color.service';
 import { CreateColorDto } from './dto/create-color.dto';
 import { UpdateColorDto } from './dto/update-color.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
+import { ORDER_VIEWING_ROLES } from 'src/common/constants/order-viewing-roles';
 import { Role } from 'src/common/enums/roles.enum';
 import { ApiTags } from '@nestjs/swagger';
 
@@ -25,11 +26,13 @@ export class ColorController {
     return this.colorService.create(createColorDto);
   }
 
+  @Auth(...ORDER_VIEWING_ROLES)
   @Get()
   findAll() {
     return this.colorService.findAll();
   }
 
+  @Auth(...ORDER_VIEWING_ROLES)
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.colorService.findOne(+id);

@@ -1,6 +1,7 @@
 import { Controller, Get, UseInterceptors } from '@nestjs/common';
 import { OrderProductPresetService } from './order-product-preset.service';
 import { Auth } from 'src/common/decorators/auth.decorator';
+import { ORDER_VIEWING_ROLES } from 'src/common/constants/order-viewing-roles';
 import { Role } from 'src/common/enums/roles.enum';
 import { ApiTags } from '@nestjs/swagger';
 import {
@@ -19,6 +20,7 @@ export class OrderProductPresetController {
     private readonly orderProductPresetService: OrderProductPresetService,
   ) {}
 
+  @Auth(...ORDER_VIEWING_ROLES)
   @Get()
   @UseInterceptors(InMemoryCacheInterceptor)
   @CacheTtl(ORDER_PRODUCT_PRESET_CACHE_TTL_MS)

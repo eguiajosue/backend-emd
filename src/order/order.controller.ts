@@ -334,11 +334,10 @@ export class OrderController {
     @Param('revisionId') revisionId: string,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.orderService.getDesignRevisionFeedbackFile(
-      +id,
-      +revisionId,
-      { userId: user.sub, roles: user.roles },
-    );
+    return this.orderService.getDesignRevisionFeedbackFile(+id, +revisionId, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
   /** Recepción carga el feedback del cliente sobre una ronda de montaje. */

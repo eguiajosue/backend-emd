@@ -34,15 +34,15 @@ export interface RequestingUser {
 const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
 
 /**
- * Id del estado "entregado", sembrado por prisma/seed.ts (ver STATUS_NAMES,
- * 5to y último status creado en una DB nueva). Coincide con
+ * Id del estado "entregado", sembrado por prisma/seed.ts (ver STATUS_SEEDS,
+ * donde se siembra con id explícito = 5). Coincide con
  * DELIVERED_STATUS_ID en frontend-emd/src/lib/orderStatus.ts.
  */
 const DELIVERED_STATUS_ID = 5;
 
 /**
  * Nombres de los estados nuevos del flujo de Diseño, sembrados al final de
- * STATUS_NAMES en prisma/seed.ts (ids 6+ en una DB existente). A diferencia
+ * STATUS_SEEDS en prisma/seed.ts (ids 6+ en una DB existente). A diferencia
  * de DELIVERED_STATUS_ID, estos se resuelven por NOMBRE en runtime (ver
  * `resolveStatusIdByName`) y nunca se hardcodea su id, porque en otra DB
  * donde el seed corra en otro orden esos ids podrían diferir.
@@ -219,7 +219,7 @@ export class OrderService {
   /**
    * Resuelve el id de un `Status` por su nombre exacto, con cache en
    * memoria (los estados no cambian en runtime). Usado para los estados del
-   * flujo de Diseño, sembrados al final de STATUS_NAMES con ids no
+   * flujo de Diseño, sembrados al final de STATUS_SEEDS con ids no
    * hardcodeables (ver comentario sobre STATUS_NAME_* arriba).
    */
   private async resolveStatusIdByName(name: string): Promise<number> {
@@ -713,6 +713,55 @@ export class OrderService {
     });
   }
 
+  /**
+   * Notifica (persistente + WS) un CAMBIO DE ESTADO del pedido con su propio
+   * tipo `order_status_changed`, distinto de la notificación genérica
+   * `area_user_updated_order`, para que el frontend pueda renderizar una
+   * etiqueta específica ("Cambio de estado").
+   *
+   * Destinatarios: todos los usuarios de Recepción (mismo criterio que
+   * `notifyAreaUserUpdatedOrder`) más el usuario asignado al pedido, si lo
+   * hay. La lista se deduplica para que un recepcionista asignado al pedido
+   * no reciba la misma notificación dos veces.
+   */
+  private async notifyOrderStatusChanged(
+    orderId: number,
+    previousStatusName: string,
+    newStatusName: string,
+    assignedUserId: number | null,
+    requestingUser?: RequestingUser,
+  ) {
+    const changedByUsername = requestingUser?.username ?? 'Un usuario';
+    const changedAt = new Date();
+    const title = `Cambio de estado del pedido #${orderId}`;
+    const body = `${changedByUsername} cambió el estado del pedido #${orderId} de "${previousStatusName}" a "${newStatusName}"`;
+
+    const recepcionUserIds =
+      await this.notificationService.userIdsForArea('recepcion');
+    const recipientIds = Array.from(
+      new Set(
+        assignedUserId != null
+          ? [...recepcionUserIds, assignedUserId]
+          : recepcionUserIds,
+      ),
+    );
+
+    await this.notificationService.createNotificationForUsers(recipientIds, {
+      type: 'order_status_changed',
+      title,
+      body,
+      orderId,
+    });
+
+    this.notificationsGateway.notifyOrderStatusChangedToRecepcion({
+      orderId,
+      changedByUsername,
+      previousStatus: previousStatusName,
+      newStatus: newStatusName,
+      changedAt,
+    });
+  }
+
   async update(
     id: number,
     updateOrderDto: UpdateOrderDto,
@@ -899,18 +948,19 @@ export class OrderService {
           orderStatusChangeData,
         );
 
-        // Persistencia: al usuario asignado (si lo hay) le queda guardado el
-        // cambio de estado, mismo criterio de destinatario que el resto de
-        // las notificaciones dirigidas de este pedido.
-        if (updatedOrder.assignedUserId) {
-          await this.notificationService.createNotification({
-            userId: updatedOrder.assignedUserId,
-            type: 'order_status_changed',
-            title: 'Cambio de estado de pedido',
-            body: `El pedido #${updatedOrder.id} pasó de "${existingOrder.status.name}" a "${updatedOrder.status.name}"`,
-            orderId: updatedOrder.id,
-          });
-        }
+        // Persistencia + WS: Recepción (y el usuario asignado, si lo hay)
+        // reciben la notificación específica de cambio de estado, con su
+        // propio tipo `order_status_changed` para que el panel la muestre
+        // con su etiqueta propia ("Cambio de estado"). `statusId` queda
+        // deliberadamente fuera de `auditChanges`, así que la notificación
+        // genérica `area_user_updated_order` nunca duplica este evento.
+        await this.notifyOrderStatusChanged(
+          updatedOrder.id,
+          existingOrder.status.name,
+          updatedOrder.status.name,
+          updatedOrder.assignedUserId,
+          requestingUser,
+        );
       }
 
       if (Object.keys(auditChanges).length > 0 && requestingUserId) {
@@ -1039,11 +1089,12 @@ export class OrderService {
     const include = { user: ASSIGNED_USER_SELECT };
 
     if (!enabled) {
-      return this.prisma.orderAuditLog.findMany({
+      const entries = await this.prisma.orderAuditLog.findMany({
         where,
         include,
         orderBy: { createdAt: 'desc' },
       });
+      return this.withAuditLabels(entries);
     }
 
     const [data, total] = await this.prisma.$transaction([
@@ -1057,7 +1108,119 @@ export class OrderService {
       this.prisma.orderAuditLog.count({ where }),
     ]);
 
-    return buildPaginatedResult(data, total, page, limit);
+    return buildPaginatedResult(
+      await this.withAuditLabels(data),
+      total,
+      page,
+      limit,
+    );
+  }
+
+  /** Campos del diff de auditoría cuyo valor es el id de otra entidad. */
+  private static readonly AUDIT_ID_FIELDS = {
+    statusId: 'statuses',
+    assignedUserId: 'users',
+    clientId: 'clients',
+  } as const;
+
+  /**
+   * Extrae los ids referenciados por un valor del diff de auditoría. El
+   * `changes` puede venir en forma de diff (`{ campo: { before, after } }`,
+   * acción `updated`) o plano (`{ statusId, round, ... }`, acciones del flujo
+   * de diseño), así que se contemplan las dos.
+   */
+  private collectAuditIds(
+    changes: unknown,
+    buckets: Record<'statuses' | 'users' | 'clients', Set<number>>,
+  ) {
+    if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+      return;
+    }
+    for (const [field, raw] of Object.entries(
+      changes as Record<string, unknown>,
+    )) {
+      const bucket = OrderService.AUDIT_ID_FIELDS[field];
+      if (!bucket) continue;
+      const values =
+        raw && typeof raw === 'object' && !Array.isArray(raw)
+          ? [
+              (raw as { before?: unknown }).before,
+              (raw as { after?: unknown }).after,
+            ]
+          : [raw];
+      for (const value of values) {
+        if (typeof value === 'number' && Number.isInteger(value)) {
+          buckets[bucket].add(value);
+        }
+      }
+    }
+  }
+
+  /**
+   * Agrega a cada entrada de auditoría un diccionario `labels` con los nombres
+   * de los estados / usuarios / clientes referenciados en `changes`, para que
+   * el historial se pueda redactar con nombres y no con ids sin pedir los
+   * catálogos aparte (una sola respuesta, sin roundtrips extra, y consistente
+   * aun para catálogos que el rol de turno no pueda listar). Los ids que ya no
+   * existen (p. ej. un estado eliminado) simplemente no aparecen en el
+   * diccionario y el frontend los degrada.
+   */
+  private async withAuditLabels<T extends { changes: unknown }>(
+    entries: T[],
+  ): Promise<(T & { labels: Record<string, Record<string, string>> })[]> {
+    const buckets = {
+      statuses: new Set<number>(),
+      users: new Set<number>(),
+      clients: new Set<number>(),
+    };
+    for (const entry of entries) {
+      this.collectAuditIds(entry.changes, buckets);
+    }
+
+    const [statuses, users, clients] = await Promise.all([
+      buckets.statuses.size
+        ? this.prisma.status.findMany({
+            where: { id: { in: [...buckets.statuses] } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
+      buckets.users.size
+        ? this.prisma.user.findMany({
+            where: { id: { in: [...buckets.users] } },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              username: true,
+            },
+          })
+        : Promise.resolve([]),
+      buckets.clients.size
+        ? this.prisma.client.findMany({
+            where: { id: { in: [...buckets.clients] } },
+            select: { id: true, first_name: true, last_name: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const labels: Record<string, Record<string, string>> = {
+      statuses: Object.fromEntries(statuses.map((s) => [s.id, s.name])),
+      users: Object.fromEntries(
+        users.map((u) => [
+          u.id,
+          [u.firstName, u.lastName].filter(Boolean).join(' ').trim() ||
+            u.username,
+        ]),
+      ),
+      clients: Object.fromEntries(
+        clients.map((c) => [
+          c.id,
+          [c.first_name, c.last_name].filter(Boolean).join(' ').trim(),
+        ]),
+      ),
+    };
+
+    return entries.map((entry) => ({ ...entry, labels }));
   }
 
   /** Select liviano de una `DesignRevision`, sin los blobs base64 de archivo. */
@@ -1292,9 +1455,7 @@ export class OrderService {
       );
     }
 
-    const statusId = await this.resolveStatusIdByName(
-      STATUS_NAME_AUTORIZADO,
-    );
+    const statusId = await this.resolveStatusIdByName(STATUS_NAME_AUTORIZADO);
 
     const [revision] = await this.prisma.$transaction([
       this.prisma.designRevision.update({

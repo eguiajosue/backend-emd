@@ -12,6 +12,7 @@ import { StatusService } from './status.service';
 import { CreateStatusDto } from './dto/create-status.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
+import { ORDER_VIEWING_ROLES } from 'src/common/constants/order-viewing-roles';
 import { Role } from 'src/common/enums/roles.enum';
 import { ApiTags } from '@nestjs/swagger';
 import {
@@ -33,6 +34,7 @@ export class StatusController {
     return this.statusService.create(createStatusDto);
   }
 
+  @Auth(...ORDER_VIEWING_ROLES)
   @Get()
   @UseInterceptors(InMemoryCacheInterceptor)
   @CacheTtl(STATUS_CACHE_TTL_MS)
@@ -40,6 +42,7 @@ export class StatusController {
     return this.statusService.findAll();
   }
 
+  @Auth(...ORDER_VIEWING_ROLES)
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.statusService.findOne(+id);

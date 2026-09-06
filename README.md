@@ -91,6 +91,28 @@ instancia (se loguea un warning al arrancar). Definiendo `REDIS_URL` se activa
 `@socket.io/redis-adapter` y las notificaciones funcionan con N instancias sin
 tocar código.
 
+## Reporte de errores por email (Resend)
+
+`POST /bug-reports` envía el reporte por email usando [Resend](https://resend.com).
+Si no llega ningún email, revisar en este orden:
+
+| Variable | Obligatoria | Formato / valor esperado |
+| --- | --- | --- |
+| `RESEND_API_KEY` | Sí (sin ella el endpoint responde **503** y no envía nada) | API key de https://resend.com/api-keys, empieza con `re_` |
+| `BUG_REPORT_RECIPIENT` | No (default `eguiajosue@gmail.com`) | Email que recibe los reportes |
+| `BUG_REPORT_FROM` | No (default `EMD Bordados <onboarding@resend.dev>`) | `Nombre <direccion@dominio-verificado>` |
+
+Importante: `onboarding@resend.dev` es el dominio de pruebas compartido de Resend
+y **sólo entrega al email con el que se creó la cuenta de Resend**. Si
+`BUG_REPORT_RECIPIENT` es cualquier otra casilla, Resend rechaza el envío y el
+endpoint responde 502 con el mensaje del proveedor. Para enviar a otra dirección
+hay que verificar un dominio propio en Resend y definir `BUG_REPORT_FROM` con una
+dirección de ese dominio.
+
+Todos los fallos se loguean con el error real del proveedor
+(`BugReportService`) y se devuelven al cliente como error: el endpoint nunca
+responde éxito sin haber enviado el email.
+
 ## Scripts
 
 ```bash

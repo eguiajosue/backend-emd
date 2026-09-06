@@ -1,4 +1,4 @@
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { RolesGuard } from './roles.guard';
 import { Role } from '../enums/roles.enum';
@@ -38,7 +38,23 @@ describe('RolesGuard', () => {
   it('should deny access when the user does not have a required role', () => {
     reflector.getAllAndOverride.mockReturnValue([Role.ADMIN]);
 
-    expect(guard.canActivate(createContext(Role.TALLER))).toBe(false);
+    expect(() => guard.canActivate(createContext(Role.TALLER))).toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('nunca expone el mensaje crudo en inglés "Forbidden resource"', () => {
+    reflector.getAllAndOverride.mockReturnValue([Role.ADMIN]);
+
+    try {
+      guard.canActivate(createContext(Role.TALLER));
+      throw new Error('debería haber lanzado');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ForbiddenException);
+      const message = (error as ForbiddenException).message;
+      expect(message).not.toContain('Forbidden');
+      expect(message).toBe('No tenés permisos para acceder a esta sección');
+    }
   });
 
   it('should allow access when the user has at least one of several required roles (OR)', () => {
@@ -47,5 +63,37 @@ describe('RolesGuard', () => {
     expect(guard.canActivate(createContext(Role.TALLER, Role.BORDADO))).toBe(
       true,
     );
+  });
+
+  it('should allow access for a user holding multiple operational roles (diseno+bordado+dtf)', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      Role.RECEPCION,
+      Role.ADMIN,
+      Role.SUPERUSER,
+      Role.TALLER,
+      Role.DTF,
+      Role.BORDADO,
+      Role.DISENO,
+      Role.LASER,
+      Role.IMPRESIONES,
+    ]);
+
+    expect(
+      guard.canActivate(createContext(Role.DISENO, Role.BORDADO, Role.DTF)),
+    ).toBe(true);
+  });
+
+  it('should deny access when the request user has no roles at all', () => {
+    reflector.getAllAndOverride.mockReturnValue([Role.ADMIN]);
+
+    const context = {
+      getHandler: jest.fn(),
+      getClass: jest.fn(),
+      switchToHttp: () => ({
+        getRequest: () => ({ user: {} }),
+      }),
+    } as unknown as ExecutionContext;
+
+    expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
   });
 });
