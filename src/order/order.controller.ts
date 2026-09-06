@@ -30,8 +30,14 @@ export class OrderController {
 
   @Auth(Role.RECEPCION)
   @Post()
-  create(@Body() createOrderDto: CreateOrderDto) {
-    return this.orderService.create(createOrderDto);
+  create(
+    @Body() createOrderDto: CreateOrderDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    // userId (creador del pedido) lo determina el servidor a partir del
+    // token, nunca el cliente -- evita depender de que el frontend arme
+    // ese valor correctamente y evita que se pueda falsear.
+    return this.orderService.create({ ...createOrderDto, userId: user.sub });
   }
 
   @Auth(

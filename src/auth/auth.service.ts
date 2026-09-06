@@ -88,6 +88,7 @@ export class AuthService {
     return {
       token,
       refreshToken,
+      id: user.id,
       username: user.username,
       first_name: user.firstName,
       last_name: user.lastName,

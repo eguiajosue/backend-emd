@@ -83,10 +83,13 @@ export class CreateOrderDto {
   @MaxLength(200)
   clientNameOverride?: string;
 
-  @IsNotEmpty()
+  // El creador real del pedido lo determina el servidor a partir del token
+  // (ver OrderController.create) -- opcional acá para no romper la
+  // validación si el cliente lo omite o lo manda mal.
+  @IsOptional()
   @IsInt()
   @IsPositive()
-  userId: number;
+  userId?: number;
 
   @IsNotEmpty()
   @IsIn(ORDER_AREAS)
