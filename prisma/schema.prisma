@@ -164,15 +164,23 @@ model InventoryTransaction {
 }
 
 model OrderProduct {
-  orderId   Int // Clave foránea que referencia a Order.
-  productId Int // Clave foránea que referencia a Product.
-  quantity  Int // Cantidad del producto en la orden.
+  id         Int     @id @default(autoincrement()) // Identificador único de la línea de producto del pedido.
+  orderId    Int // Clave foránea que referencia a Order.
+  productId  Int? // Clave foránea opcional que referencia a Product (catálogo complejo, ya no usado desde la UI).
+  customName String? // Nombre libre del producto cuando no viene de un Product registrado (ver OrderProductPreset).
+  quantity   Int // Cantidad del producto en la orden.
 
-  order   Order   @relation(fields: [orderId], references: [id]) // Relación con Order.
-  product Product @relation(fields: [productId], references: [id]) // Relación con Product.
+  order   Order    @relation(fields: [orderId], references: [id]) // Relación con Order.
+  product Product? @relation(fields: [productId], references: [id]) // Relación opcional con Product.
 
-  @@id([orderId, productId]) // Clave primaria compuesta para garantizar unicidad.
+  @@unique([orderId, productId]) // Unicidad para líneas de producto registrado (permite múltiples nulls).
+  @@index([orderId])
   @@index([productId])
+}
+
+model OrderProductPreset {
+  id   Int    @id @default(autoincrement()) // Identificador único del preset.
+  name String @unique // Nombre del producto frecuente (ej. "Lona", "X-Banner").
 }
 
 model AreaVisibilitySetting {

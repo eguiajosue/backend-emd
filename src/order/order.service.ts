@@ -11,6 +11,8 @@ import {
 } from 'src/common/dto/pagination-query.dto';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
 import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
+import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
+import { OrderProductDto } from './dto/create-order.dto';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -40,7 +42,38 @@ export class OrderService {
     private prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
     private readonly areaVisibilityService: AreaVisibilityService,
+    private readonly orderProductPresetService: OrderProductPresetService,
   ) {}
+
+  /** Valida que cada línea de producto tenga productId y/o customName. */
+  private assertOrderProductsValid(orderProducts?: OrderProductDto[]) {
+    if (!orderProducts) {
+      return;
+    }
+    for (const op of orderProducts) {
+      if (!op.productId && !op.customName?.trim()) {
+        throw new HttpException(
+          'Cada producto debe tener un producto registrado o un nombre',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+  }
+
+  /**
+   * Da de alta automáticamente (si no existe) cada `customName` usado como
+   * "producto frecuente", para que el selector del frontend crezca solo.
+   */
+  private async registerCustomNamePresets(orderProducts?: OrderProductDto[]) {
+    if (!orderProducts) {
+      return;
+    }
+    for (const op of orderProducts) {
+      if (op.customName?.trim()) {
+        await this.orderProductPresetService.ensureExists(op.customName);
+      }
+    }
+  }
 
   /**
    * Filtra los pedidos según el área/rol del usuario autenticado.
@@ -148,6 +181,9 @@ export class OrderService {
         this.assertAuthorizationFileSize(authorizationFile);
       }
 
+      this.assertOrderProductsValid(orderProducts);
+      await this.registerCustomNamePresets(orderProducts);
+
       const data: Prisma.OrderCreateInput = {
         description,
         area,
@@ -176,9 +212,10 @@ export class OrderService {
           ? {
               create: orderProducts.map((op) => ({
                 quantity: op.quantity,
-                product: {
-                  connect: { id: op.productId },
-                },
+                customName: op.customName?.trim() || undefined,
+                ...(op.productId && {
+                  product: { connect: { id: op.productId } },
+                }),
               })),
             }
           : undefined,
@@ -224,6 +261,31 @@ export class OrderService {
         };
 
         this.notificationsGateway.notifyNewOrderToAdmin(adminNotificationData);
+
+        if (order.assignedUserId) {
+          // Pedido asignado directamente a un usuario: notificación dirigida
+          // solo a él, además de la del admin.
+          this.notificationsGateway.notifyNewAssignedOrder(
+            order.assignedUserId,
+            {
+              orderId: order.id,
+              description: order.description,
+              area: order.area,
+              deliveryDate: order.deliveryDate,
+              clientName: clientNameForNotification,
+            },
+          );
+        } else if (order.area) {
+          // Pedido sin asignar: queda disponible para cualquiera del área,
+          // se notifica a la room del rol/área correspondiente.
+          this.notificationsGateway.notifyNewOrderToArea(order.area, {
+            orderId: order.id,
+            description: order.description,
+            area: order.area,
+            deliveryDate: order.deliveryDate,
+            clientName: clientNameForNotification,
+          });
+        }
       } else {
         throw new HttpException(
           'Datos incompletos para la notificación',
@@ -388,6 +450,9 @@ export class OrderService {
         this.assertAuthorizationFileSize(authorizationFile);
       }
 
+      this.assertOrderProductsValid(orderProducts);
+      await this.registerCustomNamePresets(orderProducts);
+
       // Obtener la orden actual antes de actualizar
       const existingOrder = await this.prisma.order.findUnique({
         where: { id },
@@ -428,9 +493,10 @@ export class OrderService {
             deleteMany: {}, // Elimina los productos existentes en la orden
             create: orderProducts.map((op) => ({
               quantity: op.quantity,
-              product: {
-                connect: { id: op.productId },
-              },
+              customName: op.customName?.trim() || undefined,
+              ...(op.productId && {
+                product: { connect: { id: op.productId } },
+              }),
             })),
           },
         }),

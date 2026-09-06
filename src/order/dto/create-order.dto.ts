@@ -42,10 +42,16 @@ export class AuthorizationFileDto {
 }
 
 export class OrderProductDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsInt()
   @IsPositive()
-  productId: number;
+  productId?: number;
+
+  @TrimString()
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  customName?: string;
 
   @IsNotEmpty()
   @IsInt()

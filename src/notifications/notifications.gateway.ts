@@ -23,6 +23,15 @@ interface OrderNotificationPayload {
   status?: string;
 }
 
+/** Payload de las notificaciones dirigidas (por usuario o por área) de un pedido nuevo. */
+interface TargetedOrderNotificationPayload {
+  orderId: number;
+  description: string;
+  area: string | null;
+  deliveryDate: Date | null;
+  clientName?: string;
+}
+
 // El decorador se evalúa al cargar el módulo, antes de que exista el
 // ConfigService inyectable, por eso leemos process.env directamente acá
 // (mismo valor que consume ConfigService, con el mismo default).
@@ -61,10 +70,15 @@ export class NotificationsGateway
       const decoded = jwt.verify(
         token.replace('Bearer ', '').trim(),
         this.configService.get<string>('JWT_SECRET'),
-      ) as jwt.JwtPayload & { roles: string[]; username: string };
+      ) as jwt.JwtPayload & { sub: number; roles: string[]; username: string };
 
       const roles = decoded.roles ?? [];
       roles.forEach((role) => client.join(role));
+      // Room individual por usuario, para notificaciones dirigidas
+      // (ej. pedido asignado directamente a él).
+      if (decoded.sub != null) {
+        client.join(`user:${decoded.sub}`);
+      }
       this.logger.log(
         `Client connected: ${decoded.username} with roles ${roles.join(', ')}`,
       );
@@ -89,6 +103,36 @@ export class NotificationsGateway
     } else {
       this.logger.warn('Invalid order data received for notification', order);
     }
+  }
+
+  /**
+   * Pedido creado con `assignedUserId`: notificación dirigida SOLO a ese
+   * usuario, a través de su room individual (`user:${userId}`, unida en
+   * `handleConnection`). No pisa la notificación existente al admin.
+   */
+  notifyNewAssignedOrder(
+    userId: number,
+    order: TargetedOrderNotificationPayload,
+  ) {
+    this.server
+      .to(`user:${userId}`)
+      .emit('newAssignedOrderNotification', order);
+    this.logger.log(
+      `Assigned order notification sent to user ${userId}: Order ID ${order.orderId}`,
+    );
+  }
+
+  /**
+   * Pedido creado SIN `assignedUserId`: queda disponible para cualquiera del
+   * área, se notifica a la room de rol/área correspondiente (las rooms de
+   * rol ya se unen 1:1 con el nombre del área en `handleConnection`).
+   * Reutiliza el evento `newOrderNotification` existente.
+   */
+  notifyNewOrderToArea(area: string, order: TargetedOrderNotificationPayload) {
+    this.server.to(area).emit('newOrderNotification', order);
+    this.logger.log(
+      `New order notification sent to area "${area}": Order ID ${order.orderId}`,
+    );
   }
 
   @SubscribeMessage('orderStatusChangeNotification')

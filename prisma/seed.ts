@@ -88,6 +88,10 @@ const DEMO_CLIENTS = [
   { first_name: 'Jorge', last_name: 'Pérez', phone: '+502 5567-8901', email: 'jorge.perez@modacorporativa.com' },
 ];
 
+// Productos frecuentes iniciales (ver src/order-product-preset). La lista
+// crece sola cuando recepción escribe un customName nuevo al crear un pedido.
+const ORDER_PRODUCT_PRESET_NAMES = ['Lona', 'X-Banner', 'Playera', 'Gorra'];
+
 const DEMO_ORDER_DESCRIPTIONS = [
   '50 camisas bordadas con logo',
   'Chalecos institucionales talla M-L',
@@ -166,6 +170,16 @@ async function main() {
     console.log(
       `  area visibility for "${role}" ready (generalViewEnabled=${setting.generalViewEnabled})`,
     );
+  }
+
+  console.log('Seeding order product presets...');
+  for (const name of ORDER_PRODUCT_PRESET_NAMES) {
+    const preset = await prisma.orderProductPreset.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+    console.log(`  order product preset "${name}" ready (id=${preset.id})`);
   }
 
   console.log('Seeding demo companies, clients and orders...');

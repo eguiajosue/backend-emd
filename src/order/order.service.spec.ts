@@ -2,6 +2,7 @@ import { OrderService } from './order.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
+import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
 
 describe('OrderService - visibilidad por área (findAll)', () => {
   let orderService: OrderService;
@@ -52,6 +53,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
       prisma as unknown as PrismaService,
       { notifyNewOrderToAdmin: jest.fn() } as unknown as NotificationsGateway,
       areaVisibilityService,
+      { ensureExists: jest.fn() } as unknown as OrderProductPresetService,
     );
   });
 
