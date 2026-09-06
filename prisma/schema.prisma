@@ -8,7 +8,7 @@ datasource db {
 }
 
 model Company {
-  id       Int  @id @default(autoincrement()) // Identificador único de la empresa.
+  id       Int     @id @default(autoincrement()) // Identificador único de la empresa.
   name     String  @unique // Nombre de la empresa.
   phone    String? // Número de teléfono de la empresa.
   email    String? // Dirección de correo electrónico de la empresa.
@@ -19,7 +19,7 @@ model Company {
 }
 
 model Client {
-  id         Int  @id @default(autoincrement()) // Identificador único del cliente.
+  id         Int     @id @default(autoincrement()) // Identificador único del cliente.
   companyId  Int? // Clave foránea que referencia a Company.
   first_name String // Nombre del cliente.
   last_name  String? // Apellido del cliente (opcional).
@@ -35,29 +35,33 @@ model Client {
 }
 
 model Role {
-  id    Int  @id @default(autoincrement()) // Identificador único del rol.
+  id    Int    @id @default(autoincrement()) // Identificador único del rol.
   name  String @unique // Nombre del rol (por ejemplo, Admin, User).
   users User[] // Relación muchos a muchos con el modelo User.
 }
 
 model User {
-  id        Int  @id @default(autoincrement()) // Identificador único del usuario.
-  firstName String // Nombre del usuario.
-  lastName  String? // Apellido del usuario.
-  username  String  @unique // Nombre de usuario único para iniciar sesión.
-  password  String // Contraseña del usuario.
+  id              Int     @id @default(autoincrement()) // Identificador único del usuario.
+  firstName       String // Nombre del usuario.
+  lastName        String? // Apellido del usuario.
+  username        String  @unique // Nombre de usuario único para iniciar sesión.
+  password        String // Contraseña del usuario.
   isSharedAccount Boolean @default(false) // Cuenta compartida por varias personas de un área (ej. "Taller"), en vez de una persona.
 
-  roles  Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
-  orders Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
-  assignedOrders Order[] @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
-  logs   Log[] // Relación uno a muchos con Log.
-  orderNotes     OrderNote[] // Notas internas de pedidos escritas por este usuario.
-  orderAuditLogs OrderAuditLog[] // Registros de auditoría de ediciones de pedidos hechas por este usuario.
-  notifications  Notification[] // Notificaciones persistentes dirigidas a este usuario.
-  designRevisionsSent      DesignRevision[] @relation("DesignRevisionSentBy") // Montajes enviados por este usuario (diseñador).
-  designRevisionsFeedback  DesignRevision[] @relation("DesignRevisionFeedbackBy") // Feedback cargado por este usuario (Recepción).
-  designRevisionsApproved  DesignRevision[] @relation("DesignRevisionApprovedBy") // Autorizaciones marcadas por este usuario (Recepción).
+  roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
+  orders                  Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
+  assignedOrders          Order[]                  @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
+  logs                    Log[] // Relación uno a muchos con Log.
+  orderNotes              OrderNote[] // Notas internas de pedidos escritas por este usuario.
+  orderAuditLogs          OrderAuditLog[] // Registros de auditoría de ediciones de pedidos hechas por este usuario.
+  notifications           Notification[] // Notificaciones persistentes dirigidas a este usuario.
+  designRevisionsSent     DesignRevision[]         @relation("DesignRevisionSentBy") // Montajes enviados por este usuario (diseñador).
+  designRevisionsFeedback DesignRevision[]         @relation("DesignRevisionFeedbackBy") // Feedback cargado por este usuario (Recepción).
+  designRevisionsApproved DesignRevision[]         @relation("DesignRevisionApprovedBy") // Autorizaciones marcadas por este usuario (Recepción).
+  chatMemberships         ChatConversationMember[] // Conversaciones de chat en las que participa (incluye monitoreo de admin).
+  chatMessages            ChatMessage[] // Mensajes de chat enviados por este usuario.
+  chatDirectAsUserA       ChatConversation[]       @relation("ChatDirectUserA") // DMs donde es el participante de id menor.
+  chatDirectAsUserB       ChatConversation[]       @relation("ChatDirectUserB") // DMs donde es el participante de id mayor.
 
   themePreference    String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor        String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -68,7 +72,7 @@ model User {
 }
 
 model Status {
-  id                     Int         @id @default(autoincrement()) // Identificador único del estado.
+  id                     Int            @id @default(autoincrement()) // Identificador único del estado.
   name                   String         @unique // Nombre del estado (por ejemplo, Pendiente).
   orders                 Order[] // Relación uno a muchos con Order.
   previousOrderHistories OrderHistory[] @relation("PreviousStatus") // Relación con OrderHistory donde este estado es el estado anterior.
@@ -76,33 +80,33 @@ model Status {
 }
 
 model Order {
-  id           Int    @id @default(autoincrement()) // Identificador único de la orden.
-  clientId     Int? // Clave foránea que referencia a Client (opcional: puede haber cliente libre por nombre).
+  id                 Int       @id @default(autoincrement()) // Identificador único de la orden.
+  clientId           Int? // Clave foránea que referencia a Client (opcional: puede haber cliente libre por nombre).
   clientNameOverride String? // Nombre de cliente escrito a mano cuando no se selecciona un cliente registrado.
-  userId       Int // Clave foránea que referencia al User que creó la orden.
-  assignedUserId Int? // Clave foránea que referencia al User asignado para trabajar la orden.
-  statusId     Int // Clave foránea que referencia a Status (flujo: pendiente→en proceso→terminado→entregado, o el flujo con diseño: en diseño→esperando autorización→cambios solicitados→autorizado→...).
-  area         String? // Departamento DONDE ESTÁ AHORA el pedido (gobierna visibilidad): taller | dtf | bordado | diseno | laser | impresiones.
-  description  String // Descripción de la orden.
-  creationDate DateTime // Fecha en que se creó la orden.
-  deliveryDate DateTime? // Fecha de entrega opcional.
+  userId             Int // Clave foránea que referencia al User que creó la orden.
+  assignedUserId     Int? // Clave foránea que referencia al User asignado para trabajar la orden.
+  statusId           Int // Clave foránea que referencia a Status (flujo: pendiente→en proceso→terminado→entregado, o el flujo con diseño: en diseño→esperando autorización→cambios solicitados→autorizado→...).
+  area               String? // Departamento DONDE ESTÁ AHORA el pedido (gobierna visibilidad): taller | dtf | bordado | diseno | laser | impresiones.
+  description        String // Descripción de la orden.
+  creationDate       DateTime // Fecha en que se creó la orden.
+  deliveryDate       DateTime? // Fecha de entrega opcional.
 
-  requiresDesign  Boolean @default(true) // Si el pedido pasa por la fase de Diseño antes de producción (decidido por Recepción al crear el pedido).
-  productionArea  String? // Área de producción destino una vez autorizado el diseño (uno de ORDER_AREAS salvo 'diseno'). Editable por recepción/admin/superuser y por usuarios con rol diseno.
+  requiresDesign Boolean @default(true) // Si el pedido pasa por la fase de Diseño antes de producción (decidido por Recepción al crear el pedido).
+  productionArea String? // Área de producción destino una vez autorizado el diseño (uno de ORDER_AREAS salvo 'diseno'). Editable por recepción/admin/superuser y por usuarios con rol diseno.
 
   authorizationFileData String? // Contenido en base64 (sin prefijo data:) de la hoja de autorización.
   authorizationFileName String? // Nombre de archivo original de la hoja de autorización.
   authorizationFileMime String? // Mime type de la hoja de autorización (image/png, image/jpeg, application/pdf).
 
-  client        Client?        @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
-  user          User           @relation(fields: [userId], references: [id]) // Relación con User (creador).
-  assignedUser  User?          @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
-  status        Status         @relation(fields: [statusId], references: [id]) // Relación con Status.
-  histories     OrderHistory[] // Relación uno a muchos con OrderHistory.
-  orderProducts OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
-  notes         OrderNote[] // Notas/comentarios internos sobre el pedido.
-  auditLogs     OrderAuditLog[] // Auditoría de ediciones del pedido.
-  notifications Notification[] // Notificaciones persistentes que referencian este pedido.
+  client          Client?          @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
+  user            User             @relation(fields: [userId], references: [id]) // Relación con User (creador).
+  assignedUser    User?            @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
+  status          Status           @relation(fields: [statusId], references: [id]) // Relación con Status.
+  histories       OrderHistory[] // Relación uno a muchos con OrderHistory.
+  orderProducts   OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
+  notes           OrderNote[] // Notas/comentarios internos sobre el pedido.
+  auditLogs       OrderAuditLog[] // Auditoría de ediciones del pedido.
+  notifications   Notification[] // Notificaciones persistentes que referencian este pedido.
   designRevisions DesignRevision[] // Rondas de montaje/feedback/autorización de la fase de Diseño.
 
   @@index([statusId])
@@ -127,12 +131,12 @@ model DesignRevision {
   sentByUserId    Int? // Clave foránea que referencia al User (diseñador) que envió el montaje.
 
   // Feedback del cliente, cargado por Recepción.
-  feedbackText       String? // Texto del feedback del cliente (máx. 2000 caracteres, validado en el DTO).
-  feedbackFileData   String? // Contenido en base64 (sin prefijo data:) del adjunto de feedback.
-  feedbackFileName   String? // Nombre de archivo original del adjunto de feedback.
-  feedbackFileMime   String? // Mime type del adjunto de feedback.
-  feedbackAt         DateTime? // Fecha en que Recepción cargó el feedback.
-  feedbackByUserId   Int? // Clave foránea que referencia al User (Recepción) que cargó el feedback.
+  feedbackText     String? // Texto del feedback del cliente (máx. 2000 caracteres, validado en el DTO).
+  feedbackFileData String? // Contenido en base64 (sin prefijo data:) del adjunto de feedback.
+  feedbackFileName String? // Nombre de archivo original del adjunto de feedback.
+  feedbackFileMime String? // Mime type del adjunto de feedback.
+  feedbackAt       DateTime? // Fecha en que Recepción cargó el feedback.
+  feedbackByUserId Int? // Clave foránea que referencia al User (Recepción) que cargó el feedback.
 
   // Resolución: el cliente autorizó esta ronda.
   approved         Boolean   @default(false) // Si el cliente autorizó esta ronda de montaje.
@@ -180,7 +184,7 @@ model OrderAuditLog {
 }
 
 model OrderHistory {
-  id               Int   @id @default(autoincrement()) // Identificador único del registro de historial de la orden.
+  id               Int      @id @default(autoincrement()) // Identificador único del registro de historial de la orden.
   orderId          Int // Clave foránea que referencia a Order.
   previousStatusId Int // Clave foránea que referencia al estado anterior en Status.
   newStatusId      Int // Clave foránea que referencia al nuevo estado en Status.
@@ -298,7 +302,7 @@ model Notification {
 }
 
 model Log {
-  id      Int   @id @default(autoincrement()) // Identificador único del registro.
+  id      Int      @id @default(autoincrement()) // Identificador único del registro.
   userId  Int // Clave foránea que referencia a User.
   logDate DateTime @default(now()) // Fecha y hora en que se registró la acción.
   action  String // Descripción de la acción realizada.
@@ -307,4 +311,67 @@ model Log {
 
   @@index([userId])
   @@index([logDate])
+}
+
+/// Conversación del chat interno. Dos tipos:
+/// - `area`: canal fijo Recepción ↔ un área operativa (uno por área, `area` único).
+/// - `direct`: mensaje directo 1 a 1 entre dos usuarios (`directUserAId` < `directUserBId`).
+/// La membresía se deriva SIEMPRE de estas columnas + los roles del usuario
+/// (ver ChatService.assertConversationAccess); `ChatConversationMember` es un
+/// cache de la membresía para poder guardar el marcador de leídos.
+model ChatConversation {
+  id            Int       @id @default(autoincrement()) // Identificador único de la conversación.
+  type          String // 'area' | 'direct'.
+  area          String?   @unique // Área operativa del canal (sólo para type='area'): taller | dtf | bordado | diseno | laser | impresiones.
+  directUserAId Int? // Primer participante del DM (el de id menor), sólo para type='direct'.
+  directUserBId Int? // Segundo participante del DM (el de id mayor), sólo para type='direct'.
+  directKey     String?   @unique // Clave canónica "menorId:mayorId" para garantizar un único DM por par de usuarios.
+  createdAt     DateTime  @default(now()) // Fecha de creación de la conversación.
+  lastMessageAt DateTime? // Fecha del último mensaje, para ordenar la lista de conversaciones.
+
+  directUserA User? @relation("ChatDirectUserA", fields: [directUserAId], references: [id])
+  directUserB User? @relation("ChatDirectUserB", fields: [directUserBId], references: [id])
+
+  members  ChatConversationMember[] // Membresías materializadas (marcador de leídos).
+  messages ChatMessage[] // Mensajes de la conversación.
+
+  @@index([type])
+  @@index([lastMessageAt])
+}
+
+/// Membresía materializada de un usuario en una conversación. NO es la fuente
+/// de verdad de la autorización (eso lo resuelve ChatService a partir de los
+/// roles): existe para persistir `lastReadAt` (badge de no leídos) y para
+/// poder mostrar la lista de participantes, marcando a los admin como
+/// monitores.
+model ChatConversationMember {
+  id             Int       @id @default(autoincrement()) // Identificador único de la membresía.
+  conversationId Int // Clave foránea que referencia a ChatConversation.
+  userId         Int // Clave foránea que referencia al User miembro.
+  isMonitor      Boolean   @default(false) // true para admin/superuser: participan para monitoreo, visible en la lista de participantes.
+  lastReadAt     DateTime? // Fecha del último mensaje leído por este usuario en la conversación.
+  joinedAt       DateTime  @default(now()) // Fecha en que se materializó la membresía.
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+/// Mensaje de chat persistido. La entrega en vivo va por WebSocket
+/// (NotificationsGateway.emitChatMessage), igual que las notificaciones:
+/// se persiste y además se emite, para que el historial sobreviva al reload.
+model ChatMessage {
+  id             Int      @id @default(autoincrement()) // Identificador único del mensaje.
+  conversationId Int // Clave foránea que referencia a ChatConversation.
+  senderId       Int // Clave foránea que referencia al User que lo envió.
+  body           String // Contenido del mensaje (texto plano).
+  createdAt      DateTime @default(now()) // Fecha de envío.
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User             @relation(fields: [senderId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
 }

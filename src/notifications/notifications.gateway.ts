@@ -50,6 +50,17 @@ export interface OrderStatusChangedPayload {
   changedAt: Date;
 }
 
+/** Payload de un mensaje de chat entregado en vivo. */
+interface ChatMessagePayload {
+  id: number;
+  conversationId: number;
+  body: string;
+  createdAt: Date;
+  senderId: number;
+  senderUsername: string;
+  senderName: string;
+}
+
 /** Payload de la notificación genérica a Recepción por cambios de un usuario de área. */
 interface AreaUserUpdatedOrderPayload {
   orderId: number;
@@ -218,6 +229,22 @@ export class NotificationsGateway
     this.server.to('recepcion').emit('orderStatusChanged', payload);
     this.logger.log(
       `Order status change notification sent to recepcion: Order ID ${payload.orderId} (${payload.previousStatus} -> ${payload.newStatus})`,
+    );
+  }
+
+  /**
+   * Mensaje de chat en vivo. Los destinatarios los calcula `ChatService` en
+   * el servidor a partir de la membresía de la conversación (nunca del
+   * cliente), y se emiten a la room individual `user:<id>` que cada cliente
+   * une en `handleConnection` tras validar su JWT: por eso no hace falta —
+   * ni se permite — que el cliente se una a rooms de conversación.
+   */
+  emitChatMessage(userIds: number[], message: ChatMessagePayload) {
+    userIds.forEach((userId) => {
+      this.server.to(`user:${userId}`).emit('chatMessage', message);
+    });
+    this.logger.log(
+      `Chat message ${message.id} emitted to ${userIds.length} member(s) of conversation ${message.conversationId}`,
     );
   }
 }
