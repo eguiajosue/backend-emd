@@ -37,6 +37,10 @@ export const envSchema = z.object({
 
   THROTTLE_TTL: z.coerce.number().int().positive().default(60000),
   THROTTLE_LIMIT: z.coerce.number().int().positive().default(60),
+
+  // Envío de reportes de bugs por email (Resend). Opcional: si no está
+  // configurada, el endpoint de reportes responde 503 en vez de fallar.
+  RESEND_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

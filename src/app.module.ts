@@ -23,6 +23,7 @@ import { HealthModule } from './health/health.module';
 import { AreaVisibilityModule } from './area-visibility/area-visibility.module';
 import { OrderProductPresetModule } from './order-product-preset/order-product-preset.module';
 import { PerformanceModule } from './performance/performance.module';
+import { BugReportModule } from './bug-report/bug-report.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 
@@ -63,6 +64,7 @@ import { validateEnv } from './config/env.validation';
     AreaVisibilityModule,
     OrderProductPresetModule,
     PerformanceModule,
+    BugReportModule,
   ],
   providers: [
     {

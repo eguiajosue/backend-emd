@@ -2,6 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateUserPreferencesDto } from './dto/update-user-preferences.dto';
 import { Prisma } from '@prisma/client';
 import * as bcryptjs from 'bcryptjs';
 
@@ -164,6 +165,45 @@ export class UserService {
       }
       if (error.code === 'P2003') {
         throw new HttpException('ID de rol inválido', HttpStatus.BAD_REQUEST);
+      }
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
+    }
+  }
+
+  async getPreferences(id: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        themePreference: true,
+        accentColor: true,
+        languagePreference: true,
+      },
+    });
+    if (!user) {
+      throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
+    }
+    return user;
+  }
+
+  async updatePreferences(
+    id: number,
+    updateUserPreferencesDto: UpdateUserPreferencesDto,
+  ) {
+    try {
+      return await this.prisma.user.update({
+        where: { id },
+        data: { ...updateUserPreferencesDto },
+        select: {
+          themePreference: true,
+          accentColor: true,
+          languagePreference: true,
+        },
+      });
+    } catch (error) {
+      if (error.code === 'P2025') {
+        throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
       }
       // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
       // detalles internos (Prisma, stack) al cliente en producción.

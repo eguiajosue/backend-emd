@@ -51,6 +51,10 @@ model User {
   orders Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
   assignedOrders Order[] @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
   logs   Log[] // Relación uno a muchos con Log.
+
+  themePreference    String? // Preferencia de tema: 'light' | 'dark' | 'system'.
+  accentColor        String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
+  languagePreference String? // Idioma preferido: 'es' | 'en'.
 }
 
 model Status {

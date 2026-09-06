@@ -6,18 +6,46 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateUserPreferencesDto } from './dto/update-user-preferences.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
-import { ApiTags } from '@nestjs/swagger';
+import { AuthGuard } from 'src/common/guards/auth.guard';
+import { ActiveUser } from 'src/common/decorators/active-user.decorator';
+import type { AccessTokenPayload } from 'src/auth/auth.service';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('users')
 @Controller('users')
 export class UserController {
   constructor(private readonly userService: UserService) {}
+
+  // Preferencias propias: cualquier usuario autenticado puede ver/actualizar
+  // las suyas, sin restricción de rol. Definidas antes de ':id' para que
+  // 'me' no sea interpretado como un id.
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard)
+  @Get('me/preferences')
+  getMyPreferences(@ActiveUser() user: AccessTokenPayload) {
+    return this.userService.getPreferences(user.sub);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard)
+  @Patch('me/preferences')
+  updateMyPreferences(
+    @ActiveUser() user: AccessTokenPayload,
+    @Body() updateUserPreferencesDto: UpdateUserPreferencesDto,
+  ) {
+    return this.userService.updatePreferences(
+      user.sub,
+      updateUserPreferencesDto,
+    );
+  }
 
   @Auth(Role.ADMIN, Role.SUPERUSER)
   @Post()

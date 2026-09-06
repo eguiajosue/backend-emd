@@ -42,6 +42,7 @@
     "jsonwebtoken": "^9.0.3",
     "redis": "^6.2.1",
     "reflect-metadata": "^0.2.0",
+    "resend": "^6.26.0",
     "rxjs": "^7.8.1",
     "simple-statistics": "^7.11.0",
     "socket.io": "^4.8.1",
