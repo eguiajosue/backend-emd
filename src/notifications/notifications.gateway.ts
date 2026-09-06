@@ -11,6 +11,10 @@ import { Server, Socket } from 'socket.io';
 import * as jwt from 'jsonwebtoken';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  buildCorsOriginCallback,
+  parseAllowedOrigins,
+} from '../common/cors-origin';
 
 interface OrderNotificationPayload {
   id: number | string;
@@ -19,9 +23,14 @@ interface OrderNotificationPayload {
   status?: string;
 }
 
+// El decorador se evalúa al cargar el módulo, antes de que exista el
+// ConfigService inyectable, por eso leemos process.env directamente acá
+// (mismo valor que consume ConfigService, con el mismo default).
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: buildCorsOriginCallback(
+      parseAllowedOrigins(process.env.FRONTEND_URL || 'http://localhost:3000'),
+    ),
     credentials: true,
   },
 })

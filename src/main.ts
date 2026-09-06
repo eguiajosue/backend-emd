@@ -10,13 +10,10 @@ import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { Env } from './config/env.validation';
-
-function parseOrigins(frontendUrl: string): string[] {
-  return frontendUrl
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-}
+import {
+  buildCorsOriginCallback,
+  parseAllowedOrigins,
+} from './common/cors-origin';
 
 /** Basic auth mínimo para /api/docs cuando SWAGGER_USER/SWAGGER_PASSWORD existen. */
 function basicAuth(user: string, password: string) {
@@ -41,8 +38,11 @@ async function bootstrap() {
   app.use(helmet());
   app.use(compression());
 
+  const allowedOrigins = parseAllowedOrigins(
+    config.get('FRONTEND_URL', { infer: true }),
+  );
   app.enableCors({
-    origin: parseOrigins(config.get('FRONTEND_URL', { infer: true })),
+    origin: buildCorsOriginCallback(allowedOrigins),
     credentials: true,
   });
 
