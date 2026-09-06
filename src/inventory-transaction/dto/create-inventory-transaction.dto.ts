@@ -1,25 +1,37 @@
 import {
+  IsDateString,
+  IsInt,
   IsNotEmpty,
   IsOptional,
+  IsPositive,
   IsString,
-  IsInt,
-  IsDateString,
+  MaxLength,
 } from 'class-validator';
+import {
+  EmptyToUndefined,
+  TrimString,
+} from 'src/common/transformers/empty-to-undefined';
 
 export class CreateInventoryTransactionDto {
   @IsNotEmpty()
   @IsInt()
+  @IsPositive()
   productId: number;
 
+  /** Positivo para entrada, negativo para salida. */
   @IsNotEmpty()
   @IsInt()
-  quantityChange: number; // Positivo para entrada, negativo para salida
+  quantityChange: number;
 
+  @EmptyToUndefined()
   @IsOptional()
   @IsDateString()
-  transactionDate?: Date; // Fecha de la transacción, opcional
+  transactionDate?: string;
 
+  @EmptyToUndefined()
+  @TrimString()
   @IsOptional()
   @IsString()
-  notes?: string; // Notas adicionales
+  @MaxLength(500)
+  notes?: string;
 }

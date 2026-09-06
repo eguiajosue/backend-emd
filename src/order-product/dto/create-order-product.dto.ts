@@ -1,16 +1,18 @@
-import { IsNotEmpty, IsInt, Min, IsNumber } from 'class-validator';
+import { IsInt, IsNotEmpty, IsPositive, Min } from 'class-validator';
 
 export class CreateOrderProductDto {
   @IsNotEmpty()
-  @IsNumber()
+  @IsInt()
+  @IsPositive()
   orderId: number;
 
   @IsNotEmpty()
   @IsInt()
+  @IsPositive()
   productId: number;
 
   @IsNotEmpty()
   @IsInt()
   @Min(1, { message: 'La cantidad debe ser al menos 1' })
-  quantity: number; // Cantidad de producto que se pide
+  quantity: number;
 }

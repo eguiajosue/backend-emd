@@ -1,24 +1,30 @@
 import {
+  IsDateString,
+  IsInt,
   IsNotEmpty,
   IsOptional,
-  IsDateString,
-  IsNumber,
+  IsPositive,
 } from 'class-validator';
+import { EmptyToUndefined } from 'src/common/transformers/empty-to-undefined';
 
 export class CreateOrderHistoryDto {
   @IsNotEmpty()
-  @IsNumber()
+  @IsInt()
+  @IsPositive()
   orderId: number;
 
   @IsNotEmpty()
-  @IsNumber()
+  @IsInt()
+  @IsPositive()
   previousStatusId: number;
 
   @IsNotEmpty()
-  @IsNumber()
+  @IsInt()
+  @IsPositive()
   newStatusId: number;
 
+  @EmptyToUndefined()
   @IsOptional()
   @IsDateString()
-  changeDate?: Date;
+  changeDate?: string;
 }
