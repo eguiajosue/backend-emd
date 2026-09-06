@@ -172,6 +172,12 @@ model OrderProduct {
   @@index([productId])
 }
 
+model AreaVisibilitySetting {
+  id                 Int     @id @default(autoincrement()) // Identificador único de la configuración.
+  role               String  @unique // Rol operativo ('taller' | 'dtf' | 'bordado' | 'diseno' | 'laser' | 'impresiones').
+  generalViewEnabled Boolean @default(true) // Si es true, todos los usuarios del rol ven todos los pedidos de su etapa; si es false, solo ven los pedidos sin asignar o asignados a ellos mismos.
+}
+
 model Log {
   id      Int   @id @default(autoincrement()) // Identificador único del registro.
   userId  Int // Clave foránea que referencia a User.

@@ -20,6 +20,7 @@ import { LogModule } from './log/log.module';
 import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
+import { AreaVisibilityModule } from './area-visibility/area-visibility.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 
@@ -57,6 +58,7 @@ import { validateEnv } from './config/env.validation';
     AuthModule,
     NotificationsModule,
     HealthModule,
+    AreaVisibilityModule,
   ],
   providers: [
     {

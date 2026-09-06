@@ -16,6 +16,18 @@ const ROLE_NAMES = [
   'impresiones',
 ];
 
+// Roles operativos que participan del flujo de producción de pedidos
+// (ver src/order/role-stage-mapping.ts). Cada uno tiene una configuración
+// de visibilidad general en AreaVisibilitySetting.
+const OPERATIONAL_ROLE_NAMES = [
+  'taller',
+  'dtf',
+  'bordado',
+  'diseno',
+  'laser',
+  'impresiones',
+];
+
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
 
@@ -142,6 +154,18 @@ async function main() {
     });
     statuses[name] = status;
     console.log(`  status "${name}" ready (id=${status.id})`);
+  }
+
+  console.log('Seeding area visibility settings...');
+  for (const role of OPERATIONAL_ROLE_NAMES) {
+    const setting = await prisma.areaVisibilitySetting.upsert({
+      where: { role },
+      update: {},
+      create: { role, generalViewEnabled: true },
+    });
+    console.log(
+      `  area visibility for "${role}" ready (generalViewEnabled=${setting.generalViewEnabled})`,
+    );
   }
 
   console.log('Seeding demo companies, clients and orders...');

@@ -9,6 +9,18 @@ import {
   PaginationQueryDto,
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
+import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
+import {
+  isFullVisibilityRole,
+  operationalRolesOf,
+  roleStageMapping,
+} from './role-stage-mapping';
+
+/** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
+export interface RequestingUser {
+  userId: number;
+  roles: string[];
+}
 
 /** Tamaño máximo (en bytes, ya decodificado) para la hoja de autorización. */
 const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
@@ -31,7 +43,71 @@ export class OrderService {
   constructor(
     private prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
+    private readonly areaVisibilityService: AreaVisibilityService,
   ) {}
+
+  /**
+   * Filtra los pedidos según el área/rol del usuario autenticado.
+   *
+   * - admin/superuser/recepcion: ven todo, sin cambios.
+   * - Roles puramente operativos: por cada rol operativo del usuario, si su
+   *   AreaVisibilitySetting.generalViewEnabled es true, todos los pedidos de
+   *   la(s) etapa(s) de ese rol quedan visibles. Si es false, de esa etapa
+   *   solo quedan visibles los pedidos sin asignar (assignedUserId null) o
+   *   asignados al propio usuario. Un pedido cuya etapa no corresponde a
+   *   ningún rol del usuario no se incluye.
+   */
+  private async filterOrdersForUser<
+    T extends { status: { name: string }; assignedUserId: number | null },
+  >(orders: T[], requestingUser?: RequestingUser): Promise<T[]> {
+    if (!requestingUser) {
+      return orders;
+    }
+    const { userId, roles } = requestingUser;
+
+    if (isFullVisibilityRole(roles)) {
+      return orders;
+    }
+
+    const userOperationalRoles = operationalRolesOf(roles);
+    if (userOperationalRoles.length === 0) {
+      // Usuario sin ningún rol operativo ni de visibilidad total: no ve nada.
+      return [];
+    }
+
+    const settings = await this.areaVisibilityService.findAll();
+    const generalViewByRole = new Map(
+      settings.map((s) => [s.role, s.generalViewEnabled]),
+    );
+
+    // Etapas (nombres de status) donde el usuario tiene vista general habilitada.
+    const generalViewStages = new Set<string>();
+    // Todas las etapas alcanzables por los roles del usuario (con o sin vista general).
+    const allUserStages = new Set<string>();
+    for (const role of userOperationalRoles) {
+      const stages = roleStageMapping[role] || [];
+      stages.forEach((stage) => {
+        allUserStages.add(stage);
+        if (generalViewByRole.get(role) !== false) {
+          generalViewStages.add(stage);
+        }
+      });
+    }
+
+    return orders.filter((order) => {
+      const stage = order.status?.name;
+      if (!stage || !allUserStages.has(stage)) {
+        return false;
+      }
+      if (generalViewStages.has(stage)) {
+        return true;
+      }
+      // Etapa con vista general deshabilitada para todos los roles del
+      // usuario que la alcanzan: solo visible si no está asignada o está
+      // asignada a este usuario.
+      return order.assignedUserId == null || order.assignedUserId === userId;
+    });
+  }
 
   /** Valida el tamaño decodificado del archivo de autorización. */
   private assertAuthorizationFileSize(file: AuthorizationFileDto) {
@@ -166,7 +242,7 @@ export class OrderService {
    * pesado en base64 y rompería el rendimiento del listado). En su lugar
    * expone un booleano `hasAuthorizationFile` calculado.
    */
-  async findAll(query?: PaginationQueryDto) {
+  async findAll(query?: PaginationQueryDto, requestingUser?: RequestingUser) {
     try {
       const select = {
         id: true,
@@ -203,18 +279,25 @@ export class OrderService {
 
       if (!enabled) {
         const orders = await this.prisma.order.findMany({ select });
-        return orders.map(toListItem);
+        const visible = await this.filterOrdersForUser(orders, requestingUser);
+        return visible.map(toListItem);
       }
 
-      const [data, total] = await this.prisma.$transaction([
-        this.prisma.order.findMany({
-          select,
-          skip,
-          take: limit,
-          orderBy: { id: 'desc' },
-        }),
-        this.prisma.order.count(),
-      ]);
+      // Con restricción de visibilidad por área, el filtrado depende de
+      // configuración dinámica (AreaVisibilitySetting) y no puede resolverse
+      // enteramente en el WHERE de Prisma sin duplicar esa lógica; con el
+      // volumen actual de datos se trae todo ordenado, se filtra en memoria
+      // y se pagina sobre el resultado ya filtrado.
+      const allMatching = await this.prisma.order.findMany({
+        select,
+        orderBy: { id: 'desc' },
+      });
+      const visible = await this.filterOrdersForUser(
+        allMatching,
+        requestingUser,
+      );
+      const total = visible.length;
+      const data = visible.slice(skip, skip + limit);
 
       return buildPaginatedResult(data.map(toListItem), total, page, limit);
     } catch (error) {

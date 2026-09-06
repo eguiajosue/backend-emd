@@ -14,7 +14,9 @@ import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
+import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AccessTokenPayload } from 'src/auth/auth.service';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -39,8 +41,14 @@ export class OrderController {
     Role.IMPRESIONES,
   )
   @Get()
-  findAll(@Query() query: PaginationQueryDto) {
-    return this.orderService.findAll(query);
+  findAll(
+    @Query() query: PaginationQueryDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.findAll(query, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
   @Auth(
