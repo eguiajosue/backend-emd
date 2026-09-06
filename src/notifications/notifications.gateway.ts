@@ -94,7 +94,14 @@ export class NotificationsGateway
   }
 
   handleConnection(client: Socket) {
-    const token = client.handshake.headers.authorization;
+    // El cliente manda el token de dos formas: `extraHeaders.authorization`
+    // (sólo viaja con el transporte polling) y `auth.token` (el único que
+    // llega cuando el navegador usa `transports: ["websocket"]`, porque el
+    // WebSocket del browser no admite cabeceras propias). Se aceptan las dos.
+    const authPayload = client.handshake.auth as { token?: unknown } | undefined;
+    const token =
+      (typeof authPayload?.token === 'string' ? authPayload.token : undefined) ??
+      client.handshake.headers.authorization;
 
     if (!token) {
       this.logger.warn(`Client disconnected: No token provided`);
