@@ -501,8 +501,12 @@ export class OrderService {
     }
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, requestingUser?: RequestingUser) {
     try {
+      // Corrige un hueco de seguridad: antes cualquier usuario autenticado
+      // con rol operativo podía leer el detalle de cualquier orden por id,
+      // sin importar su área. Mismo criterio de visibilidad que findAll.
+      await this.assertOrderAccess(id, requestingUser);
       const order = await this.prisma.order.findUnique({
         where: { id },
         include: {

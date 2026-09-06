@@ -138,8 +138,11 @@ export class OrderController {
     Role.IMPRESIONES,
   )
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.orderService.findOne(+id);
+  findOne(@Param('id') id: string, @ActiveUser() user: AccessTokenPayload) {
+    return this.orderService.findOne(+id, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
   @Auth(
