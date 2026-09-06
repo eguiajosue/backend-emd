@@ -1,0 +1,3 @@
+ALTER TABLE "User" ADD COLUMN "glassIntensity" INTEGER;
+ALTER TABLE "User" ADD COLUMN "density" TEXT;
+ALTER TABLE "User" ADD COLUMN "hasSeenOnboarding" BOOLEAN;

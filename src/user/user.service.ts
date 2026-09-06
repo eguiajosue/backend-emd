@@ -180,6 +180,9 @@ export class UserService {
         themePreference: true,
         accentColor: true,
         languagePreference: true,
+        glassIntensity: true,
+        density: true,
+        hasSeenOnboarding: true,
       },
     });
     if (!user) {
@@ -200,6 +203,9 @@ export class UserService {
           themePreference: true,
           accentColor: true,
           languagePreference: true,
+          glassIntensity: true,
+          density: true,
+          hasSeenOnboarding: true,
         },
       });
     } catch (error) {
