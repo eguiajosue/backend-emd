@@ -12,8 +12,10 @@ import { CreateProductTypeDto } from './dto/create-product-type.dto';
 import { UpdateProductTypeDto } from './dto/update-product-type.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { ApiTags } from '@nestjs/swagger';
 
 @Auth(Role.ADMIN, Role.RECEPCION)
+@ApiTags('product-types')
 @Controller('product-types')
 export class ProductTypeController {
   constructor(private readonly productTypeService: ProductTypeService) {}

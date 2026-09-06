@@ -12,7 +12,9 @@ import { CreateInventoryTransactionDto } from './dto/create-inventory-transactio
 import { UpdateInventoryTransactionDto } from './dto/update-inventory-transaction.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { ApiTags } from '@nestjs/swagger';
 
+@ApiTags('inventory-transactions')
 @Controller('inventory-transactions')
 export class InventoryTransactionController {
   constructor(

@@ -12,8 +12,10 @@ import { CreateColorDto } from './dto/create-color.dto';
 import { UpdateColorDto } from './dto/update-color.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { ApiTags } from '@nestjs/swagger';
 
 @Auth(Role.ADMIN, Role.RECEPCION)
+@ApiTags('colors')
 @Controller('colors')
 export class ColorController {
   constructor(private readonly colorService: ColorService) {}

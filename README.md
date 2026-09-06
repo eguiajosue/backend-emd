@@ -1,108 +1,100 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Backend EMD Bordados
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+API de gestión de pedidos y producción (NestJS 10 + Prisma 5 + PostgreSQL + Socket.io).
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
-
-## Description
-
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
+## Puesta en marcha
 
 ```bash
-$ npm install
-```
-
-## Compile and run the project
-
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
-```
-
-## Database seed
-
-This project ships a Prisma seed script (`prisma/seed.ts`) that idempotently creates:
-
-- The base roles used by `@Auth(...)` in the controllers (`admin`, `taller`, `recepcion`, `superuser`, `dtf`, `bordado`, `diseno`, `laser`, `impresiones`). A user can hold multiple roles at once (many-to-many `User` <-> `Role`); the JWT payload carries `roles: string[]` and `RolesGuard` grants access if the user has at least one of the roles required by the route.
-- An `admin` user with the password `Admin123!` (override it by setting the `SEED_ADMIN_PASSWORD` env var before seeding).
-
-Run it manually with:
-
-```bash
+npm install
+cp .env.example .env      # completar DATABASE_URL y JWT_SECRET
+npx prisma generate
+npx prisma migrate deploy
 npx prisma db seed
+npm run start:dev
 ```
 
-### Render deploy configuration
+Las variables de entorno se validan al arranque (`src/config/env.validation.ts`,
+zod). Si falta `DATABASE_URL` o `JWT_SECRET` (mínimo 32 caracteres) la app falla
+inmediatamente con un mensaje claro en vez de arrancar rota.
 
-For a fresh database (or after adding new roles), Render's **Start Command** should run migrations and the seed before starting the server. Instead of the current `node dist/main` / `npm run start:prod`, configure Render's Start Command to:
+## Documentación de la API
+
+`GET /api/docs` (Swagger UI) y `GET /api/docs-json` (OpenAPI JSON).
+
+Si se definen `SWAGGER_USER` y `SWAGGER_PASSWORD` quedan protegidos con basic
+auth; si no, son públicos. En producción conviene definirlas: la doc no expone
+datos, pero sí el mapa completo de endpoints.
+
+## Health checks
+
+- `GET /health` — liveness (proceso vivo). Público.
+- `GET /health/ready` — readiness, incluye ping a PostgreSQL. Público.
+
+Configurar `/health` como health check path en Render.
+
+## Autenticación
+
+`POST /auth/login` → `{ token, refreshToken, username, first_name, last_name, roles }`
+
+- `token` es el access token (duración `JWT_ACCESS_EXPIRES_IN`, default `1d`).
+- `refreshToken` (duración `JWT_REFRESH_EXPIRES_IN`, default `7d`) se canjea en
+  `POST /auth/refresh` con body `{ "refreshToken": "..." }`, que devuelve el
+  mismo shape que el login (con roles releídos de la base).
+- Un refresh token NO sirve como access token: los endpoints protegidos lo
+  rechazan con 401.
+
+Cuando el frontend implemente el flujo de refresh, bajar `JWT_ACCESS_EXPIRES_IN`
+a `15m`. Se mantiene en `1d` por defecto para no cerrar sesiones hoy.
+
+Política de contraseñas (alta/edición de usuarios): mínimo 8 caracteres, al
+menos una mayúscula y un número. Los intentos de login fallidos se registran en
+el logger de Nest (usuario inexistente / contraseña incorrecta).
+
+## Paginación (opt-in)
+
+`GET /orders`, `GET /order-histories`, `GET /logs` y `GET /clients` aceptan
+`?page=` y `?limit=`:
+
+- Sin esos query params → **array plano**, igual que siempre (contrato actual).
+- Con alguno de ellos → `{ data, meta: { total, page, limit, totalPages } }`.
+
+Defaults: `page=1`, `limit=50`, máximo `limit=200` (un limit mayor devuelve 400).
+
+## Shape de errores
+
+Todos los errores se normalizan en `AllExceptionsFilter`:
+
+```json
+{
+  "statusCode": 404,
+  "message": "Orden no encontrada",
+  "error": "Not Found",
+  "timestamp": "2026-09-05T23:54:36.082Z",
+  "path": "/orders/999",
+  "requestId": "2e3857ef-..."
+}
+```
+
+En producción nunca se devuelven stack traces ni mensajes internos de Prisma.
+Errores de Prisma no capturados se mapean: P2002 → 409, P2025 → 404,
+P2003 → 400.
+
+## Trazabilidad
+
+Cada request recibe un `x-request-id` (se propaga si el cliente ya lo manda) que
+aparece en el header de respuesta, en los logs HTTP y en el body de error.
+
+## Socket.io y escalado horizontal
+
+Sin `REDIS_URL` el gateway mantiene las rooms en memoria: correcto con UNA
+instancia (se loguea un warning al arrancar). Definiendo `REDIS_URL` se activa
+`@socket.io/redis-adapter` y las notificaciones funcionan con N instancias sin
+tocar código.
+
+## Scripts
 
 ```bash
-npm run start:prod:seeded
+npm run build     # compila
+npm run lint      # eslint --fix
+npm test          # tests unitarios
 ```
-
-This runs `prisma migrate deploy && prisma db seed && node dist/main`, so every deploy makes sure the base roles and the admin user exist without duplicating them on subsequent deploys. This change must be made manually in the Render dashboard (Settings → Start Command); it is not applied automatically by this repository.
-
-## Run tests
-
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).

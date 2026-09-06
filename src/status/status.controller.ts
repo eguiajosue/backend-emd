@@ -12,8 +12,10 @@ import { CreateStatusDto } from './dto/create-status.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { ApiTags } from '@nestjs/swagger';
 
 @Auth(Role.SUPERUSER)
+@ApiTags('status')
 @Controller('status')
 export class StatusController {
   constructor(private readonly statusService: StatusService) {}
