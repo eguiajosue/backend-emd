@@ -19,11 +19,12 @@ export class CreateClientDto {
   @MaxLength(60)
   first_name: string;
 
+  @EmptyToUndefined()
   @TrimString()
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   @MaxLength(60)
-  last_name: string;
+  last_name?: string;
 
   @EmptyToUndefined()
   @IsOptional()

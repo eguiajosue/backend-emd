@@ -22,7 +22,7 @@ model Client {
   id         Int  @id @default(autoincrement()) // Identificador único del cliente.
   companyId  Int? // Clave foránea que referencia a Company.
   first_name String // Nombre del cliente.
-  last_name  String // Apellido del cliente.
+  last_name  String? // Apellido del cliente (opcional).
   phone      String? // Número de teléfono del cliente.
   email      String? // Dirección de correo electrónico del cliente.
   address    String? // Dirección física del cliente.
@@ -48,7 +48,8 @@ model User {
   password  String // Contraseña del usuario.
 
   roles  Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
-  orders Order[] // Relación uno a muchos con Order.
+  orders Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
+  assignedOrders Order[] @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
   logs   Log[] // Relación uno a muchos con Log.
 }
 
@@ -64,6 +65,7 @@ model Order {
   id           Int    @id @default(autoincrement()) // Identificador único de la orden.
   clientId     Int // Clave foránea que referencia a Client.
   userId       Int // Clave foránea que referencia al User que creó la orden.
+  assignedUserId Int? // Clave foránea que referencia al User asignado para trabajar la orden.
   statusId     Int // Clave foránea que referencia a Status.
   description  String // Descripción de la orden.
   creationDate DateTime // Fecha en que se creó la orden.
@@ -74,7 +76,8 @@ model Order {
   authorizationFileMime String? // Mime type de la hoja de autorización (image/png, image/jpeg, application/pdf).
 
   client        Client         @relation(fields: [clientId], references: [id]) // Relación con Client.
-  user          User           @relation(fields: [userId], references: [id]) // Relación con User.
+  user          User           @relation(fields: [userId], references: [id]) // Relación con User (creador).
+  assignedUser  User?          @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
   status        Status         @relation(fields: [statusId], references: [id]) // Relación con Status.
   histories     OrderHistory[] // Relación uno a muchos con OrderHistory.
   orderProducts OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
@@ -82,6 +85,7 @@ model Order {
   @@index([statusId])
   @@index([clientId])
   @@index([userId])
+  @@index([assignedUserId])
   @@index([deliveryDate])
   @@index([creationDate])
 }
