@@ -14,6 +14,7 @@ import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
 import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
 import { OrderProductDto } from './dto/create-order.dto';
 import { CreateOrderNoteDto } from './dto/create-order-note.dto';
+import { NotificationService } from 'src/notification/notification.service';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -61,6 +62,7 @@ export class OrderService {
     private readonly notificationsGateway: NotificationsGateway,
     private readonly areaVisibilityService: AreaVisibilityService,
     private readonly orderProductPresetService: OrderProductPresetService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /** Valida que cada línea de producto tenga productId y/o customName. */
@@ -324,6 +326,15 @@ export class OrderService {
               clientName: clientNameForNotification,
             },
           );
+          // Persistencia: misma notificación, para que no se pierda si el
+          // usuario asignado no tenía sesión abierta en ese momento.
+          await this.notificationService.createNotification({
+            userId: order.assignedUserId,
+            type: 'order_assigned',
+            title: 'Pedido asignado',
+            body: `Se te asignó el pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''}`,
+            orderId: order.id,
+          });
         } else if (order.area) {
           // Pedido sin asignar: queda disponible para cualquiera del área,
           // se notifica a la room del rol/área correspondiente.
@@ -334,6 +345,20 @@ export class OrderService {
             deliveryDate: order.deliveryDate,
             clientName: clientNameForNotification,
           });
+          // Persistencia: mismo criterio que el WS, un registro por cada
+          // usuario que tiene el rol/área del pedido.
+          const areaUserIds = await this.notificationService.userIdsForArea(
+            order.area,
+          );
+          await this.notificationService.createNotificationForUsers(
+            areaUserIds,
+            {
+              type: 'order_assigned',
+              title: 'Nuevo pedido para tu área',
+              body: `Nuevo pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} sin asignar en ${order.area}`,
+              orderId: order.id,
+            },
+          );
         }
       } else {
         throw new HttpException(
@@ -711,6 +736,19 @@ export class OrderService {
         this.notificationsGateway.notifyOrderStatusChange(
           orderStatusChangeData,
         );
+
+        // Persistencia: al usuario asignado (si lo hay) le queda guardado el
+        // cambio de estado, mismo criterio de destinatario que el resto de
+        // las notificaciones dirigidas de este pedido.
+        if (updatedOrder.assignedUserId) {
+          await this.notificationService.createNotification({
+            userId: updatedOrder.assignedUserId,
+            type: 'order_status_changed',
+            title: 'Cambio de estado de pedido',
+            body: `El pedido #${updatedOrder.id} pasó de "${existingOrder.status.name}" a "${updatedOrder.status.name}"`,
+            orderId: updatedOrder.id,
+          });
+        }
       }
 
       if (Object.keys(auditChanges).length > 0 && requestingUserId) {

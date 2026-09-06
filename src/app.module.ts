@@ -19,6 +19,7 @@ import { OrderProductModule } from './order-product/order-product.module';
 import { LogModule } from './log/log.module';
 import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { NotificationModule } from './notification/notification.module';
 import { HealthModule } from './health/health.module';
 import { AreaVisibilityModule } from './area-visibility/area-visibility.module';
 import { OrderProductPresetModule } from './order-product-preset/order-product-preset.module';
@@ -61,6 +62,7 @@ import { validateEnv } from './config/env.validation';
     LogModule,
     AuthModule,
     NotificationsModule,
+    NotificationModule,
     HealthModule,
     AreaVisibilityModule,
     OrderProductPresetModule,

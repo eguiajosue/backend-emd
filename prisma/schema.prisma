@@ -54,6 +54,7 @@ model User {
   logs   Log[] // Relación uno a muchos con Log.
   orderNotes     OrderNote[] // Notas internas de pedidos escritas por este usuario.
   orderAuditLogs OrderAuditLog[] // Registros de auditoría de ediciones de pedidos hechas por este usuario.
+  notifications  Notification[] // Notificaciones persistentes dirigidas a este usuario.
 
   themePreference    String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor        String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -95,6 +96,7 @@ model Order {
   orderProducts OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
   notes         OrderNote[] // Notas/comentarios internos sobre el pedido.
   auditLogs     OrderAuditLog[] // Auditoría de ediciones del pedido.
+  notifications Notification[] // Notificaciones persistentes que referencian este pedido.
 
   @@index([statusId])
   @@index([clientId])
@@ -233,6 +235,23 @@ model AreaVisibilitySetting {
 model AppSetting {
   id                      Int @id @default(1) // Fila única de configuración global (siempre id=1).
   deliveredRetentionHours Int @default(48) // Horas que un pedido "entregado" sigue visible en el tablero en vivo.
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement()) // Identificador único de la notificación.
+  userId    Int // Clave foránea que referencia al User destinatario.
+  type      String // Tipo de notificación (ej. "order_assigned", "order_status_changed"), abierto a futuros tipos.
+  title     String // Título corto de la notificación.
+  body      String? // Cuerpo/detalle opcional de la notificación.
+  orderId   Int? // Clave foránea opcional que referencia a Order, para poder linkear "ver pedido".
+  read      Boolean  @default(false) // Si el usuario ya la marcó como leída.
+  createdAt DateTime @default(now()) // Fecha de creación de la notificación.
+
+  user  User   @relation(fields: [userId], references: [id]) // Relación con User destinatario.
+  order Order? @relation(fields: [orderId], references: [id]) // Relación opcional con Order.
+
+  @@index([userId, read])
+  @@index([orderId])
 }
 
 model Log {
