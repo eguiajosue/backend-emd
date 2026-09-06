@@ -11,7 +11,18 @@ export class GenerateUsernameMiddleware implements NestMiddleware {
   constructor(private userService: UserService) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
-    const { firstName, lastName } = req.body;
+    const { firstName, lastName, isSharedAccount } = req.body;
+
+    // Cuenta compartida de área: el cliente manda su propio `username`
+    // (ej. "taller") en vez de derivarlo de firstName+lastName.
+    if (
+      isSharedAccount === true &&
+      typeof req.body.username === 'string' &&
+      req.body.username.trim() !== ''
+    ) {
+      req.body.username = req.body.username.trim();
+      return next();
+    }
 
     if (!firstName || !lastName) {
       throw new BadRequestException(

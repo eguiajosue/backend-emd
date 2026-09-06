@@ -24,6 +24,22 @@ export interface RequestingUser {
 const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
 
 /**
+ * Id del estado "entregado", sembrado por prisma/seed.ts (ver STATUS_NAMES,
+ * 5to y último status creado en una DB nueva). Coincide con
+ * DELIVERED_STATUS_ID en frontend-emd/src/lib/orderStatus.ts.
+ */
+const DELIVERED_STATUS_ID = 5;
+
+/** Selección liviana del historial, solo lo necesario para calcular `deliveredAt`. */
+const HISTORY_SELECT_FOR_DELIVERED_AT = {
+  select: {
+    changeDate: true,
+    newStatusId: true,
+  },
+  orderBy: { changeDate: 'desc' as const },
+} satisfies { select: Prisma.OrderHistorySelect; orderBy: unknown };
+
+/**
  * Selección liviana del usuario asignado: solo lo necesario para mostrarlo
  * en listados/detalle, sin exponer roles ni otros datos sensibles del User.
  */
@@ -33,6 +49,7 @@ const ASSIGNED_USER_SELECT = {
     firstName: true,
     lastName: true,
     username: true,
+    isSharedAccount: true,
   },
 } satisfies { select: Prisma.UserSelect };
 
@@ -316,47 +333,69 @@ export class OrderService {
    * pesado en base64 y rompería el rendimiento del listado). En su lugar
    * expone un booleano `hasAuthorizationFile` calculado.
    */
+  /** Select común para listados: incluye `histories` liviano para calcular `deliveredAt`. */
+  private orderListSelect() {
+    return {
+      id: true,
+      clientId: true,
+      clientNameOverride: true,
+      userId: true,
+      assignedUserId: true,
+      statusId: true,
+      area: true,
+      description: true,
+      creationDate: true,
+      deliveryDate: true,
+      authorizationFileName: true,
+      client: true,
+      user: true,
+      assignedUser: ASSIGNED_USER_SELECT,
+      status: true,
+      orderProducts: {
+        include: {
+          product: true,
+        },
+      },
+      histories: HISTORY_SELECT_FOR_DELIVERED_AT,
+    } satisfies Prisma.OrderSelect;
+  }
+
+  /**
+   * Fecha (ISO string) del cambio de estado más reciente hacia "entregado",
+   * o null si el pedido nunca llegó a ese estado. `histories` debe venir
+   * ordenado por `changeDate desc` (ver HISTORY_SELECT_FOR_DELIVERED_AT).
+   */
+  private computeDeliveredAt(
+    histories: { changeDate: Date; newStatusId: number }[] | undefined,
+  ): string | null {
+    const delivered = histories?.find(
+      (h) => h.newStatusId === DELIVERED_STATUS_ID,
+    );
+    return delivered ? delivered.changeDate.toISOString() : null;
+  }
+
+  private toListItem = (order: {
+    authorizationFileName: string | null;
+    histories?: { changeDate: Date; newStatusId: number }[];
+    [key: string]: unknown;
+  }) => {
+    const { authorizationFileName, histories, ...rest } = order;
+    return {
+      ...rest,
+      hasAuthorizationFile: authorizationFileName != null,
+      deliveredAt: this.computeDeliveredAt(histories),
+    };
+  };
+
   async findAll(query?: PaginationQueryDto, requestingUser?: RequestingUser) {
     try {
-      const select = {
-        id: true,
-        clientId: true,
-        clientNameOverride: true,
-        userId: true,
-        assignedUserId: true,
-        statusId: true,
-        area: true,
-        description: true,
-        creationDate: true,
-        deliveryDate: true,
-        authorizationFileName: true,
-        client: true,
-        user: true,
-        assignedUser: ASSIGNED_USER_SELECT,
-        status: true,
-        orderProducts: {
-          include: {
-            product: true,
-          },
-        },
-      } satisfies Prisma.OrderSelect;
+      const select = this.orderListSelect();
       const { enabled, page, limit, skip } = resolvePagination(query);
-
-      const toListItem = (order: {
-        authorizationFileName: string | null;
-        [key: string]: unknown;
-      }) => {
-        const { authorizationFileName, ...rest } = order;
-        return {
-          ...rest,
-          hasAuthorizationFile: authorizationFileName != null,
-        };
-      };
 
       if (!enabled) {
         const orders = await this.prisma.order.findMany({ select });
         const visible = await this.filterOrdersForUser(orders, requestingUser);
-        return visible.map(toListItem);
+        return visible.map(this.toListItem);
       }
 
       // Con restricción de visibilidad por área, el filtrado depende de
@@ -375,7 +414,41 @@ export class OrderService {
       const total = visible.length;
       const data = visible.slice(skip, skip + limit);
 
-      return buildPaginatedResult(data.map(toListItem), total, page, limit);
+      return buildPaginatedResult(data.map(this.toListItem), total, page, limit);
+    } catch (error) {
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
+    }
+  }
+
+  /**
+   * Historial completo de pedidos para el tablero: misma visibilidad por
+   * área/rol que `findAll`, pero SIN filtrar por antigüedad de entrega (los
+   * pedidos nunca se borran/ocultan en DB; el "recently delivered" es solo
+   * una ventana de visibilidad del tablero en vivo, resuelta en el cliente
+   * con `deliveredAt` + `GET /settings`). Siempre ordenado por
+   * `creationDate desc` y paginado igual que `findAll`.
+   */
+  async findHistory(query?: PaginationQueryDto, requestingUser?: RequestingUser) {
+    try {
+      const select = this.orderListSelect();
+      // Paginación siempre activa para /orders/history (a diferencia de
+      // `findAll`, que es opt-in): evita traer todo el histórico sin límite.
+      const { page, limit, skip } = resolvePagination(query ?? {});
+
+      const allMatching = await this.prisma.order.findMany({
+        select,
+        orderBy: { creationDate: 'desc' },
+      });
+      const visible = await this.filterOrdersForUser(
+        allMatching,
+        requestingUser,
+      );
+      const total = visible.length;
+      const data = visible.slice(skip, skip + limit);
+
+      return buildPaginatedResult(data.map(this.toListItem), total, page, limit);
     } catch (error) {
       // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
       // detalles internos (Prisma, stack) al cliente en producción.
@@ -397,6 +470,7 @@ export class OrderService {
               product: true,
             },
           },
+          histories: HISTORY_SELECT_FOR_DELIVERED_AT,
         },
       });
       if (!order) {
@@ -407,6 +481,7 @@ export class OrderService {
         authorizationFileData,
         authorizationFileName,
         authorizationFileMime,
+        histories,
         ...rest
       } = order;
 
@@ -419,6 +494,7 @@ export class OrderService {
               dataUrl: `data:${authorizationFileMime};base64,${authorizationFileData}`,
             }
           : null,
+        deliveredAt: this.computeDeliveredAt(histories),
       };
     } catch (error) {
       if (error.status === HttpStatus.NOT_FOUND) {

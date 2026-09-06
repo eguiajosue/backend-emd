@@ -107,6 +107,13 @@ function addDays(base: Date, days: number): Date {
 }
 
 async function main() {
+  console.log('Seeding app settings...');
+  await prisma.appSetting.upsert({
+    where: { id: 1 },
+    update: {},
+    create: { id: 1, deliveredRetentionHours: 48 },
+  });
+
   console.log('Seeding roles...');
   const roles: Record<string, { id: number }> = {};
   for (const name of ROLE_NAMES) {

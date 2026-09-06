@@ -24,6 +24,7 @@ import { AreaVisibilityModule } from './area-visibility/area-visibility.module';
 import { OrderProductPresetModule } from './order-product-preset/order-product-preset.module';
 import { PerformanceModule } from './performance/performance.module';
 import { BugReportModule } from './bug-report/bug-report.module';
+import { SettingsModule } from './settings/settings.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 
@@ -65,6 +66,7 @@ import { validateEnv } from './config/env.validation';
     OrderProductPresetModule,
     PerformanceModule,
     BugReportModule,
+    SettingsModule,
   ],
   providers: [
     {

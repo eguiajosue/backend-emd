@@ -51,6 +51,29 @@ export class OrderController {
     });
   }
 
+  // Definido antes de ':id' para que 'history' no sea interpretado como un id.
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get('history')
+  findHistory(
+    @Query() query: PaginationQueryDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.findHistory(query, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
   @Auth(
     Role.RECEPCION,
     Role.ADMIN,

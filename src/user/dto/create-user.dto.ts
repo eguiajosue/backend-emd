@@ -1,6 +1,7 @@
 import {
   ArrayNotEmpty,
   ArrayUnique,
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -48,4 +49,13 @@ export class CreateUserDto {
   @ArrayUnique()
   @IsInt({ each: true })
   roleIds: number[];
+
+  /**
+   * Cuenta compartida por varias personas de un área (ej. "Taller"). Cuando
+   * es true, el cliente puede mandar un `username` propio en vez de que
+   * GenerateUsernameMiddleware lo derive de firstName+lastName.
+   */
+  @IsOptional()
+  @IsBoolean()
+  isSharedAccount?: boolean;
 }

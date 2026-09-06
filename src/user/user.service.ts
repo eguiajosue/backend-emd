@@ -16,6 +16,7 @@ const USER_SAFE_SELECT = {
   lastName: true,
   username: true,
   roles: true,
+  isSharedAccount: true,
 } satisfies Prisma.UserSelect;
 
 @Injectable()
