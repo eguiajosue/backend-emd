@@ -6,13 +6,17 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
+import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 
+@ApiTags('orders')
 @Controller('orders')
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
@@ -35,8 +39,8 @@ export class OrderController {
     Role.IMPRESIONES,
   )
   @Get()
-  findAll() {
-    return this.orderService.findAll();
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.orderService.findAll(query);
   }
 
   @Auth(

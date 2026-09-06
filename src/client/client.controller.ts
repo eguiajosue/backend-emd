@@ -6,13 +6,17 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
+import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 import { ClientService } from './client.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 
+@ApiTags('clients')
 @Controller('clients')
 export class ClientController {
   constructor(private readonly clientService: ClientService) {}
@@ -25,8 +29,8 @@ export class ClientController {
 
   @Auth(Role.ADMIN, Role.RECEPCION)
   @Get()
-  findAll() {
-    return this.clientService.findAll();
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.clientService.findAll(query);
   }
 
   @Auth(Role.ADMIN, Role.RECEPCION)
