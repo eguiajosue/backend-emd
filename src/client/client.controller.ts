@@ -14,12 +14,18 @@ import { ClientService } from './client.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
+import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AccessTokenPayload } from 'src/auth/auth.service';
+import { OrderService } from 'src/order/order.service';
 
 @ApiTags('clients')
 @Controller('clients')
 export class ClientController {
-  constructor(private readonly clientService: ClientService) {}
+  constructor(
+    private readonly clientService: ClientService,
+    private readonly orderService: OrderService,
+  ) {}
 
   @Auth(Role.RECEPCION)
   @Post()
@@ -49,5 +55,28 @@ export class ClientController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.clientService.remove(+id);
+  }
+
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/orders')
+  findOrders(
+    @Param('id') id: string,
+    @Query() query: PaginationQueryDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.findAllByClient(+id, query, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 }

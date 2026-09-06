@@ -13,6 +13,7 @@ import { AreaVisibilityService } from 'src/area-visibility/area-visibility.servi
 import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
 import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
 import { OrderProductDto } from './dto/create-order.dto';
+import { CreateOrderNoteDto } from './dto/create-order-note.dto';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -151,6 +152,37 @@ export class OrderService {
       // asignada a este usuario.
       return order.assignedUserId == null || order.assignedUserId === userId;
     });
+  }
+
+  /**
+   * Verifica que `requestingUser` tenga acceso al pedido `orderId` (mismo
+   * criterio de visibilidad por área/rol que `findAll`/`findHistory`), y
+   * devuelve el pedido base (`area`, `assignedUserId`) si es así. Usado por
+   * los endpoints de notas y auditoría de un pedido individual.
+   */
+  private async assertOrderAccess(
+    orderId: number,
+    requestingUser?: RequestingUser,
+  ): Promise<{
+    id: number;
+    area: string | null;
+    assignedUserId: number | null;
+  }> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, area: true, assignedUserId: true },
+    });
+    if (!order) {
+      throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
+    }
+    const visible = await this.filterOrdersForUser([order], requestingUser);
+    if (visible.length === 0) {
+      throw new HttpException(
+        'No tenés acceso a este pedido',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return order;
   }
 
   /** Valida el tamaño decodificado del archivo de autorización. */
@@ -414,7 +446,12 @@ export class OrderService {
       const total = visible.length;
       const data = visible.slice(skip, skip + limit);
 
-      return buildPaginatedResult(data.map(this.toListItem), total, page, limit);
+      return buildPaginatedResult(
+        data.map(this.toListItem),
+        total,
+        page,
+        limit,
+      );
     } catch (error) {
       // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
       // detalles internos (Prisma, stack) al cliente en producción.
@@ -430,7 +467,10 @@ export class OrderService {
    * con `deliveredAt` + `GET /settings`). Siempre ordenado por
    * `creationDate desc` y paginado igual que `findAll`.
    */
-  async findHistory(query?: PaginationQueryDto, requestingUser?: RequestingUser) {
+  async findHistory(
+    query?: PaginationQueryDto,
+    requestingUser?: RequestingUser,
+  ) {
     try {
       const select = this.orderListSelect();
       // Paginación siempre activa para /orders/history (a diferencia de
@@ -448,7 +488,12 @@ export class OrderService {
       const total = visible.length;
       const data = visible.slice(skip, skip + limit);
 
-      return buildPaginatedResult(data.map(this.toListItem), total, page, limit);
+      return buildPaginatedResult(
+        data.map(this.toListItem),
+        total,
+        page,
+        limit,
+      );
     } catch (error) {
       // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
       // detalles internos (Prisma, stack) al cliente en producción.
@@ -506,7 +551,11 @@ export class OrderService {
     }
   }
 
-  async update(id: number, updateOrderDto: UpdateOrderDto) {
+  async update(
+    id: number,
+    updateOrderDto: UpdateOrderDto,
+    requestingUserId?: number,
+  ) {
     try {
       const {
         clientId,
@@ -539,6 +588,47 @@ export class OrderService {
 
       if (!existingOrder) {
         throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
+      }
+
+      // Auditoría: diff de los campos "editables" relevantes (no incluye
+      // cambio de estado, que ya queda registrado en OrderHistory).
+      const auditChanges: Record<string, { before: unknown; after: unknown }> =
+        {};
+      const noteChange = (field: string, before: unknown, after: unknown) => {
+        if (after === undefined) return;
+        if (before === (after ?? null)) return;
+        auditChanges[field] = { before: before ?? null, after: after ?? null };
+      };
+      if (description !== undefined) {
+        noteChange('description', existingOrder.description, description);
+      }
+      if (deliveryDate !== undefined) {
+        const newDeliveryDate = deliveryDate ? new Date(deliveryDate) : null;
+        noteChange(
+          'deliveryDate',
+          existingOrder.deliveryDate?.toISOString() ?? null,
+          newDeliveryDate?.toISOString() ?? null,
+        );
+      }
+      if (hasAssignedUserId) {
+        noteChange(
+          'assignedUserId',
+          existingOrder.assignedUserId,
+          assignedUserId ?? null,
+        );
+      }
+      if (area !== undefined) {
+        noteChange('area', existingOrder.area, area);
+      }
+      if (clientId !== undefined) {
+        noteChange('clientId', existingOrder.clientId, clientId);
+      }
+      if (clientNameOverride !== undefined) {
+        noteChange(
+          'clientNameOverride',
+          existingOrder.clientNameOverride,
+          clientNameOverride,
+        );
       }
 
       const data: Prisma.OrderUpdateInput = {
@@ -619,6 +709,17 @@ export class OrderService {
         );
       }
 
+      if (Object.keys(auditChanges).length > 0 && requestingUserId) {
+        await this.prisma.orderAuditLog.create({
+          data: {
+            action: 'updated',
+            changes: auditChanges as Prisma.InputJsonValue,
+            order: { connect: { id } },
+            user: { connect: { id: requestingUserId } },
+          },
+        });
+      }
+
       return updatedOrder;
     } catch (error) {
       if (error.code === 'P2025') {
@@ -636,6 +737,195 @@ export class OrderService {
       // detalles internos (Prisma, stack) al cliente en producción.
       throw error;
     }
+  }
+
+  /** Crea una nota interna en un pedido y notifica al área/usuario asignado. */
+  async createNote(
+    orderId: number,
+    createOrderNoteDto: CreateOrderNoteDto,
+    requestingUser: RequestingUser,
+  ) {
+    const order = await this.assertOrderAccess(orderId, requestingUser);
+
+    const note = await this.prisma.orderNote.create({
+      data: {
+        text: createOrderNoteDto.text,
+        order: { connect: { id: orderId } },
+        user: { connect: { id: requestingUser.userId } },
+      },
+      include: { user: ASSIGNED_USER_SELECT },
+    });
+
+    this.notificationsGateway.notifyOrderNoteAdded(
+      { assignedUserId: order.assignedUserId, area: order.area },
+      {
+        orderId,
+        noteId: note.id,
+        text: note.text,
+        authorUsername: note.user.username,
+        createdAt: note.createdAt,
+      },
+    );
+
+    return note;
+  }
+
+  /** Lista las notas de un pedido, ordenadas por fecha de creación ascendente. */
+  async getNotes(
+    orderId: number,
+    requestingUser: RequestingUser,
+    query?: PaginationQueryDto,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+
+    const { enabled, page, limit, skip } = resolvePagination(query);
+    const where = { orderId };
+    const include = { user: ASSIGNED_USER_SELECT };
+
+    if (!enabled) {
+      return this.prisma.orderNote.findMany({
+        where,
+        include,
+        orderBy: { createdAt: 'asc' },
+      });
+    }
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.orderNote.findMany({
+        where,
+        include,
+        orderBy: { createdAt: 'asc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.orderNote.count({ where }),
+    ]);
+
+    return buildPaginatedResult(data, total, page, limit);
+  }
+
+  /** Lista el log de auditoría de ediciones de un pedido, más reciente primero. */
+  async getAuditLog(
+    orderId: number,
+    requestingUser: RequestingUser,
+    query?: PaginationQueryDto,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+
+    const { enabled, page, limit, skip } = resolvePagination(query);
+    const where = { orderId };
+    const include = { user: ASSIGNED_USER_SELECT };
+
+    if (!enabled) {
+      return this.prisma.orderAuditLog.findMany({
+        where,
+        include,
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.orderAuditLog.findMany({
+        where,
+        include,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.orderAuditLog.count({ where }),
+    ]);
+
+    return buildPaginatedResult(data, total, page, limit);
+  }
+
+  /**
+   * Pedidos de un cliente específico, con el mismo filtrado de
+   * visibilidad por área/rol que `findAll`. Sin paginación forzada:
+   * respeta el mismo contrato opt-in.
+   */
+  async findAllByClient(
+    clientId: number,
+    query?: PaginationQueryDto,
+    requestingUser?: RequestingUser,
+  ) {
+    const select = this.orderListSelect();
+    const { enabled, page, limit, skip } = resolvePagination(query);
+    const where = { clientId };
+
+    if (!enabled) {
+      const orders = await this.prisma.order.findMany({
+        where,
+        select,
+        orderBy: { id: 'desc' },
+      });
+      const visible = await this.filterOrdersForUser(orders, requestingUser);
+      return visible.map(this.toListItem);
+    }
+
+    const allMatching = await this.prisma.order.findMany({
+      where,
+      select,
+      orderBy: { id: 'desc' },
+    });
+    const visible = await this.filterOrdersForUser(allMatching, requestingUser);
+    const total = visible.length;
+    const data = visible.slice(skip, skip + limit);
+    return buildPaginatedResult(data.map(this.toListItem), total, page, limit);
+  }
+
+  /**
+   * Filas planas para exportación CSV, respetando la misma visibilidad por
+   * área/rol y los mismos filtros de fecha/estado/área/cliente que
+   * `findAll` acepta vía query params (aplicados en el controller/frontend
+   * hoy no existen filtros dedicados en `findAll`, así que acá se filtra
+   * directo en el WHERE de Prisma sobre los campos soportados).
+   */
+  async exportOrders(
+    filters: {
+      dateFrom?: string;
+      dateTo?: string;
+      statusId?: number;
+      area?: string;
+      clientId?: number;
+    },
+    requestingUser?: RequestingUser,
+  ) {
+    const where: Prisma.OrderWhereInput = {
+      ...(filters.statusId && { statusId: filters.statusId }),
+      ...(filters.area && { area: filters.area }),
+      ...(filters.clientId && { clientId: filters.clientId }),
+      ...((filters.dateFrom || filters.dateTo) && {
+        creationDate: {
+          ...(filters.dateFrom && { gte: new Date(filters.dateFrom) }),
+          ...(filters.dateTo && { lte: new Date(filters.dateTo) }),
+        },
+      }),
+    };
+
+    const orders = await this.prisma.order.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      include: {
+        client: true,
+        assignedUser: ASSIGNED_USER_SELECT,
+        status: true,
+      },
+    });
+
+    const visible = await this.filterOrdersForUser(orders, requestingUser);
+
+    return visible.map((order) => ({
+      id: order.id,
+      cliente: order.client?.first_name ?? order.clientNameOverride ?? '',
+      area: order.area ?? '',
+      estado: order.status?.name ?? '',
+      fechaCreacion: order.creationDate.toISOString(),
+      fechaEntrega: order.deliveryDate ? order.deliveryDate.toISOString() : '',
+      asignadoA: order.assignedUser
+        ? `${order.assignedUser.firstName} ${order.assignedUser.lastName ?? ''}`.trim()
+        : '',
+      descripcion: order.description ?? '',
+    }));
   }
 
   async remove(id: number) {

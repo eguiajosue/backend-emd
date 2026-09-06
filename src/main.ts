@@ -4,7 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as compression from 'compression';
 import helmet from 'helmet';
-import { NextFunction, Request, Response } from 'express';
+import { json, urlencoded, NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -29,7 +29,16 @@ function basicAuth(user: string, password: string) {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  // bodyParser deshabilitado acá para poder fijar un límite explícito (la
+  // hoja de autorización de un pedido va en base64 dentro del JSON, ver
+  // MAX_AUTHORIZATION_FILE_BYTES en order.service.ts): 10mb cubre eso con
+  // margen sin dejar el límite sin techo (Express default es 100kb).
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: false,
+    bodyParser: false,
+  });
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ extended: true, limit: '10mb' }));
   const config = app.get(ConfigService<Env, true>);
   const logger = new Logger('Bootstrap');
 

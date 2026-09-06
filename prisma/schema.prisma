@@ -52,6 +52,8 @@ model User {
   orders Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
   assignedOrders Order[] @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
   logs   Log[] // Relación uno a muchos con Log.
+  orderNotes     OrderNote[] // Notas internas de pedidos escritas por este usuario.
+  orderAuditLogs OrderAuditLog[] // Registros de auditoría de ediciones de pedidos hechas por este usuario.
 
   themePreference    String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor        String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -88,6 +90,8 @@ model Order {
   status        Status         @relation(fields: [statusId], references: [id]) // Relación con Status.
   histories     OrderHistory[] // Relación uno a muchos con OrderHistory.
   orderProducts OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
+  notes         OrderNote[] // Notas/comentarios internos sobre el pedido.
+  auditLogs     OrderAuditLog[] // Auditoría de ediciones del pedido.
 
   @@index([statusId])
   @@index([clientId])
@@ -96,6 +100,35 @@ model Order {
   @@index([deliveryDate])
   @@index([creationDate])
   @@index([area])
+}
+
+model OrderNote {
+  id        Int      @id @default(autoincrement()) // Identificador único de la nota.
+  orderId   Int // Clave foránea que referencia a Order.
+  userId    Int // Clave foránea que referencia al User autor de la nota.
+  text      String // Contenido de la nota (máx. 2000 caracteres, validado en el DTO).
+  createdAt DateTime @default(now()) // Fecha de creación de la nota.
+
+  order Order @relation(fields: [orderId], references: [id]) // Relación con Order.
+  user  User  @relation(fields: [userId], references: [id]) // Relación con User autor.
+
+  @@index([orderId])
+  @@index([userId])
+}
+
+model OrderAuditLog {
+  id        Int      @id @default(autoincrement()) // Identificador único del registro de auditoría.
+  orderId   Int // Clave foránea que referencia a Order.
+  userId    Int // Clave foránea que referencia al User que realizó la acción.
+  action    String // Acción realizada: "created" | "updated" | etc.
+  changes   Json // Diff de campos: { campo: { before, after } }.
+  createdAt DateTime @default(now()) // Fecha del registro de auditoría.
+
+  order Order @relation(fields: [orderId], references: [id]) // Relación con Order.
+  user  User  @relation(fields: [userId], references: [id]) // Relación con User que hizo el cambio.
+
+  @@index([orderId])
+  @@index([userId])
 }
 
 model OrderHistory {

@@ -32,6 +32,15 @@ interface TargetedOrderNotificationPayload {
   clientName?: string;
 }
 
+/** Payload de la notificación de nota agregada a un pedido. */
+interface OrderNoteNotificationPayload {
+  orderId: number;
+  noteId: number;
+  text: string;
+  authorUsername: string;
+  createdAt: Date;
+}
+
 // El decorador se evalúa al cargar el módulo, antes de que exista el
 // ConfigService inyectable, por eso leemos process.env directamente acá
 // (mismo valor que consume ConfigService, con el mismo default).
@@ -147,5 +156,25 @@ export class NotificationsGateway
         'Invalid order data received for status change notification',
       );
     }
+  }
+
+  /**
+   * Nota agregada a un pedido: se notifica al usuario asignado (room
+   * `user:${assignedUserId}`) si tiene uno, o al área del pedido (misma
+   * room de rol/área que las notificaciones de pedido nuevo) en caso
+   * contrario.
+   */
+  notifyOrderNoteAdded(
+    target: { assignedUserId: number | null; area: string | null },
+    note: OrderNoteNotificationPayload,
+  ) {
+    if (target.assignedUserId) {
+      this.server
+        .to(`user:${target.assignedUserId}`)
+        .emit('orderNoteAdded', note);
+    } else if (target.area) {
+      this.server.to(target.area).emit('orderNoteAdded', note);
+    }
+    this.logger.log(`Note notification sent: Order ID ${note.orderId}`);
   }
 }

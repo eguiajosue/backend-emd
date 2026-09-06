@@ -10,5 +10,6 @@ import { OrderProductPresetModule } from 'src/order-product-preset/order-product
   imports: [PrismaModule, AreaVisibilityModule, OrderProductPresetModule],
   controllers: [OrderController],
   providers: [OrderService, NotificationsGateway],
+  exports: [OrderService],
 })
 export class OrderModule {}
