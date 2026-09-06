@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  UseInterceptors,
 } from '@nestjs/common';
 import { RoleService } from './role.service';
 import { CreateRoleDto } from './dto/create-role.dto';
@@ -13,6 +14,13 @@ import { UpdateRoleDto } from './dto/update-role.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 import { ApiTags } from '@nestjs/swagger';
+import {
+  CacheTtl,
+  InMemoryCacheInterceptor,
+} from 'src/common/interceptors/in-memory-cache.interceptor';
+
+/** Catálogo de roles: cambia rarísima vez, se cachea 5 minutos. */
+const ROLES_CACHE_TTL_MS = 5 * 60 * 1000;
 
 @Auth(Role.ADMIN)
 @ApiTags('roles')
@@ -26,6 +34,8 @@ export class RoleController {
   }
 
   @Get()
+  @UseInterceptors(InMemoryCacheInterceptor)
+  @CacheTtl(ROLES_CACHE_TTL_MS)
   findAll() {
     return this.roleService.findAll();
   }
