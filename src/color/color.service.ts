@@ -21,10 +21,9 @@ export class ColorService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al crear el color: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -36,10 +35,9 @@ export class ColorService {
         },
       });
     } catch (error) {
-      throw new HttpException(
-        'Error al obtener los colores: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -59,10 +57,9 @@ export class ColorService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(
-        'Error al obtener el color: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -85,10 +82,9 @@ export class ColorService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al actualizar el color: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -103,10 +99,9 @@ export class ColorService {
         // Registro no encontrado
         throw new HttpException('Color no encontrado', HttpStatus.NOT_FOUND);
       }
-      throw new HttpException(
-        'Error al eliminar el color: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }

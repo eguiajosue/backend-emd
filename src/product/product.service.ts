@@ -40,10 +40,9 @@ export class ProductService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al crear el producto: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -57,10 +56,9 @@ export class ProductService {
         },
       });
     } catch (error) {
-      throw new HttpException(
-        'Error al obtener los productos: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -82,10 +80,9 @@ export class ProductService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(
-        'Error al obtener el producto: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -136,10 +133,9 @@ export class ProductService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al actualizar el producto: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -154,10 +150,9 @@ export class ProductService {
         // Registro no encontrado
         throw new HttpException('Producto no encontrado', HttpStatus.NOT_FOUND);
       }
-      throw new HttpException(
-        'Error al eliminar el producto: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }

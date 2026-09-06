@@ -20,7 +20,9 @@ export class CompanyService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -28,7 +30,9 @@ export class CompanyService {
     try {
       return await this.prisma.company.findMany();
     } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -45,7 +49,9 @@ export class CompanyService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -66,7 +72,9 @@ export class CompanyService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -80,7 +88,9 @@ export class CompanyService {
       if (error.code === 'P2025') {
         throw new HttpException('Company not found', HttpStatus.NOT_FOUND);
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }

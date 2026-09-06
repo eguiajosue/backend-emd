@@ -3,6 +3,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderHistoryDto } from './dto/create-order-history.dto';
 import { UpdateOrderHistoryDto } from './dto/update-order-history.dto';
 import { Prisma } from '@prisma/client';
+import {
+  buildPaginatedResult,
+  PaginationQueryDto,
+  resolvePagination,
+} from 'src/common/dto/pagination-query.dto';
 
 @Injectable()
 export class OrderHistoryService {
@@ -43,27 +48,41 @@ export class OrderHistoryService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al crear el historial de la orden: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
-  async findAll() {
+  /** Paginación OPT-IN (ver PaginationQueryDto). */
+  async findAll(query?: PaginationQueryDto) {
     try {
-      return await this.prisma.orderHistory.findMany({
-        include: {
-          order: true,
-          previousStatus: true,
-          newStatus: true,
-        },
-      });
+      const include = {
+        order: true,
+        previousStatus: true,
+        newStatus: true,
+      };
+      const { enabled, page, limit, skip } = resolvePagination(query);
+
+      if (!enabled) {
+        return await this.prisma.orderHistory.findMany({ include });
+      }
+
+      const [data, total] = await this.prisma.$transaction([
+        this.prisma.orderHistory.findMany({
+          include,
+          skip,
+          take: limit,
+          orderBy: { changeDate: 'desc' },
+        }),
+        this.prisma.orderHistory.count(),
+      ]);
+
+      return buildPaginatedResult(data, total, page, limit);
     } catch (error) {
-      throw new HttpException(
-        'Error al obtener los historiales de órdenes: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -88,10 +107,9 @@ export class OrderHistoryService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(
-        'Error al obtener el historial de la orden: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -144,10 +162,9 @@ export class OrderHistoryService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al actualizar el historial de la orden: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -165,10 +182,9 @@ export class OrderHistoryService {
           HttpStatus.NOT_FOUND,
         );
       }
-      throw new HttpException(
-        'Error al eliminar el historial de la orden: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }

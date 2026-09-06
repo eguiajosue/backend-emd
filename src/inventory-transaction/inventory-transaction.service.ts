@@ -40,10 +40,9 @@ export class InventoryTransactionService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al crear la transacción de inventario: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -55,10 +54,9 @@ export class InventoryTransactionService {
         },
       });
     } catch (error) {
-      throw new HttpException(
-        'Error al obtener las transacciones de inventario: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -82,10 +80,9 @@ export class InventoryTransactionService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(
-        'Error al obtener la transacción de inventario: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 

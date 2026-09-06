@@ -1,6 +1,11 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateLogDto } from './dto/create-log.dto';
+import {
+  buildPaginatedResult,
+  PaginationQueryDto,
+  resolvePagination,
+} from 'src/common/dto/pagination-query.dto';
 
 @Injectable()
 export class LogService {
@@ -25,28 +30,43 @@ export class LogService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al crear el registro en el log: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
-  async findAll() {
+  /** Paginación OPT-IN (ver PaginationQueryDto). */
+  async findAll(query?: PaginationQueryDto) {
     try {
-      return await this.prisma.log.findMany({
-        include: {
-          user: true, // Incluye los detalles del usuario
+      // No se incluye `password`: sólo los datos del usuario que se muestran.
+      const include = {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
         },
-        orderBy: {
-          logDate: 'desc',
-        },
-      });
+      };
+      const orderBy = { logDate: 'desc' as const };
+      const { enabled, page, limit, skip } = resolvePagination(query);
+
+      if (!enabled) {
+        return await this.prisma.log.findMany({ include, orderBy });
+      }
+
+      const [data, total] = await this.prisma.$transaction([
+        this.prisma.log.findMany({ include, orderBy, skip, take: limit }),
+        this.prisma.log.count(),
+      ]);
+
+      return buildPaginatedResult(data, total, page, limit);
     } catch (error) {
-      throw new HttpException(
-        'Error al obtener los registros del log: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }

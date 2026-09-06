@@ -5,6 +5,18 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { Prisma } from '@prisma/client';
 import * as bcryptjs from 'bcryptjs';
 
+/**
+ * Campos que se devuelven al cliente. Excluye `password` explícitamente:
+ * ningún endpoint debe filtrar el hash de la contraseña.
+ */
+const USER_SAFE_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  username: true,
+  roles: true,
+} satisfies Prisma.UserSelect;
+
 @Injectable()
 export class UserService {
   constructor(private prisma: PrismaService) {}
@@ -31,6 +43,7 @@ export class UserService {
 
       const user = await this.prisma.user.create({
         data,
+        select: USER_SAFE_SELECT,
       });
       return user;
     } catch (error) {
@@ -45,19 +58,22 @@ export class UserService {
         // Fallo en restricción de clave foránea (roleId inválido)
         throw new HttpException('ID de rol inválido', HttpStatus.BAD_REQUEST);
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
   async findAll() {
     try {
       return await this.prisma.user.findMany({
-        include: {
-          roles: true,
-        },
+        select: USER_SAFE_SELECT,
+        orderBy: { id: 'asc' },
       });
     } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -65,9 +81,7 @@ export class UserService {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id },
-        include: {
-          roles: true,
-        },
+        select: USER_SAFE_SELECT,
       });
       if (!user) {
         throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
@@ -77,7 +91,9 @@ export class UserService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -91,7 +107,9 @@ export class UserService {
       });
       return user || null;
     } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -131,6 +149,7 @@ export class UserService {
       const user = await this.prisma.user.update({
         where: { id },
         data,
+        select: USER_SAFE_SELECT,
       });
       return user;
     } catch (error) {
@@ -146,7 +165,9 @@ export class UserService {
       if (error.code === 'P2003') {
         throw new HttpException('ID de rol inválido', HttpStatus.BAD_REQUEST);
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -167,7 +188,9 @@ export class UserService {
       if (error.code === 'P2025') {
         throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }

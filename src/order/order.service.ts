@@ -4,6 +4,11 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Prisma } from '@prisma/client';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import {
+  buildPaginatedResult,
+  PaginationQueryDto,
+  resolvePagination,
+} from 'src/common/dto/pagination-query.dto';
 
 @Injectable()
 export class OrderService {
@@ -103,32 +108,48 @@ export class OrderService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al crear la orden: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
-  async findAll() {
+  /**
+   * Paginación OPT-IN: sin `page`/`limit` devuelve el array plano de siempre.
+   */
+  async findAll(query?: PaginationQueryDto) {
     try {
-      return await this.prisma.order.findMany({
-        include: {
-          client: true,
-          user: true,
-          status: true,
-          orderProducts: {
-            include: {
-              product: true,
-            },
+      const include = {
+        client: true,
+        user: true,
+        status: true,
+        orderProducts: {
+          include: {
+            product: true,
           },
         },
-      });
+      };
+      const { enabled, page, limit, skip } = resolvePagination(query);
+
+      if (!enabled) {
+        return await this.prisma.order.findMany({ include });
+      }
+
+      const [data, total] = await this.prisma.$transaction([
+        this.prisma.order.findMany({
+          include,
+          skip,
+          take: limit,
+          orderBy: { id: 'desc' },
+        }),
+        this.prisma.order.count(),
+      ]);
+
+      return buildPaginatedResult(data, total, page, limit);
     } catch (error) {
-      throw new HttpException(
-        'Error al obtener las órdenes: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -155,10 +176,9 @@ export class OrderService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(
-        'Error al obtener la orden: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -256,10 +276,9 @@ export class OrderService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(
-        'Error al actualizar la orden: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -274,10 +293,9 @@ export class OrderService {
         // Registro no encontrado
         throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
       }
-      throw new HttpException(
-        'Error al eliminar la orden: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }

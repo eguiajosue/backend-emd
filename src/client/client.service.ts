@@ -2,6 +2,11 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
+import {
+  buildPaginatedResult,
+  PaginationQueryDto,
+  resolvePagination,
+} from 'src/common/dto/pagination-query.dto';
 
 @Injectable()
 export class ClientService {
@@ -21,19 +26,37 @@ export class ClientService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
-  async findAll() {
+  /** Paginación OPT-IN (ver PaginationQueryDto). */
+  async findAll(query?: PaginationQueryDto) {
     try {
-      return await this.prisma.client.findMany({
-        include: {
-          company: true,
-        },
-      });
+      const include = { company: true };
+      const { enabled, page, limit, skip } = resolvePagination(query);
+
+      if (!enabled) {
+        return await this.prisma.client.findMany({ include });
+      }
+
+      const [data, total] = await this.prisma.$transaction([
+        this.prisma.client.findMany({
+          include,
+          skip,
+          take: limit,
+          orderBy: { id: 'asc' },
+        }),
+        this.prisma.client.count(),
+      ]);
+
+      return buildPaginatedResult(data, total, page, limit);
     } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -53,7 +76,9 @@ export class ClientService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -76,7 +101,9 @@ export class ClientService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -91,7 +118,9 @@ export class ClientService {
         // Registro no encontrado
         throw new HttpException('Cliente no encontrado', HttpStatus.NOT_FOUND);
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }

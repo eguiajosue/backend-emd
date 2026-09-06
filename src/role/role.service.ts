@@ -21,7 +21,9 @@ export class RoleService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -29,7 +31,9 @@ export class RoleService {
     try {
       return await this.prisma.role.findMany();
     } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -46,7 +50,9 @@ export class RoleService {
       if (error.status === HttpStatus.NOT_FOUND) {
         throw error;
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -69,7 +75,9 @@ export class RoleService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 
@@ -84,7 +92,9 @@ export class RoleService {
         // Registro no encontrado
         throw new HttpException('Rol no encontrado', HttpStatus.NOT_FOUND);
       }
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
+      // detalles internos (Prisma, stack) al cliente en producción.
+      throw error;
     }
   }
 }
