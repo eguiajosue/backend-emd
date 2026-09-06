@@ -34,15 +34,15 @@ export interface RequestingUser {
 const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
 
 /**
- * Id del estado "entregado", sembrado por prisma/seed.ts (ver STATUS_NAMES,
- * 5to y último status creado en una DB nueva). Coincide con
+ * Id del estado "entregado", sembrado por prisma/seed.ts (ver STATUS_SEEDS,
+ * donde se siembra con id explícito = 5). Coincide con
  * DELIVERED_STATUS_ID en frontend-emd/src/lib/orderStatus.ts.
  */
 const DELIVERED_STATUS_ID = 5;
 
 /**
  * Nombres de los estados nuevos del flujo de Diseño, sembrados al final de
- * STATUS_NAMES en prisma/seed.ts (ids 6+ en una DB existente). A diferencia
+ * STATUS_SEEDS en prisma/seed.ts (ids 6+ en una DB existente). A diferencia
  * de DELIVERED_STATUS_ID, estos se resuelven por NOMBRE en runtime (ver
  * `resolveStatusIdByName`) y nunca se hardcodea su id, porque en otra DB
  * donde el seed corra en otro orden esos ids podrían diferir.
@@ -219,7 +219,7 @@ export class OrderService {
   /**
    * Resuelve el id de un `Status` por su nombre exacto, con cache en
    * memoria (los estados no cambian en runtime). Usado para los estados del
-   * flujo de Diseño, sembrados al final de STATUS_NAMES con ids no
+   * flujo de Diseño, sembrados al final de STATUS_SEEDS con ids no
    * hardcodeables (ver comentario sobre STATUS_NAME_* arriba).
    */
   private async resolveStatusIdByName(name: string): Promise<number> {
@@ -713,6 +713,55 @@ export class OrderService {
     });
   }
 
+  /**
+   * Notifica (persistente + WS) un CAMBIO DE ESTADO del pedido con su propio
+   * tipo `order_status_changed`, distinto de la notificación genérica
+   * `area_user_updated_order`, para que el frontend pueda renderizar una
+   * etiqueta específica ("Cambio de estado").
+   *
+   * Destinatarios: todos los usuarios de Recepción (mismo criterio que
+   * `notifyAreaUserUpdatedOrder`) más el usuario asignado al pedido, si lo
+   * hay. La lista se deduplica para que un recepcionista asignado al pedido
+   * no reciba la misma notificación dos veces.
+   */
+  private async notifyOrderStatusChanged(
+    orderId: number,
+    previousStatusName: string,
+    newStatusName: string,
+    assignedUserId: number | null,
+    requestingUser?: RequestingUser,
+  ) {
+    const changedByUsername = requestingUser?.username ?? 'Un usuario';
+    const changedAt = new Date();
+    const title = `Cambio de estado del pedido #${orderId}`;
+    const body = `${changedByUsername} cambió el estado del pedido #${orderId} de "${previousStatusName}" a "${newStatusName}"`;
+
+    const recepcionUserIds =
+      await this.notificationService.userIdsForArea('recepcion');
+    const recipientIds = Array.from(
+      new Set(
+        assignedUserId != null
+          ? [...recepcionUserIds, assignedUserId]
+          : recepcionUserIds,
+      ),
+    );
+
+    await this.notificationService.createNotificationForUsers(recipientIds, {
+      type: 'order_status_changed',
+      title,
+      body,
+      orderId,
+    });
+
+    this.notificationsGateway.notifyOrderStatusChangedToRecepcion({
+      orderId,
+      changedByUsername,
+      previousStatus: previousStatusName,
+      newStatus: newStatusName,
+      changedAt,
+    });
+  }
+
   async update(
     id: number,
     updateOrderDto: UpdateOrderDto,
@@ -899,18 +948,19 @@ export class OrderService {
           orderStatusChangeData,
         );
 
-        // Persistencia: al usuario asignado (si lo hay) le queda guardado el
-        // cambio de estado, mismo criterio de destinatario que el resto de
-        // las notificaciones dirigidas de este pedido.
-        if (updatedOrder.assignedUserId) {
-          await this.notificationService.createNotification({
-            userId: updatedOrder.assignedUserId,
-            type: 'order_status_changed',
-            title: 'Cambio de estado de pedido',
-            body: `El pedido #${updatedOrder.id} pasó de "${existingOrder.status.name}" a "${updatedOrder.status.name}"`,
-            orderId: updatedOrder.id,
-          });
-        }
+        // Persistencia + WS: Recepción (y el usuario asignado, si lo hay)
+        // reciben la notificación específica de cambio de estado, con su
+        // propio tipo `order_status_changed` para que el panel la muestre
+        // con su etiqueta propia ("Cambio de estado"). `statusId` queda
+        // deliberadamente fuera de `auditChanges`, así que la notificación
+        // genérica `area_user_updated_order` nunca duplica este evento.
+        await this.notifyOrderStatusChanged(
+          updatedOrder.id,
+          existingOrder.status.name,
+          updatedOrder.status.name,
+          updatedOrder.assignedUserId,
+          requestingUser,
+        );
       }
 
       if (Object.keys(auditChanges).length > 0 && requestingUserId) {

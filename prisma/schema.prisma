@@ -81,7 +81,7 @@ model Order {
   clientNameOverride String? // Nombre de cliente escrito a mano cuando no se selecciona un cliente registrado.
   userId       Int // Clave foránea que referencia al User que creó la orden.
   assignedUserId Int? // Clave foránea que referencia al User asignado para trabajar la orden.
-  statusId     Int // Clave foránea que referencia a Status (flujo: pendiente→en pruebas→en proceso→terminado→entregado, o el flujo con diseño: en diseño→esperando autorización→cambios solicitados→autorizado→...).
+  statusId     Int // Clave foránea que referencia a Status (flujo: pendiente→en proceso→terminado→entregado, o el flujo con diseño: en diseño→esperando autorización→cambios solicitados→autorizado→...).
   area         String? // Departamento DONDE ESTÁ AHORA el pedido (gobierna visibilidad): taller | dtf | bordado | diseno | laser | impresiones.
   description  String // Descripción de la orden.
   creationDate DateTime // Fecha en que se creó la orden.

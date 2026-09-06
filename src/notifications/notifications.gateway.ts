@@ -41,6 +41,15 @@ interface OrderNoteNotificationPayload {
   createdAt: Date;
 }
 
+/** Payload de la notificación específica a Recepción por cambio de estado de un pedido. */
+export interface OrderStatusChangedPayload {
+  orderId: number;
+  changedByUsername: string;
+  previousStatus: string;
+  newStatus: string;
+  changedAt: Date;
+}
+
 /** Payload de la notificación genérica a Recepción por cambios de un usuario de área. */
 interface AreaUserUpdatedOrderPayload {
   orderId: number;
@@ -196,6 +205,19 @@ export class NotificationsGateway
     this.server.to('recepcion').emit('areaUserUpdatedOrder', payload);
     this.logger.log(
       `Area user update notification sent to recepcion: Order ID ${payload.orderId}`,
+    );
+  }
+
+  /**
+   * Cambio de estado de un pedido, con su propio evento/tipo para que el
+   * panel de notificaciones lo muestre con una etiqueta distinguible
+   * ("Cambio de estado"). Se emite a Recepción (misma room que
+   * `notifyAreaUserUpdatedOrder`) y al usuario asignado, si lo hay.
+   */
+  notifyOrderStatusChangedToRecepcion(payload: OrderStatusChangedPayload) {
+    this.server.to('recepcion').emit('orderStatusChanged', payload);
+    this.logger.log(
+      `Order status change notification sent to recepcion: Order ID ${payload.orderId} (${payload.previousStatus} -> ${payload.newStatus})`,
     );
   }
 }
