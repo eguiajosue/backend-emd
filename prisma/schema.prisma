@@ -29,6 +29,9 @@ model Client {
 
   company Company? @relation(fields: [companyId], references: [id]) // Relación con Company.
   orders  Order[] // Relación uno a muchos con el modelo Order.
+
+  @@index([companyId])
+  @@index([last_name, first_name])
 }
 
 model Role {
@@ -71,6 +74,12 @@ model Order {
   status        Status         @relation(fields: [statusId], references: [id]) // Relación con Status.
   histories     OrderHistory[] // Relación uno a muchos con OrderHistory.
   orderProducts OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
+
+  @@index([statusId])
+  @@index([clientId])
+  @@index([userId])
+  @@index([deliveryDate])
+  @@index([creationDate])
 }
 
 model OrderHistory {
@@ -83,6 +92,11 @@ model OrderHistory {
   order          Order  @relation(fields: [orderId], references: [id]) // Relación con Order.
   previousStatus Status @relation("PreviousStatus", fields: [previousStatusId], references: [id]) // Relación con el estado anterior en Status.
   newStatus      Status @relation("NewStatus", fields: [newStatusId], references: [id]) // Relación con el nuevo estado en Status.
+
+  @@index([orderId])
+  @@index([changeDate])
+  @@index([previousStatusId])
+  @@index([newStatusId])
 }
 
 model ProductType {
@@ -133,6 +147,9 @@ model InventoryTransaction {
   notes           String? // Notas opcionales sobre la transacción.
 
   product Product @relation(fields: [productId], references: [id]) // Relación con Product.
+
+  @@index([productId])
+  @@index([transactionDate])
 }
 
 model OrderProduct {
@@ -144,6 +161,7 @@ model OrderProduct {
   product Product @relation(fields: [productId], references: [id]) // Relación con Product.
 
   @@id([orderId, productId]) // Clave primaria compuesta para garantizar unicidad.
+  @@index([productId])
 }
 
 model Log {
@@ -153,4 +171,7 @@ model Log {
   action  String // Descripción de la acción realizada.
 
   user User @relation(fields: [userId], references: [id]) // Relación con User.
+
+  @@index([userId])
+  @@index([logDate])
 }
