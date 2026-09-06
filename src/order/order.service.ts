@@ -1089,11 +1089,12 @@ export class OrderService {
     const include = { user: ASSIGNED_USER_SELECT };
 
     if (!enabled) {
-      return this.prisma.orderAuditLog.findMany({
+      const entries = await this.prisma.orderAuditLog.findMany({
         where,
         include,
         orderBy: { createdAt: 'desc' },
       });
+      return this.withAuditLabels(entries);
     }
 
     const [data, total] = await this.prisma.$transaction([
@@ -1107,7 +1108,119 @@ export class OrderService {
       this.prisma.orderAuditLog.count({ where }),
     ]);
 
-    return buildPaginatedResult(data, total, page, limit);
+    return buildPaginatedResult(
+      await this.withAuditLabels(data),
+      total,
+      page,
+      limit,
+    );
+  }
+
+  /** Campos del diff de auditoría cuyo valor es el id de otra entidad. */
+  private static readonly AUDIT_ID_FIELDS = {
+    statusId: 'statuses',
+    assignedUserId: 'users',
+    clientId: 'clients',
+  } as const;
+
+  /**
+   * Extrae los ids referenciados por un valor del diff de auditoría. El
+   * `changes` puede venir en forma de diff (`{ campo: { before, after } }`,
+   * acción `updated`) o plano (`{ statusId, round, ... }`, acciones del flujo
+   * de diseño), así que se contemplan las dos.
+   */
+  private collectAuditIds(
+    changes: unknown,
+    buckets: Record<'statuses' | 'users' | 'clients', Set<number>>,
+  ) {
+    if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+      return;
+    }
+    for (const [field, raw] of Object.entries(
+      changes as Record<string, unknown>,
+    )) {
+      const bucket = OrderService.AUDIT_ID_FIELDS[field];
+      if (!bucket) continue;
+      const values =
+        raw && typeof raw === 'object' && !Array.isArray(raw)
+          ? [
+              (raw as { before?: unknown }).before,
+              (raw as { after?: unknown }).after,
+            ]
+          : [raw];
+      for (const value of values) {
+        if (typeof value === 'number' && Number.isInteger(value)) {
+          buckets[bucket].add(value);
+        }
+      }
+    }
+  }
+
+  /**
+   * Agrega a cada entrada de auditoría un diccionario `labels` con los nombres
+   * de los estados / usuarios / clientes referenciados en `changes`, para que
+   * el historial se pueda redactar con nombres y no con ids sin pedir los
+   * catálogos aparte (una sola respuesta, sin roundtrips extra, y consistente
+   * aun para catálogos que el rol de turno no pueda listar). Los ids que ya no
+   * existen (p. ej. un estado eliminado) simplemente no aparecen en el
+   * diccionario y el frontend los degrada.
+   */
+  private async withAuditLabels<T extends { changes: unknown }>(
+    entries: T[],
+  ): Promise<(T & { labels: Record<string, Record<string, string>> })[]> {
+    const buckets = {
+      statuses: new Set<number>(),
+      users: new Set<number>(),
+      clients: new Set<number>(),
+    };
+    for (const entry of entries) {
+      this.collectAuditIds(entry.changes, buckets);
+    }
+
+    const [statuses, users, clients] = await Promise.all([
+      buckets.statuses.size
+        ? this.prisma.status.findMany({
+            where: { id: { in: [...buckets.statuses] } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
+      buckets.users.size
+        ? this.prisma.user.findMany({
+            where: { id: { in: [...buckets.users] } },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              username: true,
+            },
+          })
+        : Promise.resolve([]),
+      buckets.clients.size
+        ? this.prisma.client.findMany({
+            where: { id: { in: [...buckets.clients] } },
+            select: { id: true, first_name: true, last_name: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const labels: Record<string, Record<string, string>> = {
+      statuses: Object.fromEntries(statuses.map((s) => [s.id, s.name])),
+      users: Object.fromEntries(
+        users.map((u) => [
+          u.id,
+          [u.firstName, u.lastName].filter(Boolean).join(' ').trim() ||
+            u.username,
+        ]),
+      ),
+      clients: Object.fromEntries(
+        clients.map((c) => [
+          c.id,
+          [c.first_name, c.last_name].filter(Boolean).join(' ').trim(),
+        ]),
+      ),
+    };
+
+    return entries.map((entry) => ({ ...entry, labels }));
   }
 
   /** Select liviano de una `DesignRevision`, sin los blobs base64 de archivo. */
