@@ -262,10 +262,7 @@ export class OrderService {
     }
     const visible = await this.filterOrdersForUser([order], requestingUser);
     if (visible.length === 0) {
-      throw new HttpException(
-        'Sin acceso a este pedido',
-        HttpStatus.FORBIDDEN,
-      );
+      throw new HttpException('Sin acceso a este pedido', HttpStatus.FORBIDDEN);
     }
     return order;
   }
@@ -592,6 +589,19 @@ export class OrderService {
       deliveryDate: true,
       authorizationFileName: true,
       client: true,
+      // Trabajo de producción partido por área. Va en el LISTADO (no sólo en el
+      // detalle) porque el tablero de producción del frontend agrupa por el
+      // estado de la tarea del área del usuario, no por `statusId`: tras la
+      // autorización el pedido queda en "autorizado" (dato del circuito de
+      // Diseño) mientras cada área arranca su tarea en "pendiente".
+      areaTasks: {
+        select: {
+          id: true,
+          area: true,
+          status: true,
+          assignedUserId: true,
+        },
+      },
       user: CREATOR_USER_SELECT,
       assignedUser: ASSIGNED_USER_SELECT,
       status: true,
@@ -1742,9 +1752,13 @@ export class OrderService {
 
     // Crea las tareas de las áreas que falten (idempotente: las planificadas
     // desde el alta ya existen y no se duplican).
-    await this.orderAreaTaskService.createTasksForAreas(orderId, resolvedAreas, {
-      notify: false,
-    });
+    await this.orderAreaTaskService.createTasksForAreas(
+      orderId,
+      resolvedAreas,
+      {
+        notify: false,
+      },
+    );
 
     // Recién ahora hay trabajo real para producción: se avisa a cada área
     // involucrada, sólo de lo suyo.
