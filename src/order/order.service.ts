@@ -1793,6 +1793,16 @@ export class OrderService {
 
     const visible = await this.filterOrdersForUser(orders, requestingUser);
 
+    if (requestingUser) {
+      await this.auditLogService.record({
+        actorUserId: requestingUser.userId,
+        action: 'order.csv_export',
+        entityType: 'order_export',
+        entityId: 'bulk',
+        metadata: { filters, exportedCount: visible.length },
+      });
+    }
+
     return visible.map((order) => ({
       id: order.id,
       cliente: order.client?.first_name ?? order.clientNameOverride ?? '',
