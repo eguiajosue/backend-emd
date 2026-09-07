@@ -141,6 +141,51 @@ export class OrderAreaTaskService {
     });
   }
 
+  /**
+   * Tareas de producción visibles para un usuario: SOLO las de sus propias
+   * áreas (WORKFLOW.md §4). Si es bordador y laserista ve Bordado y Láser
+   * mezcladas, cada una etiquetada con su área; nunca las de otras.
+   *
+   * Recepción/admin ven todas, porque siguen el avance global.
+   *
+   * El frontend decide con esta misma lista si mostrarlas todas juntas o
+   * agrupadas por área, según la preferencia personal del usuario.
+   */
+  async findForUser(requestingUser: RequestingUser) {
+    const isManager = requestingUser.roles.some((r) =>
+      TASK_MANAGER_ROLES.includes(r),
+    );
+    const ownAreas = requestingUser.roles.filter((role) =>
+      (PRODUCTION_AREAS as readonly string[]).includes(role),
+    );
+
+    // Un usuario sin áreas de producción ni rol de gestión no tiene tareas
+    // propias que ver (ej. sólo Diseño): lista vacía en vez de todas.
+    if (!isManager && ownAreas.length === 0) return [];
+
+    return this.prisma.orderAreaTask.findMany({
+      where: {
+        ...(isManager ? {} : { area: { in: ownAreas } }),
+        // Los pedidos cerrados no ensucian la bandeja de trabajo.
+        order: { statusId: { notIn: [5, 10] } },
+      },
+      select: {
+        ...this.taskSelect(),
+        order: {
+          select: {
+            id: true,
+            description: true,
+            deliveryDate: true,
+            statusId: true,
+            clientNameOverride: true,
+            client: { select: { first_name: true, last_name: true } },
+          },
+        },
+      },
+      orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
   /** Tareas de un pedido, en orden de creación. */
   async findByOrder(orderId: number) {
     return this.prisma.orderAreaTask.findMany({

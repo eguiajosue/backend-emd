@@ -198,6 +198,47 @@ describe('OrderAreaTaskService', () => {
     });
   });
 
+  describe('findForUser', () => {
+    it('un empleado ve sólo las tareas de sus propias áreas', async () => {
+      await service.findForUser({ userId: 3, roles: ['bordado', 'laser'] });
+
+      expect(prisma.orderAreaTask.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            area: { in: ['bordado', 'laser'] },
+          }),
+        }),
+      );
+    });
+
+    it('Recepción ve las tareas de todas las áreas', async () => {
+      await service.findForUser({ userId: 1, roles: ['recepcion'] });
+
+      const args = prisma.orderAreaTask.findMany.mock.calls.at(-1)?.[0] as {
+        where: Record<string, unknown>;
+      };
+      expect(args.where).not.toHaveProperty('area');
+    });
+
+    it('deja fuera los pedidos entregados y cancelados', async () => {
+      await service.findForUser({ userId: 3, roles: ['dtf'] });
+
+      expect(prisma.orderAreaTask.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            order: { statusId: { notIn: [5, 10] } },
+          }),
+        }),
+      );
+    });
+
+    it('sin áreas de producción ni gestión, no hay bandeja', async () => {
+      const result = await service.findForUser({ userId: 4, roles: ['diseno'] });
+
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('assign', () => {
     beforeEach(() => {
       prisma.orderAreaTask.findUnique.mockResolvedValue({

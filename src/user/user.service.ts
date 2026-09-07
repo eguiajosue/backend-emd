@@ -183,6 +183,7 @@ export class UserService {
         glassIntensity: true,
         density: true,
         hasSeenOnboarding: true,
+        areaViewMode: true,
       },
     });
     if (!user) {
@@ -206,6 +207,7 @@ export class UserService {
           glassIntensity: true,
           density: true,
           hasSeenOnboarding: true,
+          areaViewMode: true,
         },
       });
     } catch (error) {

@@ -137,6 +137,29 @@ export class OrderController {
     });
   }
 
+  /**
+   * Bandeja de producción del usuario: sólo las tareas de SUS áreas, cada una
+   * etiquetada con la suya (WORKFLOW.md §4). Definido antes de ':id' para que
+   * "my-area-tasks" no se interprete como un id de pedido.
+   */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get('my-area-tasks')
+  getMyAreaTasks(@ActiveUser() user: AccessTokenPayload) {
+    return this.orderAreaTaskService.findForUser({
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
   // Definido antes de ':id' para que 'export' no sea interpretado como un id.
   @Auth(Role.ADMIN, Role.SUPERUSER, Role.RECEPCION)
   @Get('export')

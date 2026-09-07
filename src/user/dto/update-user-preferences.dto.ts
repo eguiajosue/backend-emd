@@ -52,4 +52,12 @@ export class UpdateUserPreferencesDto {
   @IsOptional()
   @IsBoolean()
   hasSeenOnboarding?: boolean;
+
+  // Cómo prefiere ver este usuario sus tareas de producción: todas juntas
+  // etiquetadas por área, o separadas por área. Es preferencia personal, no la
+  // impone el admin (WORKFLOW.md §4).
+  @ApiPropertyOptional({ enum: ['unified', 'split'] })
+  @IsOptional()
+  @IsIn(['unified', 'split'])
+  areaViewMode?: string;
 }

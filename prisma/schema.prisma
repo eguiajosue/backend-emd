@@ -70,6 +70,7 @@ model User {
   glassIntensity     Int? // Intensidad del efecto Liquid Glass, 0-100.
   density            String? // Densidad de UI: 'comfortable' | 'compact'.
   hasSeenOnboarding  Boolean? // Si ya completó/cerró el tour de onboarding.
+  areaViewMode       String? // Cómo ver las tareas de producción: 'unified' (todo junto, etiquetado por área) | 'split' (una vista por área). Preferencia personal, ver WORKFLOW.md §4.
 }
 
 model Status {
