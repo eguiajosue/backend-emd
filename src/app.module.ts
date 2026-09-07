@@ -27,6 +27,7 @@ import { PerformanceModule } from './performance/performance.module';
 import { BugReportModule } from './bug-report/bug-report.module';
 import { SettingsModule } from './settings/settings.module';
 import { ChatModule } from './chat/chat.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 
@@ -71,6 +72,7 @@ import { validateEnv } from './config/env.validation';
     BugReportModule,
     SettingsModule,
     ChatModule,
+    AuditLogModule,
   ],
   providers: [
     {
