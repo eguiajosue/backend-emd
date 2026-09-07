@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcryptjs from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 
 const prisma = new PrismaClient();
 
@@ -26,6 +27,27 @@ const OPERATIONAL_ROLE_NAMES = [
   'diseno',
   'laser',
   'impresiones',
+];
+
+/**
+ * Cuentas compartidas de área (`isSharedAccount`).
+ *
+ * Son el responsable por defecto de cada tarea de producción y lo que en el
+ * selector de asignación aparece como "cualquiera del área" — sin ellas, un
+ * pedido con montaje no ofrece "Cualquier diseñador" y las tareas nacen sin
+ * responsable (ver WORKFLOW.md §1 y §3).
+ *
+ * El `username` es el nombre del rol, igual que espera
+ * GenerateUsernameMiddleware para este tipo de cuenta. El nombre visible va
+ * sin prefijo: el frontend ya antepone "Área:" al mostrarlas.
+ */
+const AREA_ACCOUNT_SEEDS: { role: string; username: string; label: string }[] = [
+  { role: 'diseno', username: 'diseno', label: 'Diseño' },
+  { role: 'taller', username: 'taller', label: 'Taller' },
+  { role: 'dtf', username: 'dtf', label: 'DTF' },
+  { role: 'bordado', username: 'bordado', label: 'Bordado' },
+  { role: 'laser', username: 'laser', label: 'Láser' },
+  { role: 'impresiones', username: 'impresiones', label: 'Impresiones' },
 ];
 
 const ADMIN_USERNAME = 'admin';
@@ -168,6 +190,45 @@ async function main() {
       },
     });
     console.log(`  admin user created (id=${admin.id})`);
+  }
+
+  console.log('Seeding area shared accounts...');
+  // Sin SEED_AREA_PASSWORD la contraseña es aleatoria y no se imprime: estas
+  // cuentas existen para asignar trabajo, no para iniciar sesión. Sembrar una
+  // contraseña conocida dejaría seis credenciales adivinables en producción.
+  // Si alguien necesita entrar como el área, se le asigna una desde Usuarios.
+  const areaPasswordFromEnv = process.env.SEED_AREA_PASSWORD;
+  for (const { role, username, label } of AREA_ACCOUNT_SEEDS) {
+    const existing = await prisma.user.findUnique({ where: { username } });
+
+    if (existing) {
+      // Idempotente y no destructivo: sólo garantiza la marca y el rol, nunca
+      // pisa la contraseña ni el nombre que alguien haya editado a mano.
+      await prisma.user.update({
+        where: { username },
+        data: {
+          isSharedAccount: true,
+          roles: { connect: [{ id: roles[role].id }] },
+        },
+      });
+      console.log(`  area account "${username}" ready (id=${existing.id})`);
+      continue;
+    }
+
+    const password = await bcryptjs.hash(
+      areaPasswordFromEnv || randomBytes(32).toString('hex'),
+      10,
+    );
+    const created = await prisma.user.create({
+      data: {
+        firstName: label,
+        username,
+        password,
+        isSharedAccount: true,
+        roles: { connect: [{ id: roles[role].id }] },
+      },
+    });
+    console.log(`  area account "${username}" created (id=${created.id})`);
   }
 
   console.log('Seeding statuses...');
