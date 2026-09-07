@@ -12,6 +12,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { Env } from './config/env.validation';
 import {
   buildCorsOriginCallback,
+  isOriginAllowed,
   parseAllowedOrigins,
 } from './common/cors-origin';
 
@@ -75,6 +76,36 @@ async function bootstrap() {
   const allowedOrigins = parseAllowedOrigins(
     config.get('FRONTEND_URL', { infer: true }),
   );
+  // Diagnóstico de CORS, ANTES del middleware de cors.
+  //
+  // El paquete `cors` no responde el preflight cuando el callback de origin
+  // devuelve false: llama a next() y el OPTIONS termina cayendo en el router,
+  // que responde `404: Cannot OPTIONS /orders`. Eso oculta la causa real (un
+  // origin no permitido) detrás de un 404 que parece un endpoint faltante y,
+  // del lado del navegador, se ve como "no se puede conectar al servidor".
+  // Acá se corta antes: 403 explícito y un log que nombra el origin rechazado.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const origin = req.headers.origin;
+    if (!origin || isOriginAllowed(origin, allowedOrigins)) return next();
+
+    logger.warn(
+      `CORS: origin no permitido "${origin}" (${req.method} ${req.originalUrl}). ` +
+        `Agregalo a FRONTEND_URL (lista separada por comas). Permitidos: ${
+          allowedOrigins.join(', ') || '(ninguno)'
+        } + *.vercel.app del proyecto.`,
+    );
+
+    if (req.method === 'OPTIONS') {
+      res.status(403).json({
+        statusCode: 403,
+        message: `Origin no permitido por CORS: ${origin}`,
+        error: 'Forbidden',
+      });
+      return;
+    }
+    next();
+  });
+
   app.enableCors({
     origin: buildCorsOriginCallback(allowedOrigins),
     credentials: true,
@@ -104,9 +135,13 @@ async function bootstrap() {
     await redisAdapter.connect();
     app.useWebSocketAdapter(redisAdapter);
   } else {
-    logger.warn(
-      'REDIS_URL no definida: Socket.io funciona en memoria. Válido con UNA sola instancia; ' +
-        'si se escala horizontalmente, las notificaciones no llegarán a los clientes conectados a otras instancias.',
+    // No es un warning: correr con una sola instancia es la configuración
+    // soportada hoy (Render arranca con WEB_CONCURRENCY=1). Sólo deja
+    // constancia de la condición que habría que revisar al escalar.
+    logger.log(
+      'Socket.io en memoria (sin REDIS_URL). Correcto con UNA sola instancia; ' +
+        'al escalar horizontalmente hace falta REDIS_URL para que las notificaciones ' +
+        'lleguen a los clientes conectados a otras instancias.',
     );
   }
 

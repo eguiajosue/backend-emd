@@ -30,6 +30,7 @@ import { ChatModule } from './chat/chat.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { validateEnv } from './config/env.validation';
       useClass: ThrottlerGuard,
     },
   ],
+  controllers: [AppController],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
