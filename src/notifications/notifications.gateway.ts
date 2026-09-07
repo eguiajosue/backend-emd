@@ -1,9 +1,7 @@
 import {
-  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
   OnGatewayInit,
-  SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
@@ -131,7 +129,21 @@ export class NotificationsGateway
       const decoded = jwt.verify(
         token.replace('Bearer ', '').trim(),
         this.configService.get<string>('JWT_SECRET'),
-      ) as jwt.JwtPayload & { sub: number; roles: string[]; username: string };
+      ) as jwt.JwtPayload & {
+        sub: number;
+        roles: string[];
+        username: string;
+        type?: string;
+      };
+
+      // Mismo criterio que AuthGuard: un refresh token es sólo para canjear
+      // por un access token, no habilita sesión (acá equivaldría a un canal
+      // de notificaciones que sobrevive 7 días a cualquier revocación).
+      if (decoded.type === 'refresh') {
+        this.logger.warn('Client disconnected: refresh token no habilitado');
+        client.disconnect();
+        return;
+      }
 
       const roles = decoded.roles ?? [];
       roles.forEach((role) => client.join(role));
@@ -154,8 +166,13 @@ export class NotificationsGateway
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
-  @SubscribeMessage('newOrderNotification')
-  notifyNewOrderToAdmin(@MessageBody() order: OrderNotificationPayload) {
+  /**
+   * Sin `@SubscribeMessage`: este método lo llama SOLO el servidor
+   * (`OrderService.create`). Estando suscrito, cualquier cliente conectado
+   * podía emitir `newOrderNotification` y hacer que el backend le reenviara a
+   * la room `admin` una notificación de un pedido inventado.
+   */
+  notifyNewOrderToAdmin(order: OrderNotificationPayload) {
     this.logger.debug('Order data received for notification:', order);
 
     if (order && order.id && order.clientName && order.createdBy) {
@@ -196,8 +213,12 @@ export class NotificationsGateway
     );
   }
 
-  @SubscribeMessage('orderStatusChangeNotification')
-  notifyOrderStatusChange(@MessageBody() order: OrderNotificationPayload) {
+  /**
+   * Igual que `notifyNewOrderToAdmin`: emisor server-side
+   * (`OrderService.update`). Suscrito era peor todavía, porque el reenvío es
+   * un broadcast a TODOS los clientes.
+   */
+  notifyOrderStatusChange(order: OrderNotificationPayload) {
     if (order && order.id && order.status) {
       this.server.emit('orderStatusChangeNotification', order);
       this.logger.log(

@@ -101,6 +101,14 @@ const ASSIGNED_USER_SELECT = {
   },
 } satisfies { select: Prisma.UserSelect };
 
+/**
+ * Selección del usuario CREADOR del pedido. Antes se incluía con `user: true`,
+ * que arrastra todos los escalares del modelo -- incluido el hash de
+ * `password` -- a cada listado y detalle de pedido. El creador sólo se muestra
+ * por nombre, así que se acota a los mismos campos que el asignado.
+ */
+const CREATOR_USER_SELECT = ASSIGNED_USER_SELECT;
+
 @Injectable()
 export class OrderService {
   /** Cache en memoria de id de Status por nombre (ver `resolveStatusIdByName`). */
@@ -436,7 +444,7 @@ export class OrderService {
         data,
         include: {
           client: true,
-          user: true,
+          user: CREATOR_USER_SELECT,
           assignedUser: ASSIGNED_USER_SELECT,
           status: true,
           orderProducts: {
@@ -584,7 +592,7 @@ export class OrderService {
       deliveryDate: true,
       authorizationFileName: true,
       client: true,
-      user: true,
+      user: CREATOR_USER_SELECT,
       assignedUser: ASSIGNED_USER_SELECT,
       status: true,
       orderProducts: {
@@ -715,7 +723,7 @@ export class OrderService {
         where: { id },
         include: {
           client: true,
-          user: true,
+          user: CREATOR_USER_SELECT,
           assignedUser: ASSIGNED_USER_SELECT,
           status: true,
           orderProducts: {
@@ -1021,7 +1029,7 @@ export class OrderService {
         data,
         include: {
           client: true,
-          user: true,
+          user: CREATOR_USER_SELECT,
           assignedUser: ASSIGNED_USER_SELECT,
           status: true,
           orderProducts: {

@@ -9,6 +9,29 @@ import {
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
 
+/**
+ * Pedido embebido en el historial, acotado.
+ *
+ * Con `order: true` Prisma trae TODOS los escalares del pedido, incluida
+ * `authorizationFileData`: la hoja de autorización entera en base64 viajaba en
+ * cada item de `GET /order-histories`, visible para cualquier rol operativo y
+ * multiplicando el peso de la respuesta.
+ */
+const ORDER_SELECT_FOR_HISTORY = {
+  select: {
+    id: true,
+    clientId: true,
+    clientNameOverride: true,
+    userId: true,
+    assignedUserId: true,
+    statusId: true,
+    area: true,
+    description: true,
+    creationDate: true,
+    deliveryDate: true,
+  },
+} satisfies { select: Prisma.OrderSelect };
+
 @Injectable()
 export class OrderHistoryService {
   constructor(private prisma: PrismaService) {}
@@ -34,7 +57,7 @@ export class OrderHistoryService {
       const orderHistory = await this.prisma.orderHistory.create({
         data,
         include: {
-          order: true,
+          order: ORDER_SELECT_FOR_HISTORY,
           previousStatus: true,
           newStatus: true,
         },
@@ -58,7 +81,7 @@ export class OrderHistoryService {
   async findAll(query?: PaginationQueryDto) {
     try {
       const include = {
-        order: true,
+        order: ORDER_SELECT_FOR_HISTORY,
         previousStatus: true,
         newStatus: true,
       };
@@ -91,7 +114,7 @@ export class OrderHistoryService {
       const orderHistory = await this.prisma.orderHistory.findUnique({
         where: { id },
         include: {
-          order: true,
+          order: ORDER_SELECT_FOR_HISTORY,
           previousStatus: true,
           newStatus: true,
         },
@@ -141,7 +164,7 @@ export class OrderHistoryService {
         where: { id },
         data,
         include: {
-          order: true,
+          order: ORDER_SELECT_FOR_HISTORY,
           previousStatus: true,
           newStatus: true,
         },
