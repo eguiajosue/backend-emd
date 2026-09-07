@@ -1,0 +1,32 @@
+# Definición declarativa del servicio en Render (Blueprint).
+#
+# El servicio actual se creó a mano desde el dashboard, así que Render NO lee
+# este archivo todavía: para que empiece a hacerlo hay que conectarlo como
+# Blueprint (New > Blueprint) o volver a crear el servicio desde acá. Mientras
+# tanto sirve para dos cosas: dejar la configuración versionada en vez de vivir
+# sólo en la UI, y poder recrear el servicio idéntico si se pierde.
+#
+# `healthCheckPath` es el motivo por el que existe este archivo: sin él, un
+# deploy que arranca roto se marca como exitoso igual, porque Render no tiene
+# forma de preguntarle al servicio si está sano.
+services:
+  - type: web
+    name: backend-emd
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm run start:prod:seeded
+    healthCheckPath: /health/ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Los secretos (DATABASE_URL, JWT_SECRET, ALLOWED_ORIGINS...) se cargan
+      # desde el dashboard y NUNCA se versionan acá.
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false

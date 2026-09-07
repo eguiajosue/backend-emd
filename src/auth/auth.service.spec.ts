@@ -72,6 +72,9 @@ describe('AuthService', () => {
         expect.objectContaining({ expiresIn: '7d' }),
       );
       expect(result).toEqual({
+        // `id` lo agregó el login para que el frontend pueda identificar al
+        // usuario de la sesión sin decodificar el JWT.
+        id: mockUser.id,
         token: 'signed-jwt-token',
         refreshToken: 'signed-jwt-token',
         username: mockUser.username,
@@ -112,6 +115,9 @@ describe('AuthService', () => {
       const result = await authService.refresh({ refreshToken: 'valid-token' });
 
       expect(result).toEqual({
+        // `id` lo agregó el login para que el frontend pueda identificar al
+        // usuario de la sesión sin decodificar el JWT.
+        id: mockUser.id,
         token: 'signed-jwt-token',
         refreshToken: 'signed-jwt-token',
         username: mockUser.username,

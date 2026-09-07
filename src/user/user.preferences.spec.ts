@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { UserService } from './user.service';
+import { UserService, USER_PREFERENCES_SELECT } from './user.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 describe('UserService preferences', () => {
@@ -35,11 +35,7 @@ describe('UserService preferences', () => {
       });
       expect(prisma.user.findUnique).toHaveBeenCalledWith({
         where: { id: 1 },
-        select: {
-          themePreference: true,
-          accentColor: true,
-          languagePreference: true,
-        },
+        select: USER_PREFERENCES_SELECT,
       });
     });
 
@@ -78,11 +74,7 @@ describe('UserService preferences', () => {
           accentColor: '#3366ff',
           languagePreference: 'en',
         },
-        select: {
-          themePreference: true,
-          accentColor: true,
-          languagePreference: true,
-        },
+        select: USER_PREFERENCES_SELECT,
       });
     });
 

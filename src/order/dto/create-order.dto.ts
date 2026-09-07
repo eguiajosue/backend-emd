@@ -44,16 +44,14 @@ export class AuthorizationFileDto {
 }
 
 export class OrderProductDto {
-  @IsOptional()
-  @IsInt()
-  @IsPositive()
-  productId?: number;
-
+  // El catálogo de productos se retiró: la línea del pedido siempre lleva el
+  // nombre escrito a mano o elegido de un preset. Antes `customName` era
+  // opcional porque podía venir un `productId` en su lugar.
   @TrimString()
-  @IsOptional()
+  @IsNotEmpty()
   @IsString()
   @MaxLength(200)
-  customName?: string;
+  customName: string;
 
   @IsNotEmpty()
   @IsInt()

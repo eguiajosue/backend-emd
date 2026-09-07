@@ -46,7 +46,10 @@ describe('OrderAreaTaskService', () => {
       },
       order: { findUnique: jest.fn(), update: jest.fn() },
       orderHistory: { create: jest.fn() },
-      user: { findFirst: jest.fn().mockResolvedValue(null), findUnique: jest.fn() },
+      user: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn(),
+      },
       $transaction: jest.fn().mockResolvedValue([]),
     };
     notificationService = {
@@ -233,7 +236,10 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('sin áreas de producción ni gestión, no hay bandeja', async () => {
-      const result = await service.findForUser({ userId: 4, roles: ['diseno'] });
+      const result = await service.findForUser({
+        userId: 4,
+        roles: ['diseno'],
+      });
 
       expect(result).toEqual([]);
     });

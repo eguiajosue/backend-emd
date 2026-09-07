@@ -19,6 +19,22 @@ const USER_SAFE_SELECT = {
   isSharedAccount: true,
 } satisfies Prisma.UserSelect;
 
+/**
+ * Campos de preferencia que se devuelven al usuario. Una sola definición para
+ * lectura y escritura: cuando estaban escritos a mano en cada método, agregar
+ * una preferencia dejaba el test del otro método en rojo sin que nada se
+ * hubiera roto de verdad.
+ */
+export const USER_PREFERENCES_SELECT = {
+  themePreference: true,
+  accentColor: true,
+  languagePreference: true,
+  glassIntensity: true,
+  density: true,
+  hasSeenOnboarding: true,
+  areaViewMode: true,
+} as const;
+
 @Injectable()
 export class UserService {
   constructor(private prisma: PrismaService) {}
@@ -176,15 +192,7 @@ export class UserService {
   async getPreferences(id: number) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      select: {
-        themePreference: true,
-        accentColor: true,
-        languagePreference: true,
-        glassIntensity: true,
-        density: true,
-        hasSeenOnboarding: true,
-        areaViewMode: true,
-      },
+      select: USER_PREFERENCES_SELECT,
     });
     if (!user) {
       throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
@@ -200,15 +208,7 @@ export class UserService {
       return await this.prisma.user.update({
         where: { id },
         data: { ...updateUserPreferencesDto },
-        select: {
-          themePreference: true,
-          accentColor: true,
-          languagePreference: true,
-          glassIntensity: true,
-          density: true,
-          hasSeenOnboarding: true,
-          areaViewMode: true,
-        },
+        select: USER_PREFERENCES_SELECT,
       });
     } catch (error) {
       if (error.code === 'P2025') {

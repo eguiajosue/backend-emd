@@ -49,16 +49,6 @@ const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
 const DELIVERED_STATUS_ID = 5;
 
 /**
- * Id del estado "cancelado", sembrado por prisma/seed.ts (ver STATUS_SEEDS)
- * y por la migración 20260907120000_add_cancelled_status con id explícito
- * = 10 (siguiente id libre después de los estados 6-9 del flujo de
- * Diseño). Se expone acá para que otra lógica backend (filtros de
- * visibilidad, bulkUpdateStatusOrArea, etc.) pueda referenciarlo sin
- * repetir el número mágico.
- */
-const CANCELLED_STATUS_ID = 10;
-
-/**
  * Nombres de los estados nuevos del flujo de Diseño, sembrados al final de
  * STATUS_SEEDS en prisma/seed.ts (ids 6+ en una DB existente). A diferencia
  * de DELIVERED_STATUS_ID, estos se resuelven por NOMBRE en runtime (ver
@@ -161,13 +151,13 @@ export class OrderService {
     }
   }
 
-  /** Valida que cada línea de producto tenga productId y/o customName. */
+  /** Valida que cada línea de producto traiga nombre y cantidad. */
   private assertOrderProductsValid(orderProducts?: OrderProductDto[]) {
     if (!orderProducts) {
       return;
     }
     for (const op of orderProducts) {
-      if (!op.productId && !op.customName?.trim()) {
+      if (!op.customName?.trim()) {
         throw new HttpException(
           'Cada producto debe tener un producto registrado o un nombre',
           HttpStatus.BAD_REQUEST,
@@ -423,10 +413,7 @@ export class OrderService {
           ? {
               create: orderProducts.map((op) => ({
                 quantity: op.quantity,
-                customName: op.customName?.trim() || undefined,
-                ...(op.productId && {
-                  product: { connect: { id: op.productId } },
-                }),
+                customName: op.customName.trim(),
               })),
             }
           : undefined,
@@ -444,11 +431,7 @@ export class OrderService {
           user: CREATOR_USER_SELECT,
           assignedUser: ASSIGNED_USER_SELECT,
           status: true,
-          orderProducts: {
-            include: {
-              product: true,
-            },
-          },
+          orderProducts: true,
         },
       });
 
@@ -605,11 +588,7 @@ export class OrderService {
       user: CREATOR_USER_SELECT,
       assignedUser: ASSIGNED_USER_SELECT,
       status: true,
-      orderProducts: {
-        include: {
-          product: true,
-        },
-      },
+      orderProducts: true,
       histories: HISTORY_SELECT_FOR_DELIVERED_AT,
     } satisfies Prisma.OrderSelect;
   }
@@ -736,11 +715,7 @@ export class OrderService {
           user: CREATOR_USER_SELECT,
           assignedUser: ASSIGNED_USER_SELECT,
           status: true,
-          orderProducts: {
-            include: {
-              product: true,
-            },
-          },
+          orderProducts: true,
           histories: HISTORY_SELECT_FOR_DELIVERED_AT,
         },
       });
@@ -1020,10 +995,7 @@ export class OrderService {
             deleteMany: {}, // Elimina los productos existentes en la orden
             create: orderProducts.map((op) => ({
               quantity: op.quantity,
-              customName: op.customName?.trim() || undefined,
-              ...(op.productId && {
-                product: { connect: { id: op.productId } },
-              }),
+              customName: op.customName.trim(),
             })),
           },
         }),
@@ -1042,11 +1014,7 @@ export class OrderService {
           user: CREATOR_USER_SELECT,
           assignedUser: ASSIGNED_USER_SELECT,
           status: true,
-          orderProducts: {
-            include: {
-              product: true,
-            },
-          },
+          orderProducts: true,
         },
       });
 

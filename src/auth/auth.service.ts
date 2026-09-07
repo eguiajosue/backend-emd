@@ -129,6 +129,9 @@ export class AuthService {
     });
 
     return {
+      // Mismo shape que `login`: sin `id`, un cliente que se apoye en la
+      // respuesta del refresh se queda sin saber quién es la sesión.
+      id: user.id,
       ...tokens,
       username: user.username,
       first_name: user.firstName,

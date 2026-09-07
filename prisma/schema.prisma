@@ -105,7 +105,7 @@ model Order {
   assignedUser    User?            @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
   status          Status           @relation(fields: [statusId], references: [id]) // Relación con Status.
   histories       OrderHistory[] // Relación uno a muchos con OrderHistory.
-  orderProducts   OrderProduct[] // Relación muchos a muchos con Product a través de OrderProduct.
+  orderProducts   OrderProduct[] // Líneas de producto del pedido.
   notes           OrderNote[] // Notas/comentarios internos sobre el pedido.
   auditLogs       OrderAuditLog[] // Auditoría de ediciones del pedido.
   notifications   Notification[] // Notificaciones persistentes que referencian este pedido.
@@ -240,72 +240,23 @@ model OrderAreaTask {
   @@index([status])
 }
 
-model ProductType {
-  id   Int    @id @default(autoincrement()) // Identificador único del tipo de producto.
-  name String @unique // Nombre del tipo de producto (por ejemplo, Hilo, Polo).
-
-  products Product[] // Relación uno a muchos con Product.
-}
-
-model Color {
-  id   Int    @id @default(autoincrement()) // Identificador único del color.
-  name String @unique // Nombre del color (por ejemplo, Rojo, Azul).
-
-  products Product[] // Relación uno a muchos con Product.
-}
-
-model Size {
-  id   Int    @id @default(autoincrement()) // Identificador único de la talla.
-  name String @unique // Nombre de la talla (por ejemplo, S, M, L).
-
-  products Product[] // Relación uno a muchos con Product.
-}
-
-model Product {
-  id            Int     @id @default(autoincrement()) // Identificador único del producto.
-  productTypeId Int // Clave foránea que referencia a ProductType.
-  colorId       Int? // Clave foránea opcional que referencia a Color.
-  sizeId        Int? // Clave foránea opcional que referencia a Size.
-  code          String? // Para hilos, puede ser nulo  // Código opcional del producto.
-  quantity      Int // Cantidad actual en el inventario.
-
-  productType   ProductType            @relation(fields: [productTypeId], references: [id]) // Relación con ProductType.
-  color         Color?                 @relation(fields: [colorId], references: [id]) // Relación opcional con Color.
-  size          Size?                  @relation(fields: [sizeId], references: [id]) // Relación opcional con Size.
-  transactions  InventoryTransaction[] // Relación uno a muchos con InventoryTransaction.
-  orderProducts OrderProduct[] // Relación muchos a muchos con Order a través de OrderProduct.
-
-  @@index([productTypeId]) // Índice para optimizar consultas en productTypeId.
-  @@index([colorId]) // Índice para optimizar consultas en colorId.
-  @@index([sizeId]) // Índice para optimizar consultas en sizeId.
-}
-
-model InventoryTransaction {
-  id              Int      @id @default(autoincrement()) // Identificador único de la transacción.
-  productId       Int // Clave foránea que referencia a Product.
-  transactionDate DateTime // Fecha y hora de la transacción.
-  quantityChange  Int // Positivo o negativo        // Cantidad de cambio en el inventario.
-  notes           String? // Notas opcionales sobre la transacción.
-
-  product Product @relation(fields: [productId], references: [id]) // Relación con Product.
-
-  @@index([productId])
-  @@index([transactionDate])
-}
+/// El catálogo de productos y el inventario (ProductType, Color, Size, Product,
+/// InventoryTransaction) se retiraron: existían en la base y en la API pero
+/// nunca tuvieron interfaz, y los pedidos siempre guardaron el producto como
+/// texto libre (`OrderProduct.customName`), así que ningún pedido descontaba
+/// stock. Al retirarlos las cinco tablas estaban vacías y ninguna línea de
+/// pedido referenciaba un producto. Ver la migración
+/// 20260907220000_remove_inventory.
 
 model OrderProduct {
   id         Int     @id @default(autoincrement()) // Identificador único de la línea de producto del pedido.
   orderId    Int // Clave foránea que referencia a Order.
-  productId  Int? // Clave foránea opcional que referencia a Product (catálogo complejo, ya no usado desde la UI).
-  customName String? // Nombre libre del producto cuando no viene de un Product registrado (ver OrderProductPreset).
+  customName String // Nombre del producto, escrito a mano o elegido de OrderProductPreset.
   quantity   Int // Cantidad del producto en la orden.
 
-  order   Order    @relation(fields: [orderId], references: [id]) // Relación con Order.
-  product Product? @relation(fields: [productId], references: [id]) // Relación opcional con Product.
+  order Order @relation(fields: [orderId], references: [id]) // Relación con Order.
 
-  @@unique([orderId, productId]) // Unicidad para líneas de producto registrado (permite múltiples nulls).
   @@index([orderId])
-  @@index([productId])
 }
 
 model OrderProductPreset {

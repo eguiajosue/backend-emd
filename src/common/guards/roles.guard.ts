@@ -29,9 +29,7 @@ export class RolesGuard implements CanActivate {
       // Devolver false haría que Nest lance un ForbiddenException genérico con
       // el mensaje en inglés "Forbidden resource", que el frontend muestra tal
       // cual al usuario. Lanzamos un mensaje propio, en español.
-      throw new ForbiddenException(
-        'Sin permisos para acceder a esta sección',
-      );
+      throw new ForbiddenException('Sin permisos para acceder a esta sección');
     }
 
     return true;

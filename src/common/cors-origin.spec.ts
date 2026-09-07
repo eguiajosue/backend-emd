@@ -2,9 +2,10 @@ import { isOriginAllowed, parseAllowedOrigins } from './cors-origin';
 
 describe('parseAllowedOrigins', () => {
   it('parses a comma separated list, ignoring blanks and spaces', () => {
-    expect(
-      parseAllowedOrigins(' https://a.com , https://b.com ,, '),
-    ).toEqual(['https://a.com', 'https://b.com']);
+    expect(parseAllowedOrigins(' https://a.com , https://b.com ,, ')).toEqual([
+      'https://a.com',
+      'https://b.com',
+    ]);
   });
 });
 

@@ -10,12 +10,6 @@ import { UserModule } from './user/user.module';
 import { StatusModule } from './status/status.module';
 import { OrderModule } from './order/order.module';
 import { OrderHistoryModule } from './order-history/order-history.module';
-import { ProductTypeModule } from './product-type/product-type.module';
-import { ColorModule } from './color/color.module';
-import { SizeModule } from './size/size.module';
-import { ProductModule } from './product/product.module';
-import { InventoryTransactionModule } from './inventory-transaction/inventory-transaction.module';
-import { OrderProductModule } from './order-product/order-product.module';
 import { LogModule } from './log/log.module';
 import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -56,12 +50,6 @@ import { AppController } from './app.controller';
     StatusModule,
     OrderModule,
     OrderHistoryModule,
-    ProductTypeModule,
-    ColorModule,
-    SizeModule,
-    ProductModule,
-    InventoryTransactionModule,
-    OrderProductModule,
     LogModule,
     AuthModule,
     NotificationsModule,

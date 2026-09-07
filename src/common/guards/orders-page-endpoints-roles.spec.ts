@@ -5,13 +5,8 @@ import { UserController } from 'src/user/user.controller';
 import { ClientController } from 'src/client/client.controller';
 import { OrderController } from 'src/order/order.controller';
 import { OrderHistoryController } from 'src/order-history/order-history.controller';
-import { OrderProductController } from 'src/order-product/order-product.controller';
 import { OrderProductPresetController } from 'src/order-product-preset/order-product-preset.controller';
 import { StatusController } from 'src/status/status.controller';
-import { ProductController } from 'src/product/product.controller';
-import { ProductTypeController } from 'src/product-type/product-type.controller';
-import { ColorController } from 'src/color/color.controller';
-import { SizeController } from 'src/size/size.controller';
 import { AreaVisibilityController } from 'src/area-visibility/area-visibility.controller';
 import { NotificationController } from 'src/notification/notification.controller';
 import { ORDER_VIEWING_ROLES } from 'src/common/constants/order-viewing-roles';
@@ -95,23 +90,9 @@ describe('Endpoints consultados por la pantalla de Pedidos: paridad de roles', (
     ['GET /clients/:id', ClientController, 'findOne'],
     ['GET /clients/:id/orders', ClientController, 'findOrders'],
     ['GET /order-histories', OrderHistoryController, 'findAll'],
-    ['GET /order-products', OrderProductController, 'findAll'],
-    [
-      'GET /order-products/:orderId/:productId',
-      OrderProductController,
-      'findOne',
-    ],
     ['GET /order-product-presets', OrderProductPresetController, 'findAll'],
     ['GET /status', StatusController, 'findAll'],
     ['GET /status/:id', StatusController, 'findOne'],
-    ['GET /products', ProductController, 'findAll'],
-    ['GET /products/:id', ProductController, 'findOne'],
-    ['GET /product-types', ProductTypeController, 'findAll'],
-    ['GET /product-types/:id', ProductTypeController, 'findOne'],
-    ['GET /colors', ColorController, 'findAll'],
-    ['GET /colors/:id', ColorController, 'findOne'],
-    ['GET /sizes', SizeController, 'findAll'],
-    ['GET /sizes/:id', SizeController, 'findOne'],
     ['GET /area-visibility', AreaVisibilityController, 'findAll'],
     ['GET /notifications', NotificationController, 'findAll'],
     ['GET /notifications/unread-count', NotificationController, 'unreadCount'],

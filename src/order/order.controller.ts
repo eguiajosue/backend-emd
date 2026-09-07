@@ -507,10 +507,14 @@ export class OrderController {
     @Body() dto: AssignAreaTaskDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.orderAreaTaskService.assign(+taskId, dto.assignedUserId ?? null, {
-      userId: user.sub,
-      roles: user.roles,
-    });
+    return this.orderAreaTaskService.assign(
+      +taskId,
+      dto.assignedUserId ?? null,
+      {
+        userId: user.sub,
+        roles: user.roles,
+      },
+    );
   }
 
   /** Quita un área del pedido. */
