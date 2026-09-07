@@ -33,6 +33,17 @@ describe('isOriginAllowed', () => {
     ).toBe(true);
   });
 
+  it('allows the per-deploy URL, where Vercel truncates the project name', () => {
+    // `frontend-emd` sale como `frontend`: esta URL no empieza con el nombre
+    // del proyecto y quedaba rechazada. Regresión del CORS roto en producción.
+    expect(
+      isOriginAllowed(
+        'https://frontend-hbp5awpny-eguiajosues-projects.vercel.app',
+        allowed,
+      ),
+    ).toBe(true);
+  });
+
   it('rejects other vercel projects', () => {
     // Si no, cualquier sitio alojado en Vercel podría llamar a la API con
     // credenciales.
@@ -46,5 +57,9 @@ describe('isOriginAllowed', () => {
 
   it('rejects an unrelated origin', () => {
     expect(isOriginAllowed('https://evil.com', allowed)).toBe(false);
+    // Otro scope de Vercel, aunque el nombre imite al del proyecto.
+    expect(
+      isOriginAllowed('https://frontend-abc-evil-projects.vercel.app', allowed),
+    ).toBe(false);
   });
 });
