@@ -1,6 +1,13 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+// `file-type` v16 (última versión con build CJS -- v17+ es ESM-only, lo que
+// rompe tanto el build de Nest como Jest con "module": "commonjs").
+import { fromBuffer } from 'file-type';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateOrderDto, AuthorizationFileDto } from './dto/create-order.dto';
+import {
+  CreateOrderDto,
+  AuthorizationFileDto,
+  AUTHORIZATION_FILE_MIME_TYPES,
+} from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Prisma } from '@prisma/client';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
@@ -208,12 +215,44 @@ export class OrderService {
     return order;
   }
 
-  /** Valida el tamaño decodificado del archivo de autorización (y, reusado, del montaje/feedback de diseño). */
-  private assertAuthorizationFileSize(file: AuthorizationFileDto) {
-    const sizeInBytes = Buffer.byteLength(file.data, 'base64');
-    if (sizeInBytes > MAX_AUTHORIZATION_FILE_BYTES) {
+  /**
+   * Valida el tamaño decodificado y el tipo REAL (por contenido, no por el
+   * `mimeType` que manda el cliente) del archivo de autorización -- reusado
+   * también para el montaje/feedback de diseño.
+   *
+   * `mimeType` en el DTO ya está restringido por `@IsIn(AUTHORIZATION_FILE_MIME_TYPES)`,
+   * pero eso sólo valida el STRING declarado por el cliente: nada impide
+   * mandar un .html o un binario ejecutable con `mimeType: 'image/png'` y
+   * `filename: 'x.png'`. `file-type` (magic bytes) confirma que el
+   * contenido decodificado sea realmente uno de los formatos permitidos, y
+   * que coincida con lo declarado.
+   */
+  private async assertAuthorizationFileSize(file: AuthorizationFileDto) {
+    const buffer = Buffer.from(file.data, 'base64');
+    if (buffer.length > MAX_AUTHORIZATION_FILE_BYTES) {
       throw new HttpException(
         'El archivo no puede superar 5MB',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const detected = await fromBuffer(buffer);
+
+    if (
+      !detected ||
+      !(AUTHORIZATION_FILE_MIME_TYPES as readonly string[]).includes(
+        detected.mime,
+      )
+    ) {
+      throw new HttpException(
+        'El contenido del archivo no coincide con un tipo permitido (PNG, JPEG o PDF)',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (detected.mime !== file.mimeType) {
+      throw new HttpException(
+        'El tipo de archivo declarado no coincide con su contenido real',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -296,7 +335,7 @@ export class OrderService {
       }
 
       if (authorizationFile) {
-        this.assertAuthorizationFileSize(authorizationFile);
+        await this.assertAuthorizationFileSize(authorizationFile);
       }
 
       this.assertOrderProductsValid(orderProducts);
@@ -793,7 +832,7 @@ export class OrderService {
       }
 
       if (authorizationFile) {
-        this.assertAuthorizationFileSize(authorizationFile);
+        await this.assertAuthorizationFileSize(authorizationFile);
       }
 
       this.assertOrderProductsValid(orderProducts);
@@ -1404,7 +1443,7 @@ export class OrderService {
     requestingUser: RequestingUser,
   ) {
     await this.assertOrderAccess(orderId, requestingUser);
-    this.assertAuthorizationFileSize(dto.montageFile);
+    await this.assertAuthorizationFileSize(dto.montageFile);
 
     const last = await this.prisma.designRevision.findFirst({
       where: { orderId },
@@ -1480,7 +1519,7 @@ export class OrderService {
     await this.assertOrderAccess(orderId, requestingUser);
     await this.getDesignRevisionOrThrow(orderId, revisionId);
     if (dto.feedbackFile) {
-      this.assertAuthorizationFileSize(dto.feedbackFile);
+      await this.assertAuthorizationFileSize(dto.feedbackFile);
     }
 
     const statusId = await this.resolveStatusIdByName(
