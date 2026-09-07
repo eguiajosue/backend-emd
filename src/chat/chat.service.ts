@@ -7,6 +7,7 @@ import {
 } from 'src/common/dto/pagination-query.dto';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { Role } from 'src/common/enums/roles.enum';
+import { OrderService } from 'src/order/order.service';
 import {
   CHAT_AREAS,
   CHAT_CONVERSATION_TYPE_AREA,
@@ -14,6 +15,14 @@ import {
   chatAreaLabel,
   isMonitorRole,
 } from './chat.constants';
+
+/** Resumen de pedido adjuntado a un mensaje, sólo lo necesario para la burbuja. */
+const MESSAGE_ORDER_SELECT = {
+  id: true,
+  description: true,
+  area: true,
+  status: { select: { name: true } },
+} as const;
 
 /** Usuario autenticado que hace la consulta (subset del AccessTokenPayload). */
 export interface ChatRequestingUser {
@@ -42,6 +51,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
+    private readonly orderService: OrderService,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -447,6 +457,8 @@ export class ChatService {
       createdAt: true,
       senderId: true,
       sender: { select: USER_SUMMARY_SELECT },
+      orderId: true,
+      order: { select: MESSAGE_ORDER_SELECT },
     };
 
     if (!enabled) {
@@ -482,14 +494,25 @@ export class ChatService {
     conversationId: number,
     body: string,
     user: ChatRequestingUser,
+    orderId?: number,
   ) {
     const conversation = await this.assertConversationAccess(
       conversationId,
       user,
     );
 
+    if (orderId != null) {
+      // Reusa la misma verificación de visibilidad que `GET /orders/:id`:
+      // si quien manda el mensaje no puede ver ese pedido, no puede
+      // adjuntarlo. `findOne` tira 403/404 por sí solo si corresponde.
+      await this.orderService.findOne(orderId, {
+        userId: user.userId,
+        roles: user.roles,
+      });
+    }
+
     const message = await this.prisma.chatMessage.create({
-      data: { conversationId, senderId: user.userId, body },
+      data: { conversationId, senderId: user.userId, body, orderId },
       select: {
         id: true,
         conversationId: true,
@@ -497,6 +520,8 @@ export class ChatService {
         createdAt: true,
         senderId: true,
         sender: { select: USER_SUMMARY_SELECT },
+        orderId: true,
+        order: { select: MESSAGE_ORDER_SELECT },
       },
     });
 
@@ -524,6 +549,8 @@ export class ChatService {
         senderUsername: message.sender.username,
         senderName:
           `${message.sender.firstName} ${message.sender.lastName ?? ''}`.trim(),
+        orderId: message.orderId,
+        order: message.order,
       },
     );
 

@@ -1,6 +1,7 @@
 import { ChatService } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { OrderService } from 'src/order/order.service';
 
 /**
  * Conversaciones de prueba: el canal Recepción↔Taller, el canal
@@ -34,6 +35,7 @@ describe('ChatService - autorización', () => {
   let chatService: ChatService;
   let prisma: any;
   let gateway: { emitChatMessage: jest.Mock };
+  let orderService: { findOne: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -89,10 +91,12 @@ describe('ChatService - autorización', () => {
       },
     };
     gateway = { emitChatMessage: jest.fn() };
+    orderService = { findOne: jest.fn().mockResolvedValue({ id: 1 }) };
 
     chatService = new ChatService(
       prisma as unknown as PrismaService,
       gateway as unknown as NotificationsGateway,
+      orderService as unknown as OrderService,
     );
   });
 

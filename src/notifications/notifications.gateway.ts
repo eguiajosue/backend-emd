@@ -59,6 +59,14 @@ interface ChatMessagePayload {
   senderId: number;
   senderUsername: string;
   senderName: string;
+  /** Pedido opcional adjuntado al mensaje como contexto (ver ChatService.sendMessage). */
+  orderId?: number | null;
+  order?: {
+    id: number;
+    description: string;
+    area: string | null;
+    status: { name: string } | null;
+  } | null;
 }
 
 /** Payload de la notificación genérica a Recepción por cambios de un usuario de área. */

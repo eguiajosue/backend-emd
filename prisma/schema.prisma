@@ -108,6 +108,7 @@ model Order {
   auditLogs       OrderAuditLog[] // Auditoría de ediciones del pedido.
   notifications   Notification[] // Notificaciones persistentes que referencian este pedido.
   designRevisions DesignRevision[] // Rondas de montaje/feedback/autorización de la fase de Diseño.
+  chatMessages    ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
 
   @@index([statusId])
   @@index([clientId])
@@ -367,11 +368,18 @@ model ChatMessage {
   conversationId Int // Clave foránea que referencia a ChatConversation.
   senderId       Int // Clave foránea que referencia al User que lo envió.
   body           String // Contenido del mensaje (texto plano).
+  // Referencia opcional a un pedido, para dar contexto sin que sea
+  // obligatorio en cada mensaje (ej. "che, mirá el pedido #123"). `SetNull`
+  // en vez de `Cascade`: si el pedido se borra, el mensaje sobrevive sin la
+  // referencia en lugar de desaparecer.
+  orderId        Int?
   createdAt      DateTime @default(now()) // Fecha de envío.
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User             @relation(fields: [senderId], references: [id])
+  order        Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
   @@index([senderId])
+  @@index([orderId])
 }

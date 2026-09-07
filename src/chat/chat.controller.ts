@@ -87,7 +87,12 @@ export class ChatController {
     @Body() dto: SendMessageDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.chatService.sendMessage(id, dto.body, requestingUser(user));
+    return this.chatService.sendMessage(
+      id,
+      dto.body,
+      requestingUser(user),
+      dto.orderId,
+    );
   }
 
   @Post('conversations/:id/read')
