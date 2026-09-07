@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -22,6 +23,7 @@ import {
   ApproveDesignRevisionDto,
 } from './dto/design-revision.dto';
 import { OrderExportQueryDto } from './dto/order-export-query.dto';
+import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
@@ -33,6 +35,10 @@ import { toCsv } from 'src/common/utils/csv';
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
 
+  // Límite más estricto que el default global: creación de pedidos es una
+  // escritura "cara" (valida cliente/productos, puede incluir el archivo de
+  // autorización) y no debería dispararse en ráfaga.
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Auth(Role.RECEPCION)
   @Post()
   create(
@@ -64,6 +70,35 @@ export class OrderController {
     return this.orderService.findAll(query, {
       userId: user.sub,
       roles: user.roles,
+    });
+  }
+
+  // Acción masiva: mismos roles que PATCH /orders/:id (mismo criterio de
+  // acceso por pedido, validado individualmente dentro del service).
+  // Throttle propio, más estricto que el default global: cada request ya
+  // puede tocar hasta 100 pedidos, así que se limita la frecuencia con la
+  // que se puede disparar.
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Post('bulk-actions')
+  bulkActions(
+    @Body() bulkOrderActionDto: BulkOrderActionDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.bulkUpdateStatusOrArea(bulkOrderActionDto, {
+      userId: user.sub,
+      roles: user.roles,
+      username: user.username,
     });
   }
 

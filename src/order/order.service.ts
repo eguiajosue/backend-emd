@@ -21,6 +21,8 @@ import {
 } from './dto/design-revision.dto';
 import { NotificationService } from 'src/notification/notification.service';
 import { Role } from 'src/common/enums/roles.enum';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
+import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -94,6 +96,7 @@ export class OrderService {
     private readonly areaVisibilityService: AreaVisibilityService,
     private readonly orderProductPresetService: OrderProductPresetService,
     private readonly notificationService: NotificationService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   /** Valida que cada línea de producto tenga productId y/o customName. */
@@ -737,9 +740,8 @@ export class OrderService {
     const title = `Cambio de estado del pedido #${orderId}`;
     const body = `${changedByUsername} cambió el estado del pedido #${orderId} de "${previousStatusName}" a "${newStatusName}"`;
 
-    const recipientIds = await this.notificationService.userIdsForArea(
-      'recepcion',
-    );
+    const recipientIds =
+      await this.notificationService.userIdsForArea('recepcion');
 
     await this.notificationService.createNotificationForUsers(recipientIds, {
       type: 'order_status_changed',
@@ -1004,6 +1006,121 @@ export class OrderService {
       // detalles internos (Prisma, stack) al cliente en producción.
       throw error;
     }
+  }
+
+  /**
+   * POST /orders/bulk-actions: aplica un cambio de estado y/o área a varios
+   * pedidos a la vez. Mismo criterio de acceso que PATCH /orders/:id
+   * (assertOrderAccess por pedido): un id sin acceso (o inexistente) se
+   * reporta como fallo individual y NO entra a la transacción, en vez de
+   * abortar el resto del batch.
+   *
+   * Atomicidad: los pedidos que sí pasan la validación previa se actualizan
+   * en una única `$transaction` -- o se aplican todos, o (si Prisma tira un
+   * error a mitad de camino, ej. un statusId que deja de existir entre la
+   * validación y el commit) no se aplica ninguno. Los resultados por id
+   * reflejan eso: si la transacción falla, todos los ids que iban a
+   * actualizarse pasan a `success: false` con el motivo del error.
+   */
+  async bulkUpdateStatusOrArea(
+    dto: BulkOrderActionDto,
+    requestingUser: RequestingUser,
+  ): Promise<{
+    results: Array<{ orderId: number; success: boolean; error?: string }>;
+  }> {
+    if (dto.statusId === undefined && dto.area === undefined) {
+      throw new HttpException(
+        'Debe indicarse statusId y/o area',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (dto.area !== undefined) {
+      this.assertCanEditProductionArea(requestingUser);
+    }
+
+    const results: Array<{
+      orderId: number;
+      success: boolean;
+      error?: string;
+    }> = [];
+    const acceptedIds: number[] = [];
+
+    // Validación previa (acceso + existencia) por id, fuera de la
+    // transacción: así un id inválido no aborta el batch completo, sólo
+    // queda afuera de él.
+    for (const orderId of dto.orderIds) {
+      try {
+        await this.assertOrderAccess(orderId, requestingUser);
+        acceptedIds.push(orderId);
+      } catch (error) {
+        results.push({
+          orderId,
+          success: false,
+          error:
+            error instanceof HttpException
+              ? ((error.getResponse() as { message?: string })?.message ??
+                error.message)
+              : 'No se pudo validar el acceso al pedido',
+        });
+      }
+    }
+
+    if (acceptedIds.length > 0) {
+      const data: Prisma.OrderUpdateInput = {
+        ...(dto.statusId !== undefined && {
+          status: { connect: { id: dto.statusId } },
+        }),
+        ...(dto.area !== undefined && { area: dto.area }),
+      };
+
+      try {
+        await this.prisma.$transaction(
+          acceptedIds.map((orderId) =>
+            this.prisma.order.update({ where: { id: orderId }, data }),
+          ),
+        );
+        for (const orderId of acceptedIds) {
+          results.push({ orderId, success: true });
+        }
+      } catch (error) {
+        const message =
+          error.code === 'P2025'
+            ? 'Orden no encontrada'
+            : error.code === 'P2003'
+              ? 'ID de estado inválido'
+              : 'No se pudo aplicar el cambio';
+        for (const orderId of acceptedIds) {
+          results.push({ orderId, success: false, error: message });
+        }
+      }
+    }
+
+    await this.auditLogService.record({
+      actorUserId: requestingUser.userId,
+      action: 'order.bulk_status_area_update',
+      entityType: 'order_bulk',
+      entityId: 'bulk',
+      metadata: {
+        requestedOrderIds: dto.orderIds,
+        statusId: dto.statusId,
+        area: dto.area,
+        results,
+      },
+    });
+
+    // Mantiene el orden pedido por el cliente en la respuesta.
+    const byId = new Map(results.map((r) => [r.orderId, r]));
+    return {
+      results: dto.orderIds.map(
+        (orderId) =>
+          byId.get(orderId) ?? {
+            orderId,
+            success: false,
+            error: 'No se pudo procesar el pedido',
+          },
+      ),
+    };
   }
 
   /** Crea una nota interna en un pedido y notifica al área/usuario asignado. */
