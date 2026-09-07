@@ -115,7 +115,18 @@ export class CreateOrderDto {
   @IsIn(ORDER_AREAS)
   area?: (typeof ORDER_AREAS)[number];
 
-  @IsOptional()
+  // Con montaje (requiresDesign !== false) el pedido arranca en Diseño y
+  // necesita responsable sí o sí: un diseñador concreto o la cuenta compartida
+  // del área Diseño ("Cualquier diseñador"). Ver WORKFLOW.md §1.a. Sin montaje
+  // la asignación sigue siendo opcional.
+  @ValidateIf(
+    (dto: CreateOrderDto) =>
+      dto.requiresDesign !== false || dto.assignedUserId !== undefined,
+  )
+  @IsNotEmpty({
+    message:
+      'assignedUserId es requerido cuando el pedido requiere diseño (un diseñador o la cuenta del área Diseño)',
+  })
   @IsInt()
   @IsPositive()
   assignedUserId?: number;

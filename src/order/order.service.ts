@@ -114,6 +114,43 @@ export class OrderService {
     private readonly auditLogService: AuditLogService,
   ) {}
 
+  /**
+   * Valida que el usuario asignado tenga el rol del área indicada. Aplica tanto
+   * a personas concretas como a las cuentas compartidas de área
+   * (`isSharedAccount`), que también llevan el rol del área que representan.
+   *
+   * Evita que un pedido con montaje quede en manos de alguien que no es de
+   * Diseño, o que un pedido directo se asigne a alguien de otra área
+   * (ver WORKFLOW.md §1).
+   */
+  private async assertUserBelongsToArea(
+    assignedUserId: number | undefined,
+    area: string,
+  ): Promise<void> {
+    if (assignedUserId === undefined) {
+      throw new HttpException(
+        `Debe asignarse un responsable del área ${area}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: assignedUserId },
+      select: { id: true, roles: { select: { name: true } } },
+    });
+    if (!user) {
+      throw new HttpException(
+        'El usuario asignado no existe',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (!user.roles.some((r) => r.name === area)) {
+      throw new HttpException(
+        `El usuario asignado no pertenece al área ${area}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   /** Valida que cada línea de producto tenga productId y/o customName. */
   private assertOrderProductsValid(orderProducts?: OrderProductDto[]) {
     if (!orderProducts) {
@@ -327,6 +364,16 @@ export class OrderService {
 
       this.assertOrderProductsValid(orderProducts);
       await this.registerCustomNamePresets(orderProducts);
+
+      // Con montaje, el responsable inicial tiene que pertenecer a Diseño: o un
+      // diseñador concreto, o la cuenta compartida del área ("Cualquier
+      // diseñador"). Ver WORKFLOW.md §1.a.
+      if (needsDesign) {
+        await this.assertUserBelongsToArea(assignedUserId, Role.DISENO);
+      } else if (assignedUserId !== undefined && area) {
+        // Sin montaje, si se nomina a alguien debe ser del área destino.
+        await this.assertUserBelongsToArea(assignedUserId, area);
+      }
 
       // Si requiere Diseño: el pedido arranca EN Diseño (area='diseno',
       // estado 'en diseño') sin importar qué `area`/`statusId` mandó
