@@ -287,6 +287,9 @@ export class OrderController {
   }
 
   /** Diseño arma una nueva ronda de montaje y la manda a Recepción. */
+  // Sube un archivo (base64, hasta 5MB): throttle más estricto que el
+  // default global.
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Auth(Role.DISENO, Role.ADMIN, Role.SUPERUSER)
   @Post(':id/design-revisions')
   createDesignRevision(
@@ -370,6 +373,9 @@ export class OrderController {
   }
 
   /** Recepción carga el feedback del cliente sobre una ronda de montaje. */
+  // Sube un archivo (base64, hasta 5MB): throttle más estricto que el
+  // default global.
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
   @Patch(':id/design-revisions/:revisionId/feedback')
   addDesignFeedback(
