@@ -170,7 +170,7 @@ export class ChatService {
     }
     if (!this.canAccess(conversation, user)) {
       throw new HttpException(
-        'No tenés acceso a esta conversación',
+        'Sin acceso a esta conversación',
         HttpStatus.FORBIDDEN,
       );
     }
@@ -444,7 +444,7 @@ export class ChatService {
   ) {
     if (otherUserId === user.userId) {
       throw new HttpException(
-        'No podés abrir un chat con vos mismo',
+        'No se puede abrir un chat con el propio usuario',
         HttpStatus.BAD_REQUEST,
       );
     }

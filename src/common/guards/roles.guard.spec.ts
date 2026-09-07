@@ -53,7 +53,7 @@ describe('RolesGuard', () => {
       expect(error).toBeInstanceOf(ForbiddenException);
       const message = (error as ForbiddenException).message;
       expect(message).not.toContain('Forbidden');
-      expect(message).toBe('No tenés permisos para acceder a esta sección');
+      expect(message).toBe('Sin permisos para acceder a esta sección');
     }
   });
 

@@ -30,7 +30,7 @@ export class RolesGuard implements CanActivate {
       // el mensaje en inglés "Forbidden resource", que el frontend muestra tal
       // cual al usuario. Lanzamos un mensaje propio, en español.
       throw new ForbiddenException(
-        'No tenés permisos para acceder a esta sección',
+        'Sin permisos para acceder a esta sección',
       );
     }
 

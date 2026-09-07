@@ -216,7 +216,7 @@ export class OrderService {
     const visible = await this.filterOrdersForUser([order], requestingUser);
     if (visible.length === 0) {
       throw new HttpException(
-        'No tenés acceso a este pedido',
+        'Sin acceso a este pedido',
         HttpStatus.FORBIDDEN,
       );
     }
@@ -278,7 +278,7 @@ export class OrderService {
     );
     if (!allowed) {
       throw new HttpException(
-        'No tenés permiso para editar el área de producción',
+        'Sin permiso para editar el área de producción',
         HttpStatus.FORBIDDEN,
       );
     }
@@ -436,8 +436,8 @@ export class OrderService {
           await this.notificationService.createNotification({
             userId: order.assignedUserId,
             type: 'order_assigned',
-            title: 'Pedido asignado',
-            body: `Se te asignó el pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''}`,
+            title: 'Nuevo pedido asignado',
+            body: `Pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} asignado`,
             orderId: order.id,
           });
         } else if (order.area) {
@@ -459,7 +459,7 @@ export class OrderService {
             areaUserIds,
             {
               type: 'order_assigned',
-              title: 'Nuevo pedido para tu área',
+              title: 'Nuevo pedido en el área',
               body: `Nuevo pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} sin asignar en ${order.area}`,
               orderId: order.id,
             },

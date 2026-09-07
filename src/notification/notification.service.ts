@@ -118,7 +118,7 @@ export class NotificationService {
       throw new NotFoundException('Notificación no encontrada');
     }
     if (notification.userId !== userId) {
-      throw new ForbiddenException('No tenés acceso a esta notificación');
+      throw new ForbiddenException('Sin acceso a esta notificación');
     }
     if (notification.read) {
       return notification;
