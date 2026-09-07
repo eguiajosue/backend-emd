@@ -11,6 +11,7 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -102,9 +103,17 @@ export class CreateOrderDto {
   @IsPositive()
   userId?: number;
 
-  @IsNotEmpty()
+  // Requerida sólo cuando el pedido NO pasa por Diseño (requiresDesign en
+  // false): en ese caso hay que saber a qué área operativa va directo. Si
+  // requiresDesign es true (default), el área se define después vía
+  // `productionArea`, así que puede venir ausente.
+  @ValidateIf(
+    (dto: CreateOrderDto) =>
+      dto.requiresDesign === false || dto.area !== undefined,
+  )
+  @IsNotEmpty({ message: 'area es requerida cuando requiresDesign es false' })
   @IsIn(ORDER_AREAS)
-  area: (typeof ORDER_AREAS)[number];
+  area?: (typeof ORDER_AREAS)[number];
 
   @IsOptional()
   @IsInt()

@@ -108,6 +108,7 @@ model Order {
   auditLogs       OrderAuditLog[] // Auditoría de ediciones del pedido.
   notifications   Notification[] // Notificaciones persistentes que referencian este pedido.
   designRevisions DesignRevision[] // Rondas de montaje/feedback/autorización de la fase de Diseño.
+  chatMessages    ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
 
   @@index([statusId])
   @@index([clientId])
@@ -366,12 +367,49 @@ model ChatMessage {
   id             Int      @id @default(autoincrement()) // Identificador único del mensaje.
   conversationId Int // Clave foránea que referencia a ChatConversation.
   senderId       Int // Clave foránea que referencia al User que lo envió.
-  body           String // Contenido del mensaje (texto plano).
+  body           String? // Contenido del mensaje (texto plano). Opcional si hay adjunto.
+  // Referencia opcional a un pedido, para dar contexto sin que sea
+  // obligatorio en cada mensaje (ej. "che, mirá el pedido #123"). `SetNull`
+  // en vez de `Cascade`: si el pedido se borra, el mensaje sobrevive sin la
+  // referencia en lugar de desaparecer.
+  orderId        Int?
+  // Adjunto opcional (foto, documento o audio). Mismo esquema que
+  // Order.authorizationFile*: el contenido va en base64 directo en la
+  // columna (sin storage externo), y el tipo/tamaño se validan en
+  // ChatService.sendMessage (magic-byte sniffing con `file-type`, igual que
+  // OrderService.assertAuthorizationFileSize).
+  attachmentData     String?
+  attachmentFilename String?
+  attachmentMimeType String?
+  attachmentSize     Int?
   createdAt      DateTime @default(now()) // Fecha de envío.
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User             @relation(fields: [senderId], references: [id])
+  order        Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
   @@index([senderId])
+  @@index([orderId])
+}
+
+// Log de auditoría genérico (independiente de `OrderAuditLog`, que sólo
+// cubre cambios de campos de un pedido puntual). Pensado para eventos que no
+// tienen necesariamente un `orderId` (ej. exportación CSV de varios pedidos)
+// o que agrupan varias entidades (ej. una acción masiva). Sin relación FK a
+// `User`/`Order`: así el registro sobrevive aunque se borre el actor o la
+// entidad referenciada, y no exige que `entityId` sea siempre un id de
+// pedido.
+model AuditLog {
+  id           Int      @id @default(autoincrement()) // Identificador único del registro.
+  actorUserId  Int // Id del usuario que ejecutó la acción (sin FK, ver nota arriba).
+  action       String // Acción realizada: "order.bulk_status_update" | "order.csv_export" | etc.
+  entityType   String // Tipo de entidad afectada: "order" | "order_bulk" | "order_export" | etc.
+  entityId     String // Id (o ids serializados/"bulk") de la entidad afectada.
+  metadata     Json? // Detalle adicional de la acción (ids afectados, filtros usados, resultado, etc.).
+  createdAt    DateTime @default(now()) // Fecha del registro.
+
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@index([createdAt])
 }

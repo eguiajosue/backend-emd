@@ -4,6 +4,7 @@ import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
 import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
 import { NotificationService } from 'src/notification/notification.service';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
 
 describe('OrderService - visibilidad por área (findAll)', () => {
   let orderService: OrderService;
@@ -60,6 +61,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
         createNotificationForUsers: jest.fn(),
         userIdsForArea: jest.fn().mockResolvedValue([]),
       } as unknown as NotificationService,
+      { record: jest.fn() } as unknown as AuditLogService,
     );
   });
 

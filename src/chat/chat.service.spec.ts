@@ -1,6 +1,7 @@
 import { ChatService } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { OrderService } from 'src/order/order.service';
 
 /**
  * Conversaciones de prueba: el canal Recepción↔Taller, el canal
@@ -34,6 +35,7 @@ describe('ChatService - autorización', () => {
   let chatService: ChatService;
   let prisma: any;
   let gateway: { emitChatMessage: jest.Mock };
+  let orderService: { findOne: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -89,10 +91,12 @@ describe('ChatService - autorización', () => {
       },
     };
     gateway = { emitChatMessage: jest.fn() };
+    orderService = { findOne: jest.fn().mockResolvedValue({ id: 1 }) };
 
     chatService = new ChatService(
       prisma as unknown as PrismaService,
       gateway as unknown as NotificationsGateway,
+      orderService as unknown as OrderService,
     );
   });
 
@@ -138,7 +142,7 @@ describe('ChatService - autorización', () => {
     ).resolves.toMatchObject({ id: 3 });
   });
 
-  it('el admin es miembro de TODO canal y de TODO DM, sin invitación', async () => {
+  it('el admin es miembro de TODO canal de área, pero NO de un DM ajeno', async () => {
     const admin = { userId: 99, roles: ['admin'] };
     await expect(
       chatService.assertConversationAccess(1, admin),
@@ -148,19 +152,31 @@ describe('ChatService - autorización', () => {
     ).resolves.toBeTruthy();
     await expect(
       chatService.assertConversationAccess(3, admin),
-    ).resolves.toBeTruthy();
+    ).rejects.toMatchObject({ status: 403 });
 
     const conversations = await chatService.findConversationsForUser(admin);
-    expect(conversations.map((c) => c.id).sort()).toEqual([1, 2, 3]);
+    expect(conversations.map((c) => c.id).sort()).toEqual([1, 2]);
   });
 
-  it('superuser tiene la misma visibilidad total que admin', async () => {
+  it('el admin SÍ accede al DM en el que él mismo es participante', async () => {
+    await expect(
+      chatService.assertConversationAccess(3, { userId: 10, roles: ['admin'] }),
+    ).resolves.toBeTruthy();
+  });
+
+  it('superuser tiene la misma visibilidad total que admin sobre los canales de área, pero no sobre DMs ajenos', async () => {
+    await expect(
+      chatService.assertConversationAccess(1, {
+        userId: 98,
+        roles: ['superuser'],
+      }),
+    ).resolves.toBeTruthy();
     await expect(
       chatService.assertConversationAccess(3, {
         userId: 98,
         roles: ['superuser'],
       }),
-    ).resolves.toBeTruthy();
+    ).rejects.toMatchObject({ status: 403 });
   });
 
   it('un usuario de taller sólo ve su canal en la lista de conversaciones', async () => {
@@ -171,15 +187,23 @@ describe('ChatService - autorización', () => {
     expect(conversations.map((c) => c.id)).toEqual([1]);
   });
 
-  it('resolveMembers incluye siempre a los admin, marcados como monitores', async () => {
-    const members = await chatService.resolveMembers(CONVERSATIONS[3] as any);
+  it('resolveMembers incluye a los admin como monitores en un canal de área', async () => {
+    const members = await chatService.resolveMembers(CONVERSATIONS[1] as any);
     expect(members).toEqual(
       expect.arrayContaining([
-        { userId: 10, isMonitor: false },
-        { userId: 11, isMonitor: false },
+        { userId: 5, isMonitor: false },
+        { userId: 7, isMonitor: false },
         { userId: 99, isMonitor: true },
       ]),
     );
+  });
+
+  it('resolveMembers de un DM NO incluye a los admin', async () => {
+    const members = await chatService.resolveMembers(CONVERSATIONS[3] as any);
+    expect(members).toEqual([
+      { userId: 10, isMonitor: false },
+      { userId: 11, isMonitor: false },
+    ]);
   });
 
   it('enviar un mensaje a una conversación ajena no persiste ni emite nada', async () => {

@@ -54,11 +54,26 @@ export interface OrderStatusChangedPayload {
 interface ChatMessagePayload {
   id: number;
   conversationId: number;
-  body: string;
+  body: string | null;
   createdAt: Date;
   senderId: number;
   senderUsername: string;
   senderName: string;
+  /** Pedido opcional adjuntado al mensaje como contexto (ver ChatService.sendMessage). */
+  orderId?: number | null;
+  order?: {
+    id: number;
+    description: string;
+    area: string | null;
+    status: { name: string } | null;
+  } | null;
+  /** Adjunto opcional (foto, documento o audio) -- ver ChatService.toAttachmentDto. */
+  attachment?: {
+    filename: string;
+    mimeType: string;
+    size: number | null;
+    dataUrl?: string;
+  } | null;
 }
 
 /** Payload de la notificación genérica a Recepción por cambios de un usuario de área. */
@@ -98,10 +113,13 @@ export class NotificationsGateway
     // (sólo viaja con el transporte polling) y `auth.token` (el único que
     // llega cuando el navegador usa `transports: ["websocket"]`, porque el
     // WebSocket del browser no admite cabeceras propias). Se aceptan las dos.
-    const authPayload = client.handshake.auth as { token?: unknown } | undefined;
+    const authPayload = client.handshake.auth as
+      | { token?: unknown }
+      | undefined;
     const token =
-      (typeof authPayload?.token === 'string' ? authPayload.token : undefined) ??
-      client.handshake.headers.authorization;
+      (typeof authPayload?.token === 'string'
+        ? authPayload.token
+        : undefined) ?? client.handshake.headers.authorization;
 
     if (!token) {
       this.logger.warn(`Client disconnected: No token provided`);
@@ -193,20 +211,19 @@ export class NotificationsGateway
   }
 
   /**
-   * Nota agregada a un pedido: se notifica al usuario asignado (room
-   * `user:${assignedUserId}`) si tiene uno, o al área del pedido (misma
-   * room de rol/área que las notificaciones de pedido nuevo) en caso
-   * contrario.
+   * Nota agregada a un pedido: sólo se notifica al área del pedido (misma
+   * room de rol/área que las notificaciones de pedido nuevo) cuando el
+   * pedido NO tiene usuario asignado todavía. Un usuario de área operativa
+   * ya asignado a un pedido no recibe esta notificación — según la regla de
+   * negocio, sólo se le notifica cuando se le asigna un pedido nuevo, no en
+   * cambios posteriores (notas incluidas) sobre pedidos que ya tiene
+   * asignados.
    */
   notifyOrderNoteAdded(
     target: { assignedUserId: number | null; area: string | null },
     note: OrderNoteNotificationPayload,
   ) {
-    if (target.assignedUserId) {
-      this.server
-        .to(`user:${target.assignedUserId}`)
-        .emit('orderNoteAdded', note);
-    } else if (target.area) {
+    if (!target.assignedUserId && target.area) {
       this.server.to(target.area).emit('orderNoteAdded', note);
     }
     this.logger.log(`Note notification sent: Order ID ${note.orderId}`);

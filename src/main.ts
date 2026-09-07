@@ -44,7 +44,32 @@ async function bootstrap() {
 
   const isProduction = config.get('NODE_ENV', { infer: true }) === 'production';
 
-  app.use(helmet());
+  // Configuración explícita en vez de los defaults de helmet() a secas: CSP
+  // restrictiva (sólo 'self', sin scripts/estilos externos -- esta API no
+  // sirve HTML propio más allá de Swagger, así que puede ser estricta), HSTS
+  // con preload (sólo tiene efecto real detrás de HTTPS, que es como corre
+  // en producción), y los headers clásicos anti-clickjacking/MIME-sniffing.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+        },
+      },
+      hsts: {
+        maxAge: 15552000, // 180 días
+        includeSubDomains: true,
+        preload: true,
+      },
+      noSniff: true, // X-Content-Type-Options: nosniff
+      frameguard: { action: 'deny' }, // X-Frame-Options: DENY
+    }),
+  );
   app.use(compression());
 
   const allowedOrigins = parseAllowedOrigins(

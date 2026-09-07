@@ -6,6 +6,7 @@ import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AreaVisibilityModule } from 'src/area-visibility/area-visibility.module';
 import { OrderProductPresetModule } from 'src/order-product-preset/order-product-preset.module';
 import { NotificationModule } from 'src/notification/notification.module';
+import { AuditLogModule } from 'src/audit-log/audit-log.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { NotificationModule } from 'src/notification/notification.module';
     AreaVisibilityModule,
     OrderProductPresetModule,
     NotificationModule,
+    AuditLogModule,
   ],
   controllers: [OrderController],
   providers: [OrderService, NotificationsGateway],

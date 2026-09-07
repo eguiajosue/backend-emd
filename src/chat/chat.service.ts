@@ -7,6 +7,12 @@ import {
 } from 'src/common/dto/pagination-query.dto';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { Role } from 'src/common/enums/roles.enum';
+import { OrderService } from 'src/order/order.service';
+import { assertBase64FileValid } from 'src/common/file-validation';
+import {
+  ChatAttachmentDto,
+  CHAT_ATTACHMENT_MIME_TYPES,
+} from './dto/send-message.dto';
 import {
   CHAT_AREAS,
   CHAT_CONVERSATION_TYPE_AREA,
@@ -14,6 +20,54 @@ import {
   chatAreaLabel,
   isMonitorRole,
 } from './chat.constants';
+
+/** Tamaño máximo (en bytes, ya decodificado) para un adjunto de chat. Mismo
+ * límite que la hoja de autorización de pedidos (ver order.service.ts). */
+const MAX_CHAT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+
+/** Selección de columnas de adjunto reusada en varios lados. */
+const MESSAGE_ATTACHMENT_SELECT = {
+  attachmentFilename: true,
+  attachmentMimeType: true,
+  attachmentSize: true,
+} as const;
+
+/** Forma cruda de un mensaje leído de la DB, con o sin `attachmentData`. */
+interface MessageAttachmentFields {
+  attachmentFilename: string | null;
+  attachmentMimeType: string | null;
+  attachmentSize: number | null;
+  attachmentData?: string | null;
+}
+
+/**
+ * Arma el objeto `attachment` expuesto en las respuestas/eventos de chat a
+ * partir de las columnas crudas de `ChatMessage`. Sigue el mismo patrón que
+ * `OrderService.findOne` con `authorizationFile`: el binario en base64 se
+ * expone como `dataUrl` (`data:<mime>;base64,<...>`), listo para usar en un
+ * `<img>`/`<audio>`/link de descarga en el cliente.
+ */
+function toAttachmentDto(message: MessageAttachmentFields) {
+  if (!message.attachmentFilename || !message.attachmentMimeType) {
+    return null;
+  }
+  return {
+    filename: message.attachmentFilename,
+    mimeType: message.attachmentMimeType,
+    size: message.attachmentSize,
+    ...(message.attachmentData != null && {
+      dataUrl: `data:${message.attachmentMimeType};base64,${message.attachmentData}`,
+    }),
+  };
+}
+
+/** Resumen de pedido adjuntado a un mensaje, sólo lo necesario para la burbuja. */
+const MESSAGE_ORDER_SELECT = {
+  id: true,
+  description: true,
+  area: true,
+  status: { select: { name: true } },
+} as const;
 
 /** Usuario autenticado que hace la consulta (subset del AccessTokenPayload). */
 export interface ChatRequestingUser {
@@ -42,6 +96,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
+    private readonly orderService: OrderService,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -53,18 +108,20 @@ export class ChatService {
    * conversación y de los roles del usuario (nunca del id que manda el
    * cliente). Mismo espíritu que `OrderService.assertOrderAccess()`.
    *
-   * - admin / superuser: miembros de TODAS las conversaciones (monitoreo).
+   * - admin / superuser: miembros de TODOS los canales de área (monitoreo).
+   *   NO son miembros automáticos de los mensajes directos ajenos: en un DM
+   *   sólo entran si son alguno de los dos participantes.
    * - canal de área: los usuarios con ese rol de área + todos los de recepción.
-   * - mensaje directo: únicamente los dos participantes (+ monitores).
+   * - mensaje directo: únicamente los dos participantes.
    */
   private canAccess(
     conversation: ConversationCore,
     user: ChatRequestingUser,
   ): boolean {
-    if (isMonitorRole(user.roles)) {
-      return true;
-    }
     if (conversation.type === CHAT_CONVERSATION_TYPE_AREA) {
+      if (isMonitorRole(user.roles)) {
+        return true;
+      }
       if (!conversation.area) return false;
       return (
         user.roles.includes(conversation.area) ||
@@ -134,16 +191,16 @@ export class ChatService {
   async resolveMembers(
     conversation: ConversationCore,
   ): Promise<{ userId: number; isMonitor: boolean }[]> {
-    const monitors = await this.prisma.user.findMany({
-      where: { roles: { some: { name: { in: [Role.ADMIN, Role.SUPERUSER] } } } },
-      select: { id: true },
-    });
-
     const participantIds = new Set<number>();
-    if (conversation.type === CHAT_CONVERSATION_TYPE_AREA && conversation.area) {
+    if (
+      conversation.type === CHAT_CONVERSATION_TYPE_AREA &&
+      conversation.area
+    ) {
       const users = await this.prisma.user.findMany({
         where: {
-          roles: { some: { name: { in: [conversation.area, Role.RECEPCION] } } },
+          roles: {
+            some: { name: { in: [conversation.area, Role.RECEPCION] } },
+          },
         },
         select: { id: true },
       });
@@ -161,11 +218,22 @@ export class ChatService {
     participantIds.forEach((userId) =>
       result.push({ userId, isMonitor: false }),
     );
-    monitors.forEach((m) => {
-      if (!participantIds.has(m.id)) {
-        result.push({ userId: m.id, isMonitor: true });
-      }
-    });
+
+    // Los admin/superuser sólo son monitores automáticos de los canales de
+    // área (recepción↔departamento). En un DM ajeno no se agregan.
+    if (conversation.type === CHAT_CONVERSATION_TYPE_AREA) {
+      const monitors = await this.prisma.user.findMany({
+        where: {
+          roles: { some: { name: { in: [Role.ADMIN, Role.SUPERUSER] } } },
+        },
+        select: { id: true },
+      });
+      monitors.forEach((m) => {
+        if (!participantIds.has(m.id)) {
+          result.push({ userId: m.id, isMonitor: true });
+        }
+      });
+    }
     return result;
   }
 
@@ -447,15 +515,29 @@ export class ChatService {
       createdAt: true,
       senderId: true,
       sender: { select: USER_SUMMARY_SELECT },
+      orderId: true,
+      order: { select: MESSAGE_ORDER_SELECT },
+      attachmentData: true,
+      ...MESSAGE_ATTACHMENT_SELECT,
     };
 
+    const toDto = (message: any) => {
+      const { attachmentData, ...rest } = message;
+      return {
+        ...rest,
+        attachment: toAttachmentDto({ attachmentData, ...rest }),
+      };
+    };
+
+    let messages: any[];
     if (!enabled) {
-      return this.prisma.chatMessage.findMany({
+      messages = await this.prisma.chatMessage.findMany({
         where,
         select,
         orderBy: { createdAt: 'desc' },
         take: 100,
       });
+      return messages.map(toDto);
     }
 
     const [data, total] = await this.prisma.$transaction([
@@ -468,8 +550,9 @@ export class ChatService {
       }),
       this.prisma.chatMessage.count({ where }),
     ]);
+    messages = data;
 
-    return buildPaginatedResult(data, total, page, limit);
+    return buildPaginatedResult(messages.map(toDto), total, page, limit);
   }
 
   /**
@@ -480,16 +563,51 @@ export class ChatService {
    */
   async sendMessage(
     conversationId: number,
-    body: string,
+    body: string | undefined,
     user: ChatRequestingUser,
+    orderId?: number,
+    attachment?: ChatAttachmentDto,
   ) {
+    if (!body && !attachment) {
+      throw new HttpException(
+        'El mensaje no puede estar vacío',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     const conversation = await this.assertConversationAccess(
       conversationId,
       user,
     );
 
+    if (orderId != null) {
+      // Reusa la misma verificación de visibilidad que `GET /orders/:id`:
+      // si quien manda el mensaje no puede ver ese pedido, no puede
+      // adjuntarlo. `findOne` tira 403/404 por sí solo si corresponde.
+      await this.orderService.findOne(orderId, {
+        userId: user.userId,
+        roles: user.roles,
+      });
+    }
+
+    let attachmentBuffer: Buffer | undefined;
+    if (attachment) {
+      attachmentBuffer = await this.assertChatAttachmentValid(attachment);
+    }
+
     const message = await this.prisma.chatMessage.create({
-      data: { conversationId, senderId: user.userId, body },
+      data: {
+        conversationId,
+        senderId: user.userId,
+        body: body ?? null,
+        orderId,
+        ...(attachment && {
+          attachmentData: attachment.data,
+          attachmentFilename: attachment.filename,
+          attachmentMimeType: attachment.mimeType,
+          attachmentSize: attachmentBuffer!.length,
+        }),
+      },
       select: {
         id: true,
         conversationId: true,
@@ -497,6 +615,10 @@ export class ChatService {
         createdAt: true,
         senderId: true,
         sender: { select: USER_SUMMARY_SELECT },
+        orderId: true,
+        order: { select: MESSAGE_ORDER_SELECT },
+        attachmentData: true,
+        ...MESSAGE_ATTACHMENT_SELECT,
       },
     });
 
@@ -513,6 +635,9 @@ export class ChatService {
       data: { lastReadAt: message.createdAt },
     });
 
+    const { attachmentData, ...messageRest } = message;
+    const attachmentDto = toAttachmentDto({ attachmentData, ...messageRest });
+
     this.notificationsGateway.emitChatMessage(
       members.map((m) => m.userId),
       {
@@ -524,10 +649,28 @@ export class ChatService {
         senderUsername: message.sender.username,
         senderName:
           `${message.sender.firstName} ${message.sender.lastName ?? ''}`.trim(),
+        orderId: message.orderId,
+        order: message.order,
+        attachment: attachmentDto,
       },
     );
 
-    return message;
+    return { ...messageRest, attachment: attachmentDto };
+  }
+
+  /** Valida tamaño y tipo real (magic bytes) de un adjunto de chat, igual
+   * que `OrderService.assertAuthorizationFileSize` pero con la lista de
+   * mime types ampliada a audio (fotos, documentos y audios). */
+  private async assertChatAttachmentValid(
+    attachment: ChatAttachmentDto,
+  ): Promise<Buffer> {
+    return assertBase64FileValid(attachment, {
+      maxBytes: MAX_CHAT_ATTACHMENT_BYTES,
+      allowedMimeTypes: CHAT_ATTACHMENT_MIME_TYPES,
+      sizeErrorMessage: 'El archivo no puede superar 5MB',
+      typeErrorMessage:
+        'El contenido del archivo no coincide con un tipo permitido (imagen, PDF o audio)',
+    });
   }
 
   /** Marca como leída la conversación hasta el instante actual. */
@@ -548,7 +691,9 @@ export class ChatService {
   }
 
   /** Total de mensajes no leídos del usuario, para el badge global del menú. */
-  async unreadCount(user: ChatRequestingUser): Promise<{ unreadCount: number }> {
+  async unreadCount(
+    user: ChatRequestingUser,
+  ): Promise<{ unreadCount: number }> {
     const conversations = await this.findConversationsForUser(user);
     return {
       unreadCount: conversations.reduce((acc, c) => acc + c.unreadCount, 0),

@@ -1,6 +1,11 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { assertBase64FileValid } from 'src/common/file-validation';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateOrderDto, AuthorizationFileDto } from './dto/create-order.dto';
+import {
+  CreateOrderDto,
+  AuthorizationFileDto,
+  AUTHORIZATION_FILE_MIME_TYPES,
+} from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Prisma } from '@prisma/client';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
@@ -21,6 +26,8 @@ import {
 } from './dto/design-revision.dto';
 import { NotificationService } from 'src/notification/notification.service';
 import { Role } from 'src/common/enums/roles.enum';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
+import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -39,6 +46,16 @@ const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
  * DELIVERED_STATUS_ID en frontend-emd/src/lib/orderStatus.ts.
  */
 const DELIVERED_STATUS_ID = 5;
+
+/**
+ * Id del estado "cancelado", sembrado por prisma/seed.ts (ver STATUS_SEEDS)
+ * y por la migración 20260907120000_add_cancelled_status con id explícito
+ * = 10 (siguiente id libre después de los estados 6-9 del flujo de
+ * Diseño). Se expone acá para que otra lógica backend (filtros de
+ * visibilidad, bulkUpdateStatusOrArea, etc.) pueda referenciarlo sin
+ * repetir el número mágico.
+ */
+const CANCELLED_STATUS_ID = 10;
 
 /**
  * Nombres de los estados nuevos del flujo de Diseño, sembrados al final de
@@ -94,6 +111,7 @@ export class OrderService {
     private readonly areaVisibilityService: AreaVisibilityService,
     private readonly orderProductPresetService: OrderProductPresetService,
     private readonly notificationService: NotificationService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   /** Valida que cada línea de producto tenga productId y/o customName. */
@@ -205,15 +223,26 @@ export class OrderService {
     return order;
   }
 
-  /** Valida el tamaño decodificado del archivo de autorización (y, reusado, del montaje/feedback de diseño). */
-  private assertAuthorizationFileSize(file: AuthorizationFileDto) {
-    const sizeInBytes = Buffer.byteLength(file.data, 'base64');
-    if (sizeInBytes > MAX_AUTHORIZATION_FILE_BYTES) {
-      throw new HttpException(
-        'El archivo no puede superar 5MB',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+  /**
+   * Valida el tamaño decodificado y el tipo REAL (por contenido, no por el
+   * `mimeType` que manda el cliente) del archivo de autorización -- reusado
+   * también para el montaje/feedback de diseño.
+   *
+   * `mimeType` en el DTO ya está restringido por `@IsIn(AUTHORIZATION_FILE_MIME_TYPES)`,
+   * pero eso sólo valida el STRING declarado por el cliente: nada impide
+   * mandar un .html o un binario ejecutable con `mimeType: 'image/png'` y
+   * `filename: 'x.png'`. `file-type` (magic bytes) confirma que el
+   * contenido decodificado sea realmente uno de los formatos permitidos, y
+   * que coincida con lo declarado.
+   */
+  private async assertAuthorizationFileSize(file: AuthorizationFileDto) {
+    await assertBase64FileValid(file, {
+      maxBytes: MAX_AUTHORIZATION_FILE_BYTES,
+      allowedMimeTypes: AUTHORIZATION_FILE_MIME_TYPES,
+      sizeErrorMessage: 'El archivo no puede superar 5MB',
+      typeErrorMessage:
+        'El contenido del archivo no coincide con un tipo permitido (PNG, JPEG o PDF)',
+    });
   }
 
   /**
@@ -293,7 +322,7 @@ export class OrderService {
       }
 
       if (authorizationFile) {
-        this.assertAuthorizationFileSize(authorizationFile);
+        await this.assertAuthorizationFileSize(authorizationFile);
       }
 
       this.assertOrderProductsValid(orderProducts);
@@ -719,10 +748,11 @@ export class OrderService {
    * `area_user_updated_order`, para que el frontend pueda renderizar una
    * etiqueta específica ("Cambio de estado").
    *
-   * Destinatarios: todos los usuarios de Recepción (mismo criterio que
-   * `notifyAreaUserUpdatedOrder`) más el usuario asignado al pedido, si lo
-   * hay. La lista se deduplica para que un recepcionista asignado al pedido
-   * no reciba la misma notificación dos veces.
+   * Destinatarios: únicamente los usuarios de Recepción (mismo criterio que
+   * `notifyAreaUserUpdatedOrder`). El usuario de área asignado al pedido NO
+   * se notifica acá: sólo recibe notificación cuando se le asigna un pedido
+   * nuevo (`notifyNewAssignedOrder`), no en cambios posteriores de un pedido
+   * que ya tiene asignado.
    */
   private async notifyOrderStatusChanged(
     orderId: number,
@@ -736,15 +766,8 @@ export class OrderService {
     const title = `Cambio de estado del pedido #${orderId}`;
     const body = `${changedByUsername} cambió el estado del pedido #${orderId} de "${previousStatusName}" a "${newStatusName}"`;
 
-    const recepcionUserIds =
+    const recipientIds =
       await this.notificationService.userIdsForArea('recepcion');
-    const recipientIds = Array.from(
-      new Set(
-        assignedUserId != null
-          ? [...recepcionUserIds, assignedUserId]
-          : recepcionUserIds,
-      ),
-    );
 
     await this.notificationService.createNotificationForUsers(recipientIds, {
       type: 'order_status_changed',
@@ -796,7 +819,7 @@ export class OrderService {
       }
 
       if (authorizationFile) {
-        this.assertAuthorizationFileSize(authorizationFile);
+        await this.assertAuthorizationFileSize(authorizationFile);
       }
 
       this.assertOrderProductsValid(orderProducts);
@@ -1009,6 +1032,121 @@ export class OrderService {
       // detalles internos (Prisma, stack) al cliente en producción.
       throw error;
     }
+  }
+
+  /**
+   * POST /orders/bulk-actions: aplica un cambio de estado y/o área a varios
+   * pedidos a la vez. Mismo criterio de acceso que PATCH /orders/:id
+   * (assertOrderAccess por pedido): un id sin acceso (o inexistente) se
+   * reporta como fallo individual y NO entra a la transacción, en vez de
+   * abortar el resto del batch.
+   *
+   * Atomicidad: los pedidos que sí pasan la validación previa se actualizan
+   * en una única `$transaction` -- o se aplican todos, o (si Prisma tira un
+   * error a mitad de camino, ej. un statusId que deja de existir entre la
+   * validación y el commit) no se aplica ninguno. Los resultados por id
+   * reflejan eso: si la transacción falla, todos los ids que iban a
+   * actualizarse pasan a `success: false` con el motivo del error.
+   */
+  async bulkUpdateStatusOrArea(
+    dto: BulkOrderActionDto,
+    requestingUser: RequestingUser,
+  ): Promise<{
+    results: Array<{ orderId: number; success: boolean; error?: string }>;
+  }> {
+    if (dto.statusId === undefined && dto.area === undefined) {
+      throw new HttpException(
+        'Debe indicarse statusId y/o area',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (dto.area !== undefined) {
+      this.assertCanEditProductionArea(requestingUser);
+    }
+
+    const results: Array<{
+      orderId: number;
+      success: boolean;
+      error?: string;
+    }> = [];
+    const acceptedIds: number[] = [];
+
+    // Validación previa (acceso + existencia) por id, fuera de la
+    // transacción: así un id inválido no aborta el batch completo, sólo
+    // queda afuera de él.
+    for (const orderId of dto.orderIds) {
+      try {
+        await this.assertOrderAccess(orderId, requestingUser);
+        acceptedIds.push(orderId);
+      } catch (error) {
+        results.push({
+          orderId,
+          success: false,
+          error:
+            error instanceof HttpException
+              ? ((error.getResponse() as { message?: string })?.message ??
+                error.message)
+              : 'No se pudo validar el acceso al pedido',
+        });
+      }
+    }
+
+    if (acceptedIds.length > 0) {
+      const data: Prisma.OrderUpdateInput = {
+        ...(dto.statusId !== undefined && {
+          status: { connect: { id: dto.statusId } },
+        }),
+        ...(dto.area !== undefined && { area: dto.area }),
+      };
+
+      try {
+        await this.prisma.$transaction(
+          acceptedIds.map((orderId) =>
+            this.prisma.order.update({ where: { id: orderId }, data }),
+          ),
+        );
+        for (const orderId of acceptedIds) {
+          results.push({ orderId, success: true });
+        }
+      } catch (error) {
+        const message =
+          error.code === 'P2025'
+            ? 'Orden no encontrada'
+            : error.code === 'P2003'
+              ? 'ID de estado inválido'
+              : 'No se pudo aplicar el cambio';
+        for (const orderId of acceptedIds) {
+          results.push({ orderId, success: false, error: message });
+        }
+      }
+    }
+
+    await this.auditLogService.record({
+      actorUserId: requestingUser.userId,
+      action: 'order.bulk_status_area_update',
+      entityType: 'order_bulk',
+      entityId: 'bulk',
+      metadata: {
+        requestedOrderIds: dto.orderIds,
+        statusId: dto.statusId,
+        area: dto.area,
+        results,
+      },
+    });
+
+    // Mantiene el orden pedido por el cliente en la respuesta.
+    const byId = new Map(results.map((r) => [r.orderId, r]));
+    return {
+      results: dto.orderIds.map(
+        (orderId) =>
+          byId.get(orderId) ?? {
+            orderId,
+            success: false,
+            error: 'No se pudo procesar el pedido',
+          },
+      ),
+    };
   }
 
   /** Crea una nota interna en un pedido y notifica al área/usuario asignado. */
@@ -1292,7 +1430,7 @@ export class OrderService {
     requestingUser: RequestingUser,
   ) {
     await this.assertOrderAccess(orderId, requestingUser);
-    this.assertAuthorizationFileSize(dto.montageFile);
+    await this.assertAuthorizationFileSize(dto.montageFile);
 
     const last = await this.prisma.designRevision.findFirst({
       where: { orderId },
@@ -1368,7 +1506,7 @@ export class OrderService {
     await this.assertOrderAccess(orderId, requestingUser);
     await this.getDesignRevisionOrThrow(orderId, revisionId);
     if (dto.feedbackFile) {
-      this.assertAuthorizationFileSize(dto.feedbackFile);
+      await this.assertAuthorizationFileSize(dto.feedbackFile);
     }
 
     const statusId = await this.resolveStatusIdByName(
@@ -1641,6 +1779,16 @@ export class OrderService {
     });
 
     const visible = await this.filterOrdersForUser(orders, requestingUser);
+
+    if (requestingUser) {
+      await this.auditLogService.record({
+        actorUserId: requestingUser.userId,
+        action: 'order.csv_export',
+        entityType: 'order_export',
+        entityId: 'bulk',
+        metadata: { filters, exportedCount: visible.length },
+      });
+    }
 
     return visible.map((order) => ({
       id: order.id,
