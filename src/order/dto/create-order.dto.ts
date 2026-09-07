@@ -171,4 +171,14 @@ export class CreateOrderDto {
   @IsOptional()
   @IsIn(PRODUCTION_AREAS)
   productionArea?: (typeof PRODUCTION_AREAS)[number];
+
+  // Áreas de producción que van a trabajar el pedido. Un pedido puede necesitar
+  // varias (ej. bordado + dtf) y todas avanzan en paralelo, cada una con su
+  // propia tarea (ver WORKFLOW.md §3). `productionArea` (singular) se mantiene
+  // como el destino "principal" para compatibilidad.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(PRODUCTION_AREAS.length)
+  @IsIn(PRODUCTION_AREAS, { each: true })
+  productionAreas?: (typeof PRODUCTION_AREAS)[number][];
 }

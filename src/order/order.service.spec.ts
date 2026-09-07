@@ -1,4 +1,5 @@
 import { OrderService } from './order.service';
+import { OrderAreaTaskService } from './order-area-task.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
@@ -62,6 +63,9 @@ describe('OrderService - visibilidad por área (findAll)', () => {
         userIdsForArea: jest.fn().mockResolvedValue([]),
       } as unknown as NotificationService,
       { record: jest.fn() } as unknown as AuditLogService,
+      {
+        createTasksForAreas: jest.fn().mockResolvedValue([]),
+      } as unknown as OrderAreaTaskService,
     );
   });
 

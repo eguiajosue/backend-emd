@@ -28,6 +28,7 @@ import { NotificationService } from 'src/notification/notification.service';
 import { Role } from 'src/common/enums/roles.enum';
 import { AuditLogService } from 'src/audit-log/audit-log.service';
 import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
+import { OrderAreaTaskService } from './order-area-task.service';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -112,6 +113,7 @@ export class OrderService {
     private readonly orderProductPresetService: OrderProductPresetService,
     private readonly notificationService: NotificationService,
     private readonly auditLogService: AuditLogService,
+    private readonly orderAreaTaskService: OrderAreaTaskService,
   ) {}
 
   /**
@@ -331,6 +333,7 @@ export class OrderService {
         statusId,
         area,
         productionArea,
+        productionAreas,
         requiresDesign,
         description,
         deliveryDate,
@@ -443,6 +446,28 @@ export class OrderService {
           },
         },
       });
+
+      // Tareas de área (WORKFLOW.md §3). Las áreas que trabajan el pedido las
+      // define Recepción acá y/o Diseño al autorizar el montaje.
+      //  - Sin montaje: el pedido entra directo a producción, así que las
+      //    tareas se crean y se notifican ya.
+      //  - Con montaje: las áreas elegidas quedan planificadas (tarea creada,
+      //    sin notificar) y se avisa a cada área recién al autorizarse el
+      //    montaje, que es cuando realmente hay trabajo para ellas.
+      const plannedAreas =
+        productionAreas && productionAreas.length > 0
+          ? productionAreas
+          : ([productionArea ?? (needsDesign ? undefined : area)].filter(
+              Boolean,
+            ) as string[]);
+      const productionOnlyAreas = plannedAreas.filter((a) => a !== 'diseno');
+      if (productionOnlyAreas.length > 0) {
+        await this.orderAreaTaskService.createTasksForAreas(
+          order.id,
+          productionOnlyAreas,
+          { notify: !needsDesign },
+        );
+      }
 
       // Validar que los datos de la orden son correctos antes de enviarlos al gateway
       const clientNameForNotification =
@@ -1551,7 +1576,10 @@ export class OrderService {
     requestingUser: RequestingUser,
   ) {
     await this.assertOrderAccess(orderId, requestingUser);
-    await this.getDesignRevisionOrThrow(orderId, revisionId);
+    const existingRevision = await this.getDesignRevisionOrThrow(
+      orderId,
+      revisionId,
+    );
     if (dto.feedbackFile) {
       await this.assertAuthorizationFileSize(dto.feedbackFile);
     }
@@ -1559,6 +1587,11 @@ export class OrderService {
     const statusId = await this.resolveStatusIdByName(
       STATUS_NAME_CAMBIOS_SOLICITADOS,
     );
+
+    // El pedido vuelve al mismo diseñador que hizo esa ronda, que es quien
+    // conoce el montaje (WORKFLOW.md §2). Recepción puede redirigirlo después
+    // con el PATCH normal del pedido si esa persona no está disponible.
+    const previousDesignerId = existingRevision.sentByUserId ?? undefined;
 
     const [revision] = await this.prisma.$transaction([
       this.prisma.designRevision.update({
@@ -1579,6 +1612,9 @@ export class OrderService {
         data: {
           area: 'diseno',
           status: { connect: { id: statusId } },
+          ...(previousDesignerId && {
+            assignedUser: { connect: { id: previousDesignerId } },
+          }),
         },
       }),
       this.prisma.orderAuditLog.create({
@@ -1632,13 +1668,28 @@ export class OrderService {
     await this.getDesignRevisionOrThrow(orderId, revisionId);
     const order = await this.getOrderOrThrow(orderId);
 
-    const productionArea = dto.productionArea ?? order.productionArea;
-    if (!productionArea) {
+    // Áreas que van a producir el pedido. Pueden ser varias y trabajan en
+    // paralelo (WORKFLOW.md §3): las define Diseño acá, o vienen planificadas
+    // por Recepción desde el alta como tareas ya creadas.
+    const plannedTasks = await this.orderAreaTaskService.findByOrder(orderId);
+    const resolvedAreas =
+      dto.productionAreas && dto.productionAreas.length > 0
+        ? (dto.productionAreas as string[])
+        : plannedTasks.length > 0
+          ? plannedTasks.map((task) => task.area)
+          : ([dto.productionArea ?? order.productionArea].filter(
+              Boolean,
+            ) as string[]);
+
+    if (resolvedAreas.length === 0) {
       throw new HttpException(
-        'Definí el área de producción antes de autorizar',
+        'Definir el área de producción antes de autorizar',
         HttpStatus.BAD_REQUEST,
       );
     }
+    // `productionArea` (singular) se mantiene como el área "principal" para
+    // toda la lógica existente de visibilidad y listados.
+    const productionArea = dto.productionArea ?? resolvedAreas[0];
 
     const statusId = await this.resolveStatusIdByName(STATUS_NAME_AUTORIZADO);
 
@@ -1657,6 +1708,10 @@ export class OrderService {
           area: productionArea,
           productionArea,
           status: { connect: { id: statusId } },
+          // El diseñador deja de ser el responsable del pedido: a partir de acá
+          // manda cada tarea de área con su propio asignado (WORKFLOW.md §3).
+          // Queda registrado abajo en la auditoría y en las rondas de montaje.
+          assignedUser: { disconnect: true },
         },
       }),
       this.prisma.orderAuditLog.create({
@@ -1666,6 +1721,10 @@ export class OrderService {
             revisionId,
             statusId,
             productionArea,
+            productionAreas: resolvedAreas,
+            // Quién venía trabajando el montaje, para no perder el rastro al
+            // liberar `assignedUserId`.
+            previousAssignedUserId: order.assignedUserId ?? null,
           } as Prisma.InputJsonValue,
           order: { connect: { id: orderId } },
           user: { connect: { id: requestingUser.userId } },
@@ -1673,23 +1732,29 @@ export class OrderService {
       }),
     ]);
 
-    const productionAreaUserIds =
-      await this.notificationService.userIdsForArea(productionArea);
-    await this.notificationService.createNotificationForUsers(
-      productionAreaUserIds,
-      {
+    // Crea las tareas de las áreas que falten (idempotente: las planificadas
+    // desde el alta ya existen y no se duplican).
+    await this.orderAreaTaskService.createTasksForAreas(orderId, resolvedAreas, {
+      notify: false,
+    });
+
+    // Recién ahora hay trabajo real para producción: se avisa a cada área
+    // involucrada, sólo de lo suyo.
+    for (const area of resolvedAreas) {
+      const areaUserIds = await this.notificationService.userIdsForArea(area);
+      await this.notificationService.createNotificationForUsers(areaUserIds, {
         type: 'design_approved',
         title: 'Diseño autorizado, listo para producción',
-        body: `Pedido #${orderId}: diseño autorizado, pasa a ${productionArea}`,
+        body: `Pedido #${orderId}: diseño autorizado, pasa a ${area}`,
         orderId,
-      },
-    );
-    this.notificationsGateway.notifyNewOrderToArea(productionArea, {
-      orderId,
-      description: `Diseño autorizado, pedido listo para producción en ${productionArea}`,
-      area: productionArea,
-      deliveryDate: null,
-    });
+      });
+      this.notificationsGateway.notifyNewOrderToArea(area, {
+        orderId,
+        description: `Diseño autorizado, pedido listo para producción en ${area}`,
+        area,
+        deliveryDate: null,
+      });
+    }
 
     const updated = await this.prisma.designRevision.findUnique({
       where: { id: revision.id },

@@ -24,6 +24,12 @@ import {
 } from './dto/design-revision.dto';
 import { OrderExportQueryDto } from './dto/order-export-query.dto';
 import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
+import {
+  SetOrderAreasDto,
+  UpdateAreaTaskStatusDto,
+  AssignAreaTaskDto,
+} from './dto/order-area-task.dto';
+import { OrderAreaTaskService } from './order-area-task.service';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
@@ -33,7 +39,10 @@ import { toCsv } from 'src/common/utils/csv';
 @ApiTags('orders')
 @Controller('orders')
 export class OrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly orderAreaTaskService: OrderAreaTaskService,
+  ) {}
 
   // Límite más estricto que el default global: creación de pedidos es una
   // escritura "cara" (valida cliente/productos, puede incluir el archivo de
@@ -390,8 +399,12 @@ export class OrderController {
     });
   }
 
-  /** Recepción marca que el cliente autorizó el montaje. */
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  /**
+   * Se registra que el cliente autorizó el montaje. Lo puede hacer Recepción o
+   * el propio Diseño, que muchas veces recibe la respuesta directo
+   * (WORKFLOW.md §2).
+   */
+  @Auth(Role.RECEPCION, Role.DISENO, Role.ADMIN, Role.SUPERUSER)
   @Patch(':id/design-revisions/:revisionId/approve')
   approveDesignRevision(
     @Param('id') id: string,
@@ -400,6 +413,91 @@ export class OrderController {
     @ActiveUser() user: AccessTokenPayload,
   ) {
     return this.orderService.approveDesignRevision(+id, +revisionId, dto, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
+  // --- Tareas de área (producción multi-área en paralelo, WORKFLOW.md §3) ---
+
+  /** Áreas que trabajan el pedido, cada una con su estado y responsable. */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.DISENO,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/area-tasks')
+  getAreaTasks(@Param('id') id: string) {
+    return this.orderAreaTaskService.findByOrder(+id);
+  }
+
+  /** Suma áreas al pedido. Recepción al crear, Diseño al autorizar. */
+  @Auth(Role.RECEPCION, Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Post(':id/area-tasks')
+  addAreaTasks(@Param('id') id: string, @Body() dto: SetOrderAreasDto) {
+    return this.orderAreaTaskService.createTasksForAreas(+id, dto.areas);
+  }
+
+  /** Avance de una tarea. Sólo el área dueña (o Recepción/admin). */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Patch(':id/area-tasks/:taskId/status')
+  updateAreaTaskStatus(
+    @Param('taskId') taskId: string,
+    @Body() dto: UpdateAreaTaskStatusDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderAreaTaskService.updateStatus(+taskId, dto.status, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
+  /** Reasigna una tarea (o alguien del área se la toma). */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Patch(':id/area-tasks/:taskId/assign')
+  assignAreaTask(
+    @Param('taskId') taskId: string,
+    @Body() dto: AssignAreaTaskDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderAreaTaskService.assign(+taskId, dto.assignedUserId ?? null, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
+  /** Quita un área del pedido. */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Delete(':id/area-tasks/:taskId')
+  removeAreaTask(
+    @Param('taskId') taskId: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderAreaTaskService.remove(+taskId, {
       userId: user.sub,
       roles: user.roles,
     });

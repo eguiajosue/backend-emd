@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { OrderService } from './order.service';
+import { OrderAreaTaskService } from './order-area-task.service';
 import { OrderController } from './order.controller';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
@@ -17,7 +18,7 @@ import { AuditLogModule } from 'src/audit-log/audit-log.module';
     AuditLogModule,
   ],
   controllers: [OrderController],
-  providers: [OrderService, NotificationsGateway],
-  exports: [OrderService],
+  providers: [OrderService, OrderAreaTaskService, NotificationsGateway],
+  exports: [OrderService, OrderAreaTaskService],
 })
 export class OrderModule {}

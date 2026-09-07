@@ -51,6 +51,7 @@ model User {
   roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
   orders                  Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
   assignedOrders          Order[]                  @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
+  assignedAreaTasks       OrderAreaTask[]          @relation("AssignedAreaTasks") // Tareas de área de producción asignadas a este usuario (o a su cuenta de área).
   logs                    Log[] // Relación uno a muchos con Log.
   orderNotes              OrderNote[] // Notas internas de pedidos escritas por este usuario.
   orderAuditLogs          OrderAuditLog[] // Registros de auditoría de ediciones de pedidos hechas por este usuario.
@@ -109,6 +110,7 @@ model Order {
   notifications   Notification[] // Notificaciones persistentes que referencian este pedido.
   designRevisions DesignRevision[] // Rondas de montaje/feedback/autorización de la fase de Diseño.
   chatMessages    ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
+  areaTasks       OrderAreaTask[] // Trabajo de producción por área; varias áreas avanzan en paralelo (ver WORKFLOW.md §3).
 
   @@index([statusId])
   @@index([clientId])
@@ -199,6 +201,42 @@ model OrderHistory {
   @@index([changeDate])
   @@index([previousStatusId])
   @@index([newStatusId])
+}
+
+/// Estado de una tarea de área. Independiente de `Status` (el estado global del
+/// pedido): acá el ciclo es corto y siempre el mismo, sin importar el área.
+enum AreaTaskStatus {
+  pendiente
+  en_proceso
+  terminado
+}
+
+/// Trabajo que le toca a UN área dentro de un pedido.
+///
+/// Un pedido puede necesitar varias áreas (ej. bordado + dtf) y todas trabajan
+/// EN PARALELO: cada una lleva su propio estado y su propio responsable, sin
+/// esperar a las demás. Cuando todas quedan en `terminado`, el pedido pasa solo
+/// a "listo para entregar"; la entrega la confirma Recepción a mano.
+/// Ver WORKFLOW.md §3.
+model OrderAreaTask {
+  id             Int            @id @default(autoincrement())
+  orderId        Int // Pedido al que pertenece esta tarea.
+  area           String // Área que la trabaja: taller | dtf | bordado | laser | impresiones (nunca 'diseno').
+  status         AreaTaskStatus @default(pendiente) // Avance de esta área en particular.
+  assignedUserId Int? // Responsable. Por defecto la cuenta compartida del área; alguien del área puede tomarla.
+  createdAt      DateTime       @default(now())
+  startedAt      DateTime? // Cuándo pasó a en_proceso.
+  completedAt    DateTime? // Cuándo pasó a terminado.
+
+  order        Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  assignedUser User? @relation("AssignedAreaTasks", fields: [assignedUserId], references: [id])
+
+  // Un área no puede aparecer dos veces en el mismo pedido.
+  @@unique([orderId, area])
+  @@index([orderId])
+  @@index([area])
+  @@index([assignedUserId])
+  @@index([status])
 }
 
 model ProductType {
