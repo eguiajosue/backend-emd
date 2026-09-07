@@ -201,20 +201,19 @@ export class NotificationsGateway
   }
 
   /**
-   * Nota agregada a un pedido: se notifica al usuario asignado (room
-   * `user:${assignedUserId}`) si tiene uno, o al área del pedido (misma
-   * room de rol/área que las notificaciones de pedido nuevo) en caso
-   * contrario.
+   * Nota agregada a un pedido: sólo se notifica al área del pedido (misma
+   * room de rol/área que las notificaciones de pedido nuevo) cuando el
+   * pedido NO tiene usuario asignado todavía. Un usuario de área operativa
+   * ya asignado a un pedido no recibe esta notificación — según la regla de
+   * negocio, sólo se le notifica cuando se le asigna un pedido nuevo, no en
+   * cambios posteriores (notas incluidas) sobre pedidos que ya tiene
+   * asignados.
    */
   notifyOrderNoteAdded(
     target: { assignedUserId: number | null; area: string | null },
     note: OrderNoteNotificationPayload,
   ) {
-    if (target.assignedUserId) {
-      this.server
-        .to(`user:${target.assignedUserId}`)
-        .emit('orderNoteAdded', note);
-    } else if (target.area) {
+    if (!target.assignedUserId && target.area) {
       this.server.to(target.area).emit('orderNoteAdded', note);
     }
     this.logger.log(`Note notification sent: Order ID ${note.orderId}`);

@@ -68,6 +68,9 @@ export class OrderController {
   }
 
   // Definido antes de ':id' para que 'history' no sea interpretado como un id.
+  // NOTA: este endpoint es el tablero histórico de pedidos (misma visibilidad
+  // por área/rol que `findAll`), no el log de auditoría de cambios — por eso
+  // mantiene acceso también para los roles operativos.
   @Auth(
     Role.RECEPCION,
     Role.ADMIN,
@@ -233,17 +236,8 @@ export class OrderController {
     );
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  // Auditoría del pedido: sólo recepción/admin/superuser (no roles operativos).
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
   @Get(':id/audit-log')
   getAuditLog(
     @Param('id') id: string,

@@ -63,18 +63,20 @@ export class ChatService {
    * conversación y de los roles del usuario (nunca del id que manda el
    * cliente). Mismo espíritu que `OrderService.assertOrderAccess()`.
    *
-   * - admin / superuser: miembros de TODAS las conversaciones (monitoreo).
+   * - admin / superuser: miembros de TODOS los canales de área (monitoreo).
+   *   NO son miembros automáticos de los mensajes directos ajenos: en un DM
+   *   sólo entran si son alguno de los dos participantes.
    * - canal de área: los usuarios con ese rol de área + todos los de recepción.
-   * - mensaje directo: únicamente los dos participantes (+ monitores).
+   * - mensaje directo: únicamente los dos participantes.
    */
   private canAccess(
     conversation: ConversationCore,
     user: ChatRequestingUser,
   ): boolean {
-    if (isMonitorRole(user.roles)) {
-      return true;
-    }
     if (conversation.type === CHAT_CONVERSATION_TYPE_AREA) {
+      if (isMonitorRole(user.roles)) {
+        return true;
+      }
       if (!conversation.area) return false;
       return (
         user.roles.includes(conversation.area) ||
@@ -144,11 +146,6 @@ export class ChatService {
   async resolveMembers(
     conversation: ConversationCore,
   ): Promise<{ userId: number; isMonitor: boolean }[]> {
-    const monitors = await this.prisma.user.findMany({
-      where: { roles: { some: { name: { in: [Role.ADMIN, Role.SUPERUSER] } } } },
-      select: { id: true },
-    });
-
     const participantIds = new Set<number>();
     if (conversation.type === CHAT_CONVERSATION_TYPE_AREA && conversation.area) {
       const users = await this.prisma.user.findMany({
@@ -171,11 +168,22 @@ export class ChatService {
     participantIds.forEach((userId) =>
       result.push({ userId, isMonitor: false }),
     );
-    monitors.forEach((m) => {
-      if (!participantIds.has(m.id)) {
-        result.push({ userId: m.id, isMonitor: true });
-      }
-    });
+
+    // Los admin/superuser sólo son monitores automáticos de los canales de
+    // área (recepción↔departamento). En un DM ajeno no se agregan.
+    if (conversation.type === CHAT_CONVERSATION_TYPE_AREA) {
+      const monitors = await this.prisma.user.findMany({
+        where: {
+          roles: { some: { name: { in: [Role.ADMIN, Role.SUPERUSER] } } },
+        },
+        select: { id: true },
+      });
+      monitors.forEach((m) => {
+        if (!participantIds.has(m.id)) {
+          result.push({ userId: m.id, isMonitor: true });
+        }
+      });
+    }
     return result;
   }
 

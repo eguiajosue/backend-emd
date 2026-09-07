@@ -719,10 +719,11 @@ export class OrderService {
    * `area_user_updated_order`, para que el frontend pueda renderizar una
    * etiqueta específica ("Cambio de estado").
    *
-   * Destinatarios: todos los usuarios de Recepción (mismo criterio que
-   * `notifyAreaUserUpdatedOrder`) más el usuario asignado al pedido, si lo
-   * hay. La lista se deduplica para que un recepcionista asignado al pedido
-   * no reciba la misma notificación dos veces.
+   * Destinatarios: únicamente los usuarios de Recepción (mismo criterio que
+   * `notifyAreaUserUpdatedOrder`). El usuario de área asignado al pedido NO
+   * se notifica acá: sólo recibe notificación cuando se le asigna un pedido
+   * nuevo (`notifyNewAssignedOrder`), no en cambios posteriores de un pedido
+   * que ya tiene asignado.
    */
   private async notifyOrderStatusChanged(
     orderId: number,
@@ -736,14 +737,8 @@ export class OrderService {
     const title = `Cambio de estado del pedido #${orderId}`;
     const body = `${changedByUsername} cambió el estado del pedido #${orderId} de "${previousStatusName}" a "${newStatusName}"`;
 
-    const recepcionUserIds =
-      await this.notificationService.userIdsForArea('recepcion');
-    const recipientIds = Array.from(
-      new Set(
-        assignedUserId != null
-          ? [...recepcionUserIds, assignedUserId]
-          : recepcionUserIds,
-      ),
+    const recipientIds = await this.notificationService.userIdsForArea(
+      'recepcion',
     );
 
     await this.notificationService.createNotificationForUsers(recipientIds, {
