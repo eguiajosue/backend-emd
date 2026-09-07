@@ -93,17 +93,31 @@ Pueden reasignar un pedido/tarea:
 
 ## 6. Plan de implementación (3 fases)
 
-1. **Fase 1 — Flujo de Diseño**: asignación obligatoria a diseñador (con
+Estado: **las 3 fases están implementadas.**
+
+1. **Fase 1 — Flujo de Diseño** ✅: asignación obligatoria a diseñador (con
    "Cualquier diseñador" = cuenta de área), selector filtrado por rol,
    `requiresDesign` editable después, retorno al diseñador en "cambios
    solicitados" con redirección por Recepción, diseñador preservado en el
    historial.
-2. **Fase 2 — Multi-área**: modelo de tareas de área (estado + responsable por
+2. **Fase 2 — Multi-área** ✅: modelo de tareas de área (estado + responsable por
    área), creación de tareas al crear/autorizar, cierre automático a "listo
    para entregar", entrega manual por Recepción, notificaciones por tarea.
-3. **Fase 3 — Vistas**: vista de Diseño vs Producción, vista unificada
+3. **Fase 3 — Vistas** ✅: vista de Diseño vs Producción, vista unificada
    etiquetada por área, alternancia para roles mixtos y preferencia personal en
    Configuración.
 
 Los pedidos existentes no tienen datos que preservar: la migración a tareas de
 área puede hacerse sin cuidados especiales.
+
+## 7. Dónde vive cada cosa
+
+| Pieza | Archivo |
+|---|---|
+| Tareas de área (lógica) | `src/order/order-area-task.service.ts` |
+| Endpoints de tareas | `src/order/order.controller.ts` (`/orders/:id/area-tasks`, `/orders/my-area-tasks`) |
+| Modelo | `prisma/schema.prisma` → `OrderAreaTask`, enum `AreaTaskStatus` |
+| Validación de asignación por área | `OrderService.assertUserBelongsToArea` |
+| Preferencia de vista | `User.areaViewMode` (`'unified' \| 'split'`) |
+| Bandeja del usuario (frontend) | `src/app/dashboard/mi-trabajo/page.tsx` |
+| Áreas en el detalle del pedido | `src/components/orders/AreaTasksSection.tsx` |
