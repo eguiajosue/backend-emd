@@ -48,6 +48,16 @@ const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
 const DELIVERED_STATUS_ID = 5;
 
 /**
+ * Id del estado "cancelado", sembrado por prisma/seed.ts (ver STATUS_SEEDS)
+ * y por la migración 20260907120000_add_cancelled_status con id explícito
+ * = 10 (siguiente id libre después de los estados 6-9 del flujo de
+ * Diseño). Se expone acá para que otra lógica backend (filtros de
+ * visibilidad, bulkUpdateStatusOrArea, etc.) pueda referenciarlo sin
+ * repetir el número mágico.
+ */
+const CANCELLED_STATUS_ID = 10;
+
+/**
  * Nombres de los estados nuevos del flujo de Diseño, sembrados al final de
  * STATUS_SEEDS en prisma/seed.ts (ids 6+ en una DB existente). A diferencia
  * de DELIVERED_STATUS_ID, estos se resuelven por NOMBRE en runtime (ver

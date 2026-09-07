@@ -51,6 +51,10 @@ const STATUS_SEEDS: { id: number; name: string }[] = [
   { id: 7, name: 'esperando autorización' },
   { id: 8, name: 'cambios solicitados' },
   { id: 9, name: 'autorizado' },
+  // id=10 queda reservado para "cancelado" (ver migración
+  // 20260907120000_add_cancelled_status y CANCELLED_STATUS_ID en
+  // src/order/order.service.ts).
+  { id: 10, name: 'cancelado' },
 ];
 
 const DEMO_COMPANIES = [

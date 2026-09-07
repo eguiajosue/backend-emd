@@ -218,7 +218,7 @@ export class OrderController {
     });
   }
 
-  @Auth(Role.SUPERUSER)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.orderService.remove(+id);
