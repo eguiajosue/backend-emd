@@ -367,12 +367,21 @@ model ChatMessage {
   id             Int      @id @default(autoincrement()) // Identificador único del mensaje.
   conversationId Int // Clave foránea que referencia a ChatConversation.
   senderId       Int // Clave foránea que referencia al User que lo envió.
-  body           String // Contenido del mensaje (texto plano).
+  body           String? // Contenido del mensaje (texto plano). Opcional si hay adjunto.
   // Referencia opcional a un pedido, para dar contexto sin que sea
   // obligatorio en cada mensaje (ej. "che, mirá el pedido #123"). `SetNull`
   // en vez de `Cascade`: si el pedido se borra, el mensaje sobrevive sin la
   // referencia en lugar de desaparecer.
   orderId        Int?
+  // Adjunto opcional (foto, documento o audio). Mismo esquema que
+  // Order.authorizationFile*: el contenido va en base64 directo en la
+  // columna (sin storage externo), y el tipo/tamaño se validan en
+  // ChatService.sendMessage (magic-byte sniffing con `file-type`, igual que
+  // OrderService.assertAuthorizationFileSize).
+  attachmentData     String?
+  attachmentFilename String?
+  attachmentMimeType String?
+  attachmentSize     Int?
   createdAt      DateTime @default(now()) // Fecha de envío.
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

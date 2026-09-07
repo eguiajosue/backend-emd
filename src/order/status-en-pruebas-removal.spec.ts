@@ -18,7 +18,7 @@ describe('Eliminación del estado "en pruebas"', () => {
     const deleteIdx = sql.indexOf('DELETE FROM "Status"');
     expect(updateIdx).toBeGreaterThan(-1);
     expect(deleteIdx).toBeGreaterThan(updateIdx);
-    expect(sql).toContain("lower(\"name\") = 'en proceso'");
+    expect(sql).toContain('lower("name") = \'en proceso\'');
   });
 
   it('la migración reapunta el historial (FKs a Status) para poder borrar la fila', () => {

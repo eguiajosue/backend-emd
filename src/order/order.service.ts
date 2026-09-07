@@ -1,7 +1,5 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-// `file-type` v16 (última versión con build CJS -- v17+ es ESM-only, lo que
-// rompe tanto el build de Nest como Jest con "module": "commonjs").
-import { fromBuffer } from 'file-type';
+import { assertBase64FileValid } from 'src/common/file-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateOrderDto,
@@ -228,34 +226,13 @@ export class OrderService {
    * que coincida con lo declarado.
    */
   private async assertAuthorizationFileSize(file: AuthorizationFileDto) {
-    const buffer = Buffer.from(file.data, 'base64');
-    if (buffer.length > MAX_AUTHORIZATION_FILE_BYTES) {
-      throw new HttpException(
-        'El archivo no puede superar 5MB',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    const detected = await fromBuffer(buffer);
-
-    if (
-      !detected ||
-      !(AUTHORIZATION_FILE_MIME_TYPES as readonly string[]).includes(
-        detected.mime,
-      )
-    ) {
-      throw new HttpException(
+    await assertBase64FileValid(file, {
+      maxBytes: MAX_AUTHORIZATION_FILE_BYTES,
+      allowedMimeTypes: AUTHORIZATION_FILE_MIME_TYPES,
+      sizeErrorMessage: 'El archivo no puede superar 5MB',
+      typeErrorMessage:
         'El contenido del archivo no coincide con un tipo permitido (PNG, JPEG o PDF)',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    if (detected.mime !== file.mimeType) {
-      throw new HttpException(
-        'El tipo de archivo declarado no coincide con su contenido real',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    });
   }
 
   /**

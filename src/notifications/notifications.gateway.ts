@@ -54,7 +54,7 @@ export interface OrderStatusChangedPayload {
 interface ChatMessagePayload {
   id: number;
   conversationId: number;
-  body: string;
+  body: string | null;
   createdAt: Date;
   senderId: number;
   senderUsername: string;
@@ -66,6 +66,13 @@ interface ChatMessagePayload {
     description: string;
     area: string | null;
     status: { name: string } | null;
+  } | null;
+  /** Adjunto opcional (foto, documento o audio) -- ver ChatService.toAttachmentDto. */
+  attachment?: {
+    filename: string;
+    mimeType: string;
+    size: number | null;
+    dataUrl?: string;
   } | null;
 }
 
@@ -106,10 +113,13 @@ export class NotificationsGateway
     // (sólo viaja con el transporte polling) y `auth.token` (el único que
     // llega cuando el navegador usa `transports: ["websocket"]`, porque el
     // WebSocket del browser no admite cabeceras propias). Se aceptan las dos.
-    const authPayload = client.handshake.auth as { token?: unknown } | undefined;
+    const authPayload = client.handshake.auth as
+      | { token?: unknown }
+      | undefined;
     const token =
-      (typeof authPayload?.token === 'string' ? authPayload.token : undefined) ??
-      client.handshake.headers.authorization;
+      (typeof authPayload?.token === 'string'
+        ? authPayload.token
+        : undefined) ?? client.handshake.headers.authorization;
 
     if (!token) {
       this.logger.warn(`Client disconnected: No token provided`);

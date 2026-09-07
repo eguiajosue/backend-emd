@@ -92,6 +92,7 @@ export class ChatController {
       dto.body,
       requestingUser(user),
       dto.orderId,
+      dto.attachment,
     );
   }
 

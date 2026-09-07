@@ -106,9 +106,10 @@ describe('OrderService.update - notificación de cambio de estado', () => {
       { userId: 7, roles: ['taller'], username: 'Ana' },
     );
 
-    expect(
-      notificationService.createNotificationForUsers,
-    ).toHaveBeenCalledWith([10, 11], expect.anything());
+    expect(notificationService.createNotificationForUsers).toHaveBeenCalledWith(
+      [10, 11],
+      expect.anything(),
+    );
   });
 
   it('notifica también cuando el cambio lo hace admin/recepción (cualquier usuario)', async () => {
@@ -133,9 +134,7 @@ describe('OrderService.update - notificación de cambio de estado', () => {
     );
 
     expect(gateway.notifyOrderStatusChangedToRecepcion).not.toHaveBeenCalled();
-    expect(
-      notificationService.createNotificationForUsers,
-    ).toHaveBeenCalledWith(
+    expect(notificationService.createNotificationForUsers).toHaveBeenCalledWith(
       [10, 11],
       expect.objectContaining({ type: 'area_user_updated_order' }),
     );
