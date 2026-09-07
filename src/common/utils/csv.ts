@@ -6,7 +6,15 @@
  */
 function escapeCell(value: unknown): string {
   if (value === null || value === undefined) return '';
-  const str = String(value);
+  let str = String(value);
+  // Previene CSV/formula injection: si la celda empieza con un carácter que
+  // Excel/Sheets interpreta como inicio de fórmula (=, +, -, @, tab, CR), se
+  // le antepone un apóstrofe para forzar que se trate como texto literal.
+  // Sin esto, un valor controlado por el usuario (ej. nombre de cliente o
+  // descripción de pedido) podría ejecutar una fórmula al abrir el export.
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
   if (/[",\n\r]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
