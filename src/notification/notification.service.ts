@@ -9,6 +9,7 @@ import {
   PaginationQueryDto,
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
+import { PushService } from 'src/push/push.service';
 
 /** Datos necesarios para crear una notificación persistente. */
 export interface CreateNotificationInput {
@@ -21,16 +22,24 @@ export interface CreateNotificationInput {
 
 @Injectable()
 export class NotificationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pushService: PushService,
+  ) {}
 
   /**
    * Persiste una notificación para un usuario puntual. Reusable desde
    * cualquier servicio que hoy emita un evento en vivo por WebSocket
    * (ej. `OrderService`), para que la notificación no se pierda si el
    * destinatario no tiene sesión abierta en ese momento.
+   *
+   * Además del persist, dispara el Web Push real (Fase 3): mismo punto de
+   * decisión de "a quién notificar" que ya usa todo `OrderService`, así no
+   * se duplica esa lógica en cada call site.
+   * // TODO Fase 4: respetar notificationsMuted / filtros antes de emitir.
    */
   async createNotification(input: CreateNotificationInput) {
-    return this.prisma.notification.create({
+    const notification = await this.prisma.notification.create({
       data: {
         userId: input.userId,
         type: input.type,
@@ -39,6 +48,12 @@ export class NotificationService {
         orderId: input.orderId,
       },
     });
+    void this.pushService.notifyUser(input.userId, {
+      title: input.title,
+      body: input.body,
+      orderId: input.orderId,
+    });
+    return notification;
   }
 
   /**
@@ -60,6 +75,11 @@ export class NotificationService {
         body: input.body,
         orderId: input.orderId,
       })),
+    });
+    void this.pushService.notifyUsers(userIds, {
+      title: input.title,
+      body: input.body,
+      orderId: input.orderId,
     });
   }
 

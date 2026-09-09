@@ -22,6 +22,7 @@ import { BugReportModule } from './bug-report/bug-report.module';
 import { SettingsModule } from './settings/settings.module';
 import { ChatModule } from './chat/chat.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
+import { PushModule } from './push/push.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -62,6 +63,7 @@ import { AppController } from './app.controller';
     SettingsModule,
     ChatModule,
     AuditLogModule,
+    PushModule,
   ],
   providers: [
     {
