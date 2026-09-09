@@ -60,4 +60,37 @@ export class UpdateUserPreferencesDto {
   @IsOptional()
   @IsIn(['unified', 'split'])
   areaViewMode?: string;
+
+  // Preferencias de notificaciones (Fase 4). Ver NotificationService para
+  // cómo se aplican al decidir si se persiste/pushea cada notificación.
+  @ApiPropertyOptional({
+    description:
+      'Modo silencio general: si está activo, no se persisten ni pushean notificaciones.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notificationsMuted?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Sólo notificar menciones directas (sin efecto práctico hasta que exista ese tipo de notificación).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyMentionsOnly?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Notificar cambios de estado/asignación de pedidos y novedades de producción.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyProductionUpdates?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Notificar alertas críticas.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyCriticalAlerts?: boolean;
 }

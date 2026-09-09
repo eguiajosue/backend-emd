@@ -72,6 +72,11 @@ model User {
   density            String? // Densidad de UI: 'comfortable' | 'compact'.
   hasSeenOnboarding  Boolean? // Si ya completó/cerró el tour de onboarding.
   areaViewMode       String? // Cómo ver las tareas de producción: 'unified' (todo junto, etiquetado por área) | 'split' (una vista por área). Preferencia personal, ver WORKFLOW.md §4.
+
+  notificationsMuted      Boolean @default(false) // Modo silencio general: si está activo, no se persisten ni pushean notificaciones (salvo menciones directas, cuando ese tipo exista).
+  notifyMentionsOnly      Boolean @default(false) // Sólo notificar menciones directas. Sin efecto práctico hoy: el sistema no tiene un tipo de notificación de "mención" implementado aún (ver NotificationService).
+  notifyProductionUpdates Boolean @default(true) // Notificar cambios de estado/asignación de pedidos y novedades de producción.
+  notifyCriticalAlerts    Boolean @default(true) // Notificar alertas críticas y cualquier tipo de notificación no clasificado como "producción".
 }
 
 model Status {

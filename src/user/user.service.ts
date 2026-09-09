@@ -33,6 +33,10 @@ export const USER_PREFERENCES_SELECT = {
   density: true,
   hasSeenOnboarding: true,
   areaViewMode: true,
+  notificationsMuted: true,
+  notifyMentionsOnly: true,
+  notifyProductionUpdates: true,
+  notifyCriticalAlerts: true,
 } as const;
 
 @Injectable()
