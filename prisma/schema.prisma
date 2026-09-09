@@ -56,6 +56,7 @@ model User {
   orderNotes              OrderNote[] // Notas internas de pedidos escritas por este usuario.
   orderAuditLogs          OrderAuditLog[] // Registros de auditoría de ediciones de pedidos hechas por este usuario.
   notifications           Notification[] // Notificaciones persistentes dirigidas a este usuario.
+  pushSubscriptions       PushSubscription[] // Suscripciones Web Push (una por navegador/dispositivo) de este usuario.
   designRevisionsSent     DesignRevision[]         @relation("DesignRevisionSentBy") // Montajes enviados por este usuario (diseñador).
   designRevisionsFeedback DesignRevision[]         @relation("DesignRevisionFeedbackBy") // Feedback cargado por este usuario (Recepción).
   designRevisionsApproved DesignRevision[]         @relation("DesignRevisionApprovedBy") // Autorizaciones marcadas por este usuario (Recepción).
@@ -71,6 +72,11 @@ model User {
   density            String? // Densidad de UI: 'comfortable' | 'compact'.
   hasSeenOnboarding  Boolean? // Si ya completó/cerró el tour de onboarding.
   areaViewMode       String? // Cómo ver las tareas de producción: 'unified' (todo junto, etiquetado por área) | 'split' (una vista por área). Preferencia personal, ver WORKFLOW.md §4.
+
+  notificationsMuted      Boolean @default(false) // Modo silencio general: si está activo, no se persisten ni pushean notificaciones (salvo menciones directas, cuando ese tipo exista).
+  notifyMentionsOnly      Boolean @default(false) // Sólo notificar menciones directas. Sin efecto práctico hoy: el sistema no tiene un tipo de notificación de "mención" implementado aún (ver NotificationService).
+  notifyProductionUpdates Boolean @default(true) // Notificar cambios de estado/asignación de pedidos y novedades de producción.
+  notifyCriticalAlerts    Boolean @default(true) // Notificar alertas críticas y cualquier tipo de notificación no clasificado como "producción".
 }
 
 model Status {
@@ -290,6 +296,19 @@ model Notification {
 
   @@index([userId, read])
   @@index([orderId])
+}
+
+model PushSubscription {
+  id        Int      @id @default(autoincrement()) // Identificador único de la suscripción push.
+  userId    Int // Clave foránea que referencia al User dueño de la suscripción.
+  endpoint  String   @unique // URL del endpoint del navegador (identifica la suscripción unívocamente).
+  p256dh    String // Clave pública de cifrado (ECDH P-256) que manda el navegador.
+  auth      String // Secreto de autenticación que manda el navegador.
+  createdAt DateTime @default(now()) // Fecha de creación de la suscripción.
+
+  user User @relation(fields: [userId], references: [id]) // Relación con User dueño.
+
+  @@index([userId])
 }
 
 model Log {
