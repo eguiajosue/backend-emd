@@ -10,6 +10,7 @@ import {
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
 import { PushService } from 'src/push/push.service';
+import { ExpoPushService } from 'src/push/expo-push.service';
 
 /** Datos necesarios para crear una notificación persistente. */
 export interface CreateNotificationInput {
@@ -61,6 +62,7 @@ export class NotificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pushService: PushService,
+    private readonly expoPushService: ExpoPushService,
   ) {}
 
   /**
@@ -148,6 +150,11 @@ export class NotificationService {
       body: input.body,
       orderId: input.orderId,
     });
+    void this.expoPushService.notifyUser(input.userId, {
+      title: input.title,
+      body: input.body,
+      orderId: input.orderId,
+    });
     return notification;
   }
 
@@ -192,6 +199,11 @@ export class NotificationService {
       })),
     });
     void this.pushService.notifyUsers(recipientIds, {
+      title: input.title,
+      body: input.body,
+      orderId: input.orderId,
+    });
+    void this.expoPushService.notifyUsers(recipientIds, {
       title: input.title,
       body: input.body,
       orderId: input.orderId,
