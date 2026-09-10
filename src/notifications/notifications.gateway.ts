@@ -1,7 +1,10 @@
 import {
+  ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
   OnGatewayInit,
+  SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
@@ -13,6 +16,7 @@ import {
   buildCorsOriginCallback,
   parseAllowedOrigins,
 } from '../common/cors-origin';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface OrderNotificationPayload {
   id: number | string;
@@ -100,13 +104,16 @@ export class NotificationsGateway
 
   private logger: Logger = new Logger('NotificationsGateway');
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   afterInit() {
     this.logger.log('WebSocket Gateway initialized');
   }
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     // El cliente manda el token de dos formas: `extraHeaders.authorization`
     // (sólo viaja con el transporte polling) y `auth.token` (el único que
     // llega cuando el navegador usa `transports: ["websocket"]`, porque el
@@ -151,10 +158,22 @@ export class NotificationsGateway
       // (ej. pedido asignado directamente a él).
       if (decoded.sub != null) {
         client.join(`user:${decoded.sub}`);
+        client.data.userId = decoded.sub;
       }
       this.logger.log(
         `Client connected: ${decoded.username} with roles ${roles.join(', ')}`,
       );
+
+      // Sólo el PRIMER socket vivo de este usuario dispara "en línea": si ya
+      // tenía otra pestaña conectada, no hace falta volver a avisar.
+      const room = this.server.sockets.adapter.rooms.get(`user:${decoded.sub}`);
+      if (room && room.size === 1) {
+        this.server.emit('presenceChanged', {
+          userId: decoded.sub,
+          online: true,
+          lastSeenAt: null,
+        });
+      }
     } catch (error) {
       this.logger.error(`Client disconnected: Invalid token`, error.message);
       client.disconnect();
@@ -162,8 +181,32 @@ export class NotificationsGateway
     }
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+
+    const userId = client.data?.userId as number | undefined;
+    if (userId == null) return;
+
+    // Socket.io ya sacó a este cliente de sus rooms en este punto: si la
+    // room del usuario queda vacía, era su último socket vivo.
+    const room = this.server.sockets.adapter.rooms.get(`user:${userId}`);
+    if (room && room.size > 0) return;
+
+    const lastSeenAt = new Date();
+    try {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { lastSeenAt },
+      });
+    } catch (error) {
+      // Igual que el resto del gateway: un fallo acá no debe tirar la
+      // desconexión. Se loguea y se sigue.
+      this.logger.error(
+        `No se pudo guardar lastSeenAt para el usuario ${userId}`,
+        error.message,
+      );
+    }
+    this.server.emit('presenceChanged', { userId, online: false, lastSeenAt });
   }
 
   /**
@@ -278,6 +321,93 @@ export class NotificationsGateway
   }
 
   /**
+   * Verifica que `userId` sea miembro de `conversationId` antes de dejarlo
+   * disparar un evento en tiempo real hacia esa conversación. Nunca se
+   * confía en el `conversationId` que manda el cliente sin esta validación
+   * server-side.
+   */
+  private async isConversationMember(
+    conversationId: number,
+    userId: number,
+  ): Promise<boolean> {
+    if (!Number.isInteger(conversationId) || !Number.isInteger(userId)) {
+      return false;
+    }
+    const membership = await this.prisma.chatConversationMember.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    return !!membership;
+  }
+
+  /**
+   * El cliente confirma haber recibido un mensaje de una conversación
+   * (dispara al recibir `chatMessage`). Actualiza `deliveredAt` de SU PROPIA
+   * membresía y avisa a los demás miembros para que actualicen el check de
+   * entrega de sus mensajes salientes.
+   */
+  @SubscribeMessage('chatDelivered')
+  async handleChatDelivered(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: number },
+  ) {
+    const userId = client.data?.userId as number | undefined;
+    const conversationId = body?.conversationId;
+    if (userId == null || conversationId == null) return;
+    if (!(await this.isConversationMember(conversationId, userId))) return;
+
+    const deliveredAt = new Date();
+    await this.prisma.chatConversationMember.updateMany({
+      where: { conversationId, userId },
+      data: { deliveredAt },
+    });
+
+    const others = await this.prisma.chatConversationMember.findMany({
+      where: { conversationId, userId: { not: userId } },
+      select: { userId: true },
+    });
+    others.forEach(({ userId: otherId }) => {
+      this.server
+        .to(`user:${otherId}`)
+        .emit('chatDelivered', { conversationId, userId, deliveredAt });
+    });
+  }
+
+  @SubscribeMessage('chatTyping')
+  async handleChatTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: number },
+  ) {
+    await this.relayTypingEvent('chatTyping', client, body);
+  }
+
+  @SubscribeMessage('chatStopTyping')
+  async handleChatStopTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: number },
+  ) {
+    await this.relayTypingEvent('chatStopTyping', client, body);
+  }
+
+  private async relayTypingEvent(
+    event: 'chatTyping' | 'chatStopTyping',
+    client: Socket,
+    body: { conversationId?: number },
+  ) {
+    const userId = client.data?.userId as number | undefined;
+    const conversationId = body?.conversationId;
+    if (userId == null || conversationId == null) return;
+    if (!(await this.isConversationMember(conversationId, userId))) return;
+
+    const others = await this.prisma.chatConversationMember.findMany({
+      where: { conversationId, userId: { not: userId } },
+      select: { userId: true },
+    });
+    others.forEach(({ userId: otherId }) => {
+      this.server.to(`user:${otherId}`).emit(event, { conversationId, userId });
+    });
+  }
+
+  /**
    * Mensaje de chat en vivo. Los destinatarios los calcula `ChatService` en
    * el servidor a partir de la membresía de la conversación (nunca del
    * cliente), y se emiten a la room individual `user:<id>` que cada cliente
@@ -291,5 +421,30 @@ export class NotificationsGateway
     this.logger.log(
       `Chat message ${message.id} emitted to ${userIds.length} member(s) of conversation ${message.conversationId}`,
     );
+  }
+
+  /**
+   * Alguien marcó la conversación como leída: se avisa a los DEMÁS
+   * miembros (no al que la marcó) para que actualicen el check de lectura
+   * de sus propios mensajes en tiempo real.
+   */
+  emitChatRead(
+    userIds: number[],
+    payload: { conversationId: number; userId: number; lastReadAt: Date },
+  ) {
+    userIds.forEach((userId) => {
+      this.server.to(`user:${userId}`).emit('chatRead', payload);
+    });
+  }
+
+  /**
+   * true si el usuario tiene al menos un socket vivo en su room individual.
+   * `this.server` puede no estar listo en tests unitarios que instancian el
+   * gateway sin levantar un servidor real — se devuelve `false` en ese caso
+   * en vez de tirar.
+   */
+  isUserOnline(userId: number): boolean {
+    const room = this.server?.sockets?.adapter?.rooms?.get(`user:${userId}`);
+    return !!room && room.size > 0;
   }
 }
