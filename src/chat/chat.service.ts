@@ -91,6 +91,11 @@ const USER_SUMMARY_SELECT = {
   lastName: true,
 } as const;
 
+const USER_SUMMARY_WITH_PRESENCE_SELECT = {
+  ...USER_SUMMARY_SELECT,
+  lastSeenAt: true,
+} as const;
+
 @Injectable()
 export class ChatService {
   constructor(
@@ -337,8 +342,8 @@ export class ChatService {
         directUserBId: true,
         lastMessageAt: true,
         createdAt: true,
-        directUserA: { select: USER_SUMMARY_SELECT },
-        directUserB: { select: USER_SUMMARY_SELECT },
+        directUserA: { select: USER_SUMMARY_WITH_PRESENCE_SELECT },
+        directUserB: { select: USER_SUMMARY_WITH_PRESENCE_SELECT },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'asc' }],
     });
@@ -389,6 +394,22 @@ export class ChatService {
     );
   }
 
+  /**
+   * Agrega presencia (`isOnline` en vivo desde el gateway, `lastSeenAt` de la
+   * última desconexión) a un usuario ya traído con
+   * `USER_SUMMARY_WITH_PRESENCE_SELECT`. Mismo criterio que `findMembers`.
+   */
+  private attachPresence<T extends { id: number; lastSeenAt: Date | null }>(
+    user: T,
+  ): Omit<T, 'lastSeenAt'> & { isOnline: boolean; lastSeenAt: Date | null } {
+    const { lastSeenAt, ...rest } = user;
+    return {
+      ...rest,
+      isOnline: this.notificationsGateway.isUserOnline(user.id),
+      lastSeenAt,
+    };
+  }
+
   /** Título en español según el tipo de conversación. */
   private toConversationDto(
     conversation: {
@@ -404,12 +425,14 @@ export class ChatService {
         username: string;
         firstName: string;
         lastName: string | null;
+        lastSeenAt: Date | null;
       } | null;
       directUserB?: {
         id: number;
         username: string;
         firstName: string;
         lastName: string | null;
+        lastSeenAt: Date | null;
       } | null;
     },
     user: ChatRequestingUser,
@@ -420,11 +443,12 @@ export class ChatService {
     },
   ) {
     const isArea = conversation.type === CHAT_CONVERSATION_TYPE_AREA;
-    const otherUser = isArea
+    const rawOtherUser = isArea
       ? null
       : conversation.directUserAId === user.userId
         ? (conversation.directUserB ?? null)
         : (conversation.directUserA ?? null);
+    const otherUser = rawOtherUser ? this.attachPresence(rawOtherUser) : null;
 
     const title = isArea
       ? `Recepción ↔ ${chatAreaLabel(conversation.area)}`
@@ -495,8 +519,8 @@ export class ChatService {
         directUserBId: true,
         lastMessageAt: true,
         createdAt: true,
-        directUserA: { select: USER_SUMMARY_SELECT },
-        directUserB: { select: USER_SUMMARY_SELECT },
+        directUserA: { select: USER_SUMMARY_WITH_PRESENCE_SELECT },
+        directUserB: { select: USER_SUMMARY_WITH_PRESENCE_SELECT },
       },
     });
 
