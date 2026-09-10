@@ -242,3 +242,109 @@ describe('ChatService - autorización', () => {
     ).rejects.toMatchObject({ status: 404 });
   });
 });
+
+describe('ChatService - checks y presencia', () => {
+  let chatService: ChatService;
+  let prisma: any;
+  let gateway: {
+    emitChatMessage: jest.Mock;
+    emitChatRead: jest.Mock;
+    isUserOnline: jest.Mock;
+  };
+  let orderService: { findOne: jest.Mock };
+
+  beforeEach(() => {
+    prisma = {
+      chatConversation: {
+        findUnique: jest.fn(({ where }) => CONVERSATIONS[where.id] ?? null),
+        findMany: jest.fn().mockResolvedValue(
+          Object.values(CONVERSATIONS).map((c) => ({
+            ...c,
+            lastMessageAt: null,
+            createdAt: new Date('2026-01-01'),
+            directUserA: null,
+            directUserB: null,
+          })),
+        ),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
+        update: jest.fn(),
+        upsert: jest.fn(),
+      },
+      chatConversationMember: {
+        deleteMany: jest.fn(),
+        upsert: jest.fn(),
+        updateMany: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      chatMessage: {
+        create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      user: {
+        findMany: jest.fn(({ where }) => {
+          const names = where?.roles?.some?.name?.in ?? [];
+          if (names.includes('admin')) {
+            return Promise.resolve([{ id: 99 }]);
+          }
+          return Promise.resolve([{ id: 5 }, { id: 7 }]);
+        }),
+        findUnique: jest.fn().mockResolvedValue({ id: 11 }),
+      },
+    };
+    gateway = {
+      emitChatMessage: jest.fn(),
+      emitChatRead: jest.fn(),
+      isUserOnline: jest.fn().mockReturnValue(false),
+    };
+    orderService = { findOne: jest.fn().mockResolvedValue({ id: 1 }) };
+
+    chatService = new ChatService(
+      prisma as unknown as PrismaService,
+      gateway as unknown as NotificationsGateway,
+      orderService as unknown as OrderService,
+    );
+  });
+
+  it('findMembers incluye lastReadAt, deliveredAt e isOnline por miembro', async () => {
+    prisma.chatConversationMember.findMany = jest.fn().mockResolvedValue([
+      {
+        userId: 10,
+        lastReadAt: new Date('2026-01-02'),
+        deliveredAt: new Date('2026-01-01'),
+      },
+    ]);
+    prisma.user.findMany = jest.fn().mockResolvedValue([
+      {
+        id: 10,
+        username: 'ana',
+        firstName: 'Ana',
+        lastName: 'Gómez',
+        lastSeenAt: null,
+      },
+    ]);
+    gateway.isUserOnline.mockReturnValue(true);
+
+    const result = await chatService.findMembers(3, { userId: 11, roles: [] });
+
+    expect(result[0]).toMatchObject({
+      id: 10,
+      lastReadAt: new Date('2026-01-02'),
+      deliveredAt: new Date('2026-01-01'),
+      isOnline: true,
+      lastSeenAt: null,
+    });
+  });
+
+  it('markConversationAsRead emite chatRead a los demás miembros, no a quien marcó', async () => {
+    await chatService.markConversationAsRead(3, { userId: 10, roles: [] });
+
+    expect(gateway.emitChatRead).toHaveBeenCalledTimes(1);
+    const [userIds, payload] = gateway.emitChatRead.mock.calls[0];
+    expect(userIds).not.toContain(10);
+    expect(payload).toMatchObject({ conversationId: 3, userId: 10 });
+    expect(payload.lastReadAt).toBeInstanceOf(Date);
+  });
+});

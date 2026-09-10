@@ -292,4 +292,29 @@ export class NotificationsGateway
       `Chat message ${message.id} emitted to ${userIds.length} member(s) of conversation ${message.conversationId}`,
     );
   }
+
+  /**
+   * Alguien marcó la conversación como leída: se avisa a los DEMÁS
+   * miembros (no al que la marcó) para que actualicen el check de lectura
+   * de sus propios mensajes en tiempo real.
+   */
+  emitChatRead(
+    userIds: number[],
+    payload: { conversationId: number; userId: number; lastReadAt: Date },
+  ) {
+    userIds.forEach((userId) => {
+      this.server.to(`user:${userId}`).emit('chatRead', payload);
+    });
+  }
+
+  /**
+   * true si el usuario tiene al menos un socket vivo en su room individual.
+   * `this.server` puede no estar listo en tests unitarios que instancian el
+   * gateway sin levantar un servidor real — se devuelve `false` en ese caso
+   * en vez de tirar.
+   */
+  isUserOnline(userId: number): boolean {
+    const room = this.server?.sockets?.adapter?.rooms?.get(`user:${userId}`);
+    return !!room && room.size > 0;
+  }
 }

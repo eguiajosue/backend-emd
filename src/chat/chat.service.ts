@@ -269,22 +269,40 @@ export class ChatService {
     return members;
   }
 
-  /** Participantes de una conversación, con el indicador de monitoreo. */
+  /**
+   * Participantes de una conversación, con el indicador de monitoreo y los
+   * datos de checks/presencia que necesita el frontend: `lastReadAt` y
+   * `deliveredAt` por miembro (para calcular ✓/✓✓/✓✓ azul en el cliente),
+   * `isOnline`/`lastSeenAt` (para el header del hilo).
+   */
   async findMembers(conversationId: number, user: ChatRequestingUser) {
     const conversation = await this.assertConversationAccess(
       conversationId,
       user,
     );
     const members = await this.syncMembers(conversation);
+    const memberRows = await this.prisma.chatConversationMember.findMany({
+      where: { conversationId, userId: { in: members.map((m) => m.userId) } },
+      select: { userId: true, lastReadAt: true, deliveredAt: true },
+    });
+    const rowByUserId = new Map(memberRows.map((r) => [r.userId, r]));
     const users = await this.prisma.user.findMany({
       where: { id: { in: members.map((m) => m.userId) } },
-      select: USER_SUMMARY_SELECT,
+      select: { ...USER_SUMMARY_SELECT, lastSeenAt: true },
     });
     const monitorById = new Map(members.map((m) => [m.userId, m.isMonitor]));
-    return users.map((u) => ({
-      ...u,
-      isMonitor: monitorById.get(u.id) ?? false,
-    }));
+    return users.map((u) => {
+      const row = rowByUserId.get(u.id);
+      const { lastSeenAt, ...userSummary } = u;
+      return {
+        ...userSummary,
+        isMonitor: monitorById.get(u.id) ?? false,
+        lastReadAt: row?.lastReadAt ?? null,
+        deliveredAt: row?.deliveredAt ?? null,
+        isOnline: this.notificationsGateway.isUserOnline(u.id),
+        lastSeenAt,
+      };
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -682,10 +700,19 @@ export class ChatService {
       conversationId,
       user,
     );
-    await this.syncMembers(conversation);
+    const members = await this.syncMembers(conversation);
+    const lastReadAt = new Date();
     await this.prisma.chatConversationMember.updateMany({
       where: { conversationId, userId: user.userId },
-      data: { lastReadAt: new Date() },
+      data: { lastReadAt },
+    });
+    const otherMemberIds = members
+      .map((m) => m.userId)
+      .filter((id) => id !== user.userId);
+    this.notificationsGateway.emitChatRead(otherMemberIds, {
+      conversationId,
+      userId: user.userId,
+      lastReadAt,
     });
     return { message: 'Conversación marcada como leída' };
   }
@@ -704,7 +731,11 @@ export class ChatService {
   async findChatUsers(user: ChatRequestingUser) {
     const users = await this.prisma.user.findMany({
       where: { id: { not: user.userId } },
-      select: { ...USER_SUMMARY_SELECT, roles: { select: { name: true } } },
+      select: {
+        ...USER_SUMMARY_SELECT,
+        roles: { select: { name: true } },
+        lastSeenAt: true,
+      },
       orderBy: [{ firstName: 'asc' }, { username: 'asc' }],
     });
     return users.map((u) => ({
@@ -713,6 +744,8 @@ export class ChatService {
       firstName: u.firstName,
       lastName: u.lastName,
       roles: u.roles.map((r) => r.name),
+      isOnline: this.notificationsGateway.isUserOnline(u.id),
+      lastSeenAt: u.lastSeenAt,
     }));
   }
 }
