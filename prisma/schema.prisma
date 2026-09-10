@@ -47,6 +47,7 @@ model User {
   username        String  @unique // Nombre de usuario único para iniciar sesión.
   password        String // Contraseña del usuario.
   isSharedAccount Boolean @default(false) // Cuenta compartida por varias personas de un área (ej. "Taller"), en vez de una persona.
+  lastSeenAt      DateTime? // Última vez que se desconectó el último socket vivo de este usuario (ver NotificationsGateway.handleDisconnect). Null si nunca se conectó por WebSocket.
 
   roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
   orders                  Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
@@ -372,6 +373,7 @@ model ChatConversationMember {
   userId         Int // Clave foránea que referencia al User miembro.
   isMonitor      Boolean   @default(false) // true para admin/superuser: participan para monitoreo, visible en la lista de participantes.
   lastReadAt     DateTime? // Fecha del último mensaje leído por este usuario en la conversación.
+  deliveredAt    DateTime? // Última vez que el cliente de este usuario confirmó tener la conexión viva (usado para el check "entregado" — ver NotificationsGateway).
   joinedAt       DateTime  @default(now()) // Fecha en que se materializó la membresía.
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
