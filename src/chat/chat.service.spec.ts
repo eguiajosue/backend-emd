@@ -347,4 +347,76 @@ describe('ChatService - checks y presencia', () => {
     expect(payload).toMatchObject({ conversationId: 3, userId: 10 });
     expect(payload.lastReadAt).toBeInstanceOf(Date);
   });
+
+  it('findConversationsForUser expone isOnline y lastSeenAt del otro usuario en un DM', async () => {
+    prisma.chatConversation.findMany = jest.fn().mockResolvedValue([
+      {
+        ...CONVERSATIONS[3],
+        lastMessageAt: null,
+        createdAt: new Date('2026-01-01'),
+        directUserA: {
+          id: 10,
+          username: 'ana',
+          firstName: 'Ana',
+          lastName: 'Gómez',
+          lastSeenAt: null,
+        },
+        directUserB: {
+          id: 11,
+          username: 'juan',
+          firstName: 'Juan',
+          lastName: 'Pérez',
+          lastSeenAt: new Date('2026-01-05T10:00:00Z'),
+        },
+      },
+    ]);
+    gateway.isUserOnline.mockImplementation((id: number) => id === 11);
+
+    const conversations = await chatService.findConversationsForUser({
+      userId: 10,
+      roles: [],
+    });
+
+    expect(conversations[0].otherUser).toMatchObject({
+      id: 11,
+      isOnline: true,
+      lastSeenAt: new Date('2026-01-05T10:00:00Z'),
+    });
+  });
+
+  it('findConversationsForUser expone isOnline=false y lastSeenAt=null si el otro usuario nunca se conectó', async () => {
+    prisma.chatConversation.findMany = jest.fn().mockResolvedValue([
+      {
+        ...CONVERSATIONS[3],
+        lastMessageAt: null,
+        createdAt: new Date('2026-01-01'),
+        directUserA: {
+          id: 10,
+          username: 'ana',
+          firstName: 'Ana',
+          lastName: 'Gómez',
+          lastSeenAt: null,
+        },
+        directUserB: {
+          id: 11,
+          username: 'juan',
+          firstName: 'Juan',
+          lastName: 'Pérez',
+          lastSeenAt: null,
+        },
+      },
+    ]);
+    gateway.isUserOnline.mockReturnValue(false);
+
+    const conversations = await chatService.findConversationsForUser({
+      userId: 10,
+      roles: [],
+    });
+
+    expect(conversations[0].otherUser).toMatchObject({
+      id: 11,
+      isOnline: false,
+      lastSeenAt: null,
+    });
+  });
 });
