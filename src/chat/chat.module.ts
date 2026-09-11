@@ -3,6 +3,7 @@ import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { NotificationsModule } from 'src/notifications/notifications.module';
+import { NotificationModule } from 'src/notification/notification.module';
 import { OrderModule } from 'src/order/order.module';
 
 /**
@@ -13,7 +14,7 @@ import { OrderModule } from 'src/order/order.module';
  * acceso a ese pedido (mismo criterio que `GET /orders/:id`).
  */
 @Module({
-  imports: [PrismaModule, NotificationsModule, OrderModule],
+  imports: [PrismaModule, NotificationsModule, NotificationModule, OrderModule],
   controllers: [ChatController],
   providers: [ChatService],
   exports: [ChatService],

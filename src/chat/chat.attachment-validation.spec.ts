@@ -3,6 +3,7 @@ import { ChatService } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { OrderService } from 'src/order/order.service';
+import { NotificationService } from 'src/notification/notification.service';
 
 // PNG mínimo válido (cabecera + IHDR de un pixel), mismo fixture que
 // `order.file-validation.spec.ts`: usado para probar que file-type detecta
@@ -18,6 +19,7 @@ describe('ChatService - validación de adjuntos (fotos/documentos/audios)', () =
       {} as unknown as PrismaService,
       {} as unknown as NotificationsGateway,
       {} as unknown as OrderService,
+      {} as unknown as NotificationService,
     );
   });
 
