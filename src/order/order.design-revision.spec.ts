@@ -220,6 +220,7 @@ describe('OrderService - flujo de diseño', () => {
 
     it('rechaza si el total de la ronda supera el tope agregado', async () => {
       // 5 archivos de ~4.5MB cada uno: cada uno pasa, el total (22MB) no.
+      // El tope agregado es 7MB (ver MAX_DESIGN_REVISION_TOTAL_BYTES).
       const big = Buffer.concat([
         Buffer.from(MINIMAL_PNG_BASE64, 'base64'),
         Buffer.alloc(4.5 * 1024 * 1024, 0),
@@ -233,6 +234,163 @@ describe('OrderService - flujo de diseño', () => {
       await expect(
         orderService.createDesignRevision(1, { montageFiles: files }, designer),
       ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+    });
+  });
+
+  describe('tope agregado por ronda (7MB, alineado al body-parser)', () => {
+    /** Archivo PNG válido de `mb` megabytes aproximados. */
+    const bigPng = (mb: number, name: string) => ({
+      data: Buffer.concat([
+        Buffer.from(MINIMAL_PNG_BASE64, 'base64'),
+        Buffer.alloc(mb * 1024 * 1024, 0),
+      ]).toString('base64'),
+      filename: name,
+      mimeType: 'image/png',
+    });
+
+    it('rechaza 2 archivos de 4MB (8MB > 7MB) aunque cada uno pase solo', async () => {
+      await expect(
+        orderService.createDesignRevision(
+          1,
+          { montageFiles: [bigPng(4, 'a.png'), bigPng(4, 'b.png')] },
+          designer,
+        ),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+    });
+
+    it('acepta 2 archivos de 3MB (6MB < 7MB)', async () => {
+      await expect(
+        orderService.createDesignRevision(
+          1,
+          { montageFiles: [bigPng(3, 'a.png'), bigPng(3, 'b.png')] },
+          designer,
+        ),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('legacy + array a la vez', () => {
+    it('rechaza montageFile y montageFiles juntos en vez de perder el legacy', async () => {
+      await expect(
+        orderService.createDesignRevision(
+          1,
+          {
+            montageFile: pngFile('legacy.png'),
+            montageFiles: [pngFile('a.png'), pngFile('b.png')],
+          },
+          designer,
+        ),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rechaza feedbackFile y feedbackFiles juntos', async () => {
+      await expect(
+        orderService.addDesignFeedback(
+          1,
+          100,
+          {
+            feedbackText: 'ver adjuntos',
+            feedbackFile: pngFile('legacy.png'),
+            feedbackFiles: [pngFile('a.png')],
+          },
+          receptionist,
+        ),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('desarchivado al volver a Diseño', () => {
+    /** Datos del `order.update` que corre dentro de la transacción. */
+    const lastOrderUpdateData = () =>
+      prisma.order.update.mock.calls.at(-1)?.[0].data;
+
+    it('addDesignFeedback desarchiva el pedido', async () => {
+      await orderService.addDesignFeedback(
+        1,
+        100,
+        { feedbackText: 'cambiar el color' },
+        receptionist,
+      );
+
+      expect(lastOrderUpdateData()).toMatchObject({
+        area: 'diseno',
+        archivedAt: null,
+      });
+    });
+
+    it('createDesignRevision desarchiva el pedido', async () => {
+      await orderService.createDesignRevision(
+        1,
+        { montageFile: pngFile('a.png') },
+        designer,
+      );
+
+      expect(lastOrderUpdateData()).toMatchObject({ archivedAt: null });
+    });
+
+    it('update() con requiresDesign:true desarchiva el pedido', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        id: 1,
+        area: 'bordado',
+        assignedUserId: null,
+        userId: CREATOR_USER_ID,
+        productionArea: 'bordado',
+        requiresDesign: false,
+        statusId: 9,
+        status: { id: 9, name: 'autorizado' },
+        description: 'algo',
+        deliveryDate: null,
+        clientId: 1,
+        clientNameOverride: null,
+      });
+      prisma.order.update.mockResolvedValue({
+        id: 1,
+        status: { id: 9, name: 'autorizado' },
+      });
+
+      await orderService.update(
+        1,
+        { requiresDesign: true },
+        receptionist.userId,
+        receptionist,
+      );
+
+      expect(lastOrderUpdateData()).toMatchObject({
+        requiresDesign: true,
+        archivedAt: null,
+      });
+    });
+
+    it('update() con requiresDesign:false NO toca archivedAt', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        id: 1,
+        area: 'bordado',
+        assignedUserId: null,
+        userId: CREATOR_USER_ID,
+        productionArea: 'bordado',
+        requiresDesign: true,
+        statusId: 9,
+        status: { id: 9, name: 'autorizado' },
+        description: 'algo',
+        deliveryDate: null,
+        clientId: 1,
+        clientNameOverride: null,
+      });
+      prisma.order.update.mockResolvedValue({
+        id: 1,
+        status: { id: 9, name: 'autorizado' },
+      });
+
+      await orderService.update(
+        1,
+        { requiresDesign: false },
+        receptionist.userId,
+        receptionist,
+      );
+
+      expect(lastOrderUpdateData()).not.toHaveProperty('archivedAt');
     });
   });
 

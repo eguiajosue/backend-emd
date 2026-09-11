@@ -44,7 +44,8 @@ describe('OrderService - validación de archivos subidos (MIME sniffing)', () =>
         filename: 'a.png',
         mimeType: 'image/png',
       }),
-    ).resolves.toBeUndefined();
+      // Devuelve el Buffer decodificado (se reusa para el tope por ronda).
+    ).resolves.toBeInstanceOf(Buffer);
   });
 
   it('rechaza un PNG real declarado con un mimeType distinto (mismatch)', async () => {

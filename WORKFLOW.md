@@ -40,8 +40,12 @@ Estados: `en diseño` → `esperando autorización` → (`cambios solicitados` �
 
 - Diseño sube un montaje (ronda N) y el pedido queda **esperando autorización**.
   Una ronda admite **varios archivos**: una o varias imágenes, o un PDF (hasta
-  10 archivos, 5MB cada uno y 20MB en total por ronda). Lo mismo vale para el
-  adjunto del feedback.
+  10 archivos, 5MB cada uno y 7MB en total por ronda). Lo mismo vale para el
+  adjunto del feedback. El tope agregado es 7MB porque el JSON viaja en base64
+  (+33%) y el body-parser corta en 10MB: más que eso devolvería un 413 genérico
+  en vez del mensaje explícito. Mandar el campo legacy (`montageFile` /
+  `feedbackFile`) **y** el nuevo (`montageFiles` / `feedbackFiles`) a la vez es
+  un error: hay que usar uno solo.
 - El aviso de **"Diseño mandó la hoja de autorización"** va **solo a la
   recepcionista que creó el pedido** (`Order.userId`), no a todo el rol
   Recepción. La **visibilidad no cambia**: todo Recepción sigue viendo todos
@@ -51,6 +55,10 @@ Estados: `en diseño` → `esperando autorización` → (`cambios solicitados` �
 - Al autorizar, el pedido se **archiva** (`Order.archivedAt`): **sale del
   tablero activo de Diseño** pero queda en el historial y en las consultas
   generales. El frontend filtra el tablero de Diseño por `archivedAt IS NULL`.
+- Cualquier cosa que devuelva el pedido a Diseño lo **desarchiva**
+  (`archivedAt = null`): cargar feedback del cliente, abrir una ronda nueva, o
+  volver a marcar `requiresDesign = true` desde el PATCH del pedido. Si no,
+  llegaría la notificación de un pedido que el tablero no muestra.
 - Si el cliente **pide cambios**, el pedido vuelve **al mismo diseñador que
   hizo esa ronda** y el aviso va **a ese diseñador**, no a todo el área;
   Recepción puede **redirigirlo** a otro si esa persona no está disponible.
@@ -72,7 +80,9 @@ paralelo**, no en secuencia.
   - Asignación por defecto: la **cuenta compartida de esa área**; cualquiera
     del área puede tomarla. **Empezar es tomar**: al pasar la tarea a "en
     proceso", si estaba sin asignar o en la cuenta del área, queda a nombre de
-    quien la arrancó.
+    quien la arrancó — **sólo si quien la arranca es del área**: Recepción y
+    admin pueden mover el estado de cualquier tarea, pero no se la quedan (si
+    no, el área perdería su bandeja).
 - El **diseñador deja de ser el responsable** al pasar a producción, pero queda
   registrado en el **historial/auditoría** del pedido y en las rondas de
   montaje.
@@ -81,13 +91,18 @@ paralelo**, no en secuencia.
   confirma Recepción** manualmente. Marcar **ENTREGADO** está restringido a
   Recepción/admin/superuser, tanto en `PATCH /orders/:id` como en las acciones
   masivas: producción termina su tarea, pero no cierra el pedido.
+- Si se **quita la última área** de un pedido que ya estaba "listo para
+  entregar", el pedido vuelve a **autorizado**: sin tareas no hay nada
+  terminado.
 
 ### Notificaciones
 
 - Una notificación **por tarea de área**, dirigida **solo al área que le toca**.
 - El aviso de **cada etapa completada** y el de **pedido terminado / listo para
   entregar** van **solo a la recepcionista que creó el pedido**
-  (`Order.userId`), no a todo el rol Recepción.
+  (`Order.userId`), no a todo el rol Recepción. Si quien hace la acción es esa
+  misma persona, **no recibe aviso de sí misma** (vale también para el aviso de
+  montaje listo).
 
 ## 4. Vistas por rol
 

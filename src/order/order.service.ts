@@ -30,6 +30,7 @@ import { Role } from 'src/common/enums/roles.enum';
 import { AuditLogService } from 'src/audit-log/audit-log.service';
 import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 import { OrderAreaTaskService } from './order-area-task.service';
+import { StatusIdResolver } from './status-id-resolver';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -46,8 +47,15 @@ const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
  * Tope AGREGADO de una ronda de diseño: 5MB por archivo está bien para un
  * archivo suelto, pero 10 archivos de 5MB serían 50MB de base64 en un solo
  * request. Se corta antes, con un error explícito.
+ *
+ * 7MB (ya decodificados) es el techo real que deja pasar el body-parser:
+ * el JSON viaja en base64 (+33%), así que 7MB de contenido son ~9.3MB de
+ * string, justo debajo del `json({ limit: '10mb' })` de src/main.ts. Un tope
+ * más alto sería inalcanzable: el request moriría antes con un 413 genérico
+ * en vez de este mensaje. No subir el límite del body-parser: cada request
+ * concurrente se guarda ese string entero en memoria.
  */
-const MAX_DESIGN_REVISION_TOTAL_BYTES = 20 * 1024 * 1024;
+const MAX_DESIGN_REVISION_TOTAL_BYTES = 7 * 1024 * 1024;
 
 /** Tipo de archivo dentro de una ronda de diseño. */
 const REVISION_FILE_KIND_MONTAGE = 'montage';
@@ -124,8 +132,8 @@ const CREATOR_USER_SELECT = ASSIGNED_USER_SELECT;
 
 @Injectable()
 export class OrderService {
-  /** Cache en memoria de id de Status por nombre (ver `resolveStatusIdByName`). */
-  private statusIdByNameCache = new Map<string, number>();
+  /** Resolución de ids de Status por nombre, con cache (ver `resolveStatusIdByName`). */
+  private readonly statusIds: StatusIdResolver;
 
   constructor(
     private prisma: PrismaService,
@@ -135,7 +143,9 @@ export class OrderService {
     private readonly notificationService: NotificationService,
     private readonly auditLogService: AuditLogService,
     private readonly orderAreaTaskService: OrderAreaTaskService,
-  ) {}
+  ) {
+    this.statusIds = new StatusIdResolver(this.prisma);
+  }
 
   /**
    * Valida que el usuario asignado tenga el rol del área indicada. Aplica tanto
@@ -294,8 +304,10 @@ export class OrderService {
    * contenido decodificado sea realmente uno de los formatos permitidos, y
    * que coincida con lo declarado.
    */
-  private async assertAuthorizationFileSize(file: AuthorizationFileDto) {
-    await assertBase64FileValid(file, {
+  private async assertAuthorizationFileSize(
+    file: AuthorizationFileDto,
+  ): Promise<Buffer> {
+    return assertBase64FileValid(file, {
       maxBytes: MAX_AUTHORIZATION_FILE_BYTES,
       allowedMimeTypes: AUTHORIZATION_FILE_MIME_TYPES,
       sizeErrorMessage: 'El archivo no puede superar 5MB',
@@ -318,8 +330,10 @@ export class OrderService {
     }
     let totalBytes = 0;
     for (const file of files) {
-      await this.assertAuthorizationFileSize(file);
-      totalBytes += Buffer.from(file.data, 'base64').length;
+      // El base64 se decodifica UNA sola vez por archivo: el Buffer que
+      // devuelve la validación es el mismo que se mide acá.
+      const buffer = await this.assertAuthorizationFileSize(file);
+      totalBytes += buffer.length;
     }
     if (totalBytes > MAX_DESIGN_REVISION_TOTAL_BYTES) {
       throw new HttpException(
@@ -334,11 +348,22 @@ export class OrderService {
   /**
    * Unifica el contrato nuevo (varios archivos) con el legacy (uno solo):
    * devuelve la lista en orden, o `[]` si no vino ninguno.
+   *
+   * Si vienen LOS DOS campos se rechaza en vez de descartar el legacy en
+   * silencio: era un archivo que el usuario creía haber subido y se perdía
+   * sin error.
    */
   private resolveRevisionFiles(
     many: AuthorizationFileDto[] | undefined,
     single: AuthorizationFileDto | undefined,
+    fieldNames: { many: string; single: string },
   ): AuthorizationFileDto[] {
+    if (many && many.length > 0 && single) {
+      throw new HttpException(
+        `No se pueden mandar "${fieldNames.single}" y "${fieldNames.many}" a la vez: usá sólo "${fieldNames.many}"`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     if (many && many.length > 0) return many;
     return single ? [single] : [];
   }
@@ -350,19 +375,7 @@ export class OrderService {
    * hardcodeables (ver comentario sobre STATUS_NAME_* arriba).
    */
   private async resolveStatusIdByName(name: string): Promise<number> {
-    const cached = this.statusIdByNameCache.get(name);
-    if (cached !== undefined) {
-      return cached;
-    }
-    const status = await this.prisma.status.findUnique({ where: { name } });
-    if (!status) {
-      throw new HttpException(
-        `El estado "${name}" no existe. Corré el seed (prisma/seed.ts) para crearlo.`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-    this.statusIdByNameCache.set(name, status.id);
-    return status.id;
+    return this.statusIds.idFor(name);
   }
 
   /**
@@ -1059,6 +1072,9 @@ export class OrderService {
         ...(area && { area }),
         ...(productionArea !== undefined && { productionArea }),
         ...(requiresDesign !== undefined && { requiresDesign }),
+        // Volver a marcar que el pedido requiere diseño lo devuelve al
+        // tablero de Diseño: desarchivarlo es parte de eso.
+        ...(requiresDesign === true && { archivedAt: null }),
         ...(deliveryDate && { deliveryDate: new Date(deliveryDate) }),
         ...(clientId && {
           client: {
@@ -1613,6 +1629,7 @@ export class OrderService {
     const montageFiles = this.resolveRevisionFiles(
       dto.montageFiles,
       dto.montageFile,
+      { many: 'montageFiles', single: 'montageFile' },
     );
     if (montageFiles.length === 0) {
       throw new HttpException(
@@ -1657,7 +1674,10 @@ export class OrderService {
       }),
       this.prisma.order.update({
         where: { id: orderId },
-        data: { status: { connect: { id: statusId } } },
+        // Una ronda nueva es trabajo VIVO de Diseño: si el pedido había
+        // quedado archivado (montaje autorizado antes), se desarchiva para
+        // que vuelva a verse en el tablero de Diseño.
+        data: { status: { connect: { id: statusId } }, archivedAt: null },
       }),
       this.prisma.orderAuditLog.create({
         data: {
@@ -1672,19 +1692,24 @@ export class OrderService {
     // El aviso va SÓLO a la recepcionista que creó el pedido, no a todo el
     // área: es ella la que está hablando con ese cliente (WORKFLOW.md §2).
     // La VISIBILIDAD del pedido no cambia: todo Recepción lo sigue viendo.
-    await this.notificationService.createNotification({
-      userId: order.userId,
-      type: 'design_montage_sent',
-      title: 'Montaje listo para enviar al cliente',
-      body: `Pedido #${orderId}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
-      orderId,
-    });
-    this.notificationsGateway.notifyNewAssignedOrder(order.userId, {
-      orderId,
-      description: `Montaje ronda ${round} listo para enviar al cliente`,
-      area: 'recepcion',
-      deliveryDate: null,
-    });
+    // Si quien subió el montaje es la misma persona que creó el pedido no se
+    // le manda un aviso de su propia acción.
+    if (order.userId !== requestingUser.userId) {
+      await this.notificationService.createNotification({
+        userId: order.userId,
+        type: 'design_montage_sent',
+        title: 'Montaje listo para enviar al cliente',
+        body: `Pedido #${orderId}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
+        orderId,
+      });
+      this.notificationsGateway.notifyNewAssignedOrder(order.userId, {
+        orderId,
+        description: `Montaje ronda ${round} listo para enviar al cliente`,
+        area: 'recepcion',
+        deliveryDate: null,
+        reason: 'design_montage_sent',
+      });
+    }
 
     const created = await this.prisma.designRevision.findUnique({
       where: { id: revision.id },
@@ -1712,6 +1737,7 @@ export class OrderService {
     const feedbackFiles = this.resolveRevisionFiles(
       dto.feedbackFiles,
       dto.feedbackFile,
+      { many: 'feedbackFiles', single: 'feedbackFile' },
     );
     if (feedbackFiles.length > 0) {
       await this.assertDesignRevisionFilesValid(feedbackFiles);
@@ -1758,6 +1784,10 @@ export class OrderService {
         data: {
           area: 'diseno',
           status: { connect: { id: statusId } },
+          // El pedido vuelve a Diseño: si estaba archivado (por una ronda
+          // autorizada previa) hay que desarchivarlo, o el diseñador recibe
+          // la notificación de un pedido que el tablero no le muestra.
+          archivedAt: null,
           ...(previousDesignerId && {
             assignedUser: { connect: { id: previousDesignerId } },
           }),

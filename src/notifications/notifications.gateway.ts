@@ -32,6 +32,12 @@ interface TargetedOrderNotificationPayload {
   area: string | null;
   deliveryDate: Date | null;
   clientName?: string;
+  /**
+   * Motivo del aviso. Sin esto el cliente no puede distinguir un pedido recién
+   * asignado de un montaje enviado y titula los dos igual ("Nuevo pedido
+   * asignado"), que es falso para el segundo. Ausente = pedido asignado.
+   */
+  reason?: 'order_assigned' | 'design_montage_sent';
 }
 
 /** Payload de la notificación de nota agregada a un pedido. */
