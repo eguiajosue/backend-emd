@@ -35,7 +35,7 @@ describe('OrderService - validación de archivos subidos (MIME sniffing)', () =>
     data: string;
     filename: string;
     mimeType: string;
-  }) => (orderService as any).assertAuthorizationFileSize(file);
+  }) => (orderService as any).assertOrderFileValid(file);
 
   it('acepta un PNG real declarado como image/png', async () => {
     await expect(
@@ -44,7 +44,8 @@ describe('OrderService - validación de archivos subidos (MIME sniffing)', () =>
         filename: 'a.png',
         mimeType: 'image/png',
       }),
-    ).resolves.toBeUndefined();
+      // Devuelve el Buffer decodificado (se reusa para el tope por ronda).
+    ).resolves.toBeInstanceOf(Buffer);
   });
 
   it('rechaza un PNG real declarado con un mimeType distinto (mismatch)', async () => {

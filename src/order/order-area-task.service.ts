@@ -1,4 +1,9 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+} from '@nestjs/common';
 import { AreaTaskStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from 'src/notification/notification.service';
@@ -6,13 +11,38 @@ import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { Role } from 'src/common/enums/roles.enum';
 import { PRODUCTION_AREAS } from './dto/create-order.dto';
 import type { RequestingUser } from './order.service';
+import {
+  StatusIdResolver,
+  STATUS_NAME_AUTORIZADO,
+  STATUS_NAME_CANCELADO,
+  STATUS_NAME_ENTREGADO,
+  STATUS_NAME_TERMINADO,
+} from './status-id-resolver';
+
+/*
+ * Todos los estados globales que toca este servicio se resuelven por NOMBRE
+ * (ver StatusIdResolver): sus ids dependen del orden del seed.
+ *  - "terminado": listo para entregar, al que pasa el pedido cuando TODAS sus
+ *    áreas terminaron. La entrega la confirma Recepción a mano, nunca
+ *    automáticamente (WORKFLOW.md §3).
+ *  - "autorizado": al que vuelve el pedido si un área RETROCEDE desde
+ *    `terminado` estando ya listo para entregar.
+ *  - "entregado"/"cancelado": estados finales, que no se pisan.
+ */
 
 /**
- * Estado global al que pasa el pedido cuando TODAS sus áreas terminaron:
- * "terminado" = listo para entregar. La entrega (estado 5) la confirma
- * Recepción a mano, nunca automáticamente. Ver WORKFLOW.md §3.
+ * Transiciones válidas del ciclo corto de una tarea de área. Una tarea no
+ * puede saltar de pendiente a terminado sin pasar por en_proceso, y se puede
+ * retroceder (corregir un clic) pero sólo un paso.
  */
-const READY_FOR_DELIVERY_STATUS_ID = 4;
+const ALLOWED_TASK_TRANSITIONS: Record<AreaTaskStatus, AreaTaskStatus[]> = {
+  [AreaTaskStatus.pendiente]: [AreaTaskStatus.en_proceso],
+  [AreaTaskStatus.en_proceso]: [
+    AreaTaskStatus.terminado,
+    AreaTaskStatus.pendiente,
+  ],
+  [AreaTaskStatus.terminado]: [AreaTaskStatus.en_proceso],
+};
 
 /** Roles que pueden reasignar cualquier tarea (ver WORKFLOW.md §5). */
 const TASK_MANAGER_ROLES: string[] = [
@@ -31,11 +61,16 @@ const TASK_MANAGER_ROLES: string[] = [
  */
 @Injectable()
 export class OrderAreaTaskService {
+  /** Resolución cacheada de ids de Status por nombre. */
+  private readonly statusIds: StatusIdResolver;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
     private readonly notificationsGateway: NotificationsGateway,
-  ) {}
+  ) {
+    this.statusIds = new StatusIdResolver(this.prisma);
+  }
 
   /** Selección estándar de una tarea, con el responsable resumido. */
   private taskSelect() {
@@ -152,6 +187,7 @@ export class OrderAreaTaskService {
    * agrupadas por área, según la preferencia personal del usuario.
    */
   async findForUser(requestingUser: RequestingUser) {
+    const closedStatusIds = await this.finalStatusIds();
     const isManager = requestingUser.roles.some((r) =>
       TASK_MANAGER_ROLES.includes(r),
     );
@@ -167,7 +203,7 @@ export class OrderAreaTaskService {
       where: {
         ...(isManager ? {} : { area: { in: ownAreas } }),
         // Los pedidos cerrados no ensucian la bandeja de trabajo.
-        order: { statusId: { notIn: [5, 10] } },
+        order: { statusId: { notIn: closedStatusIds } },
       },
       select: {
         ...this.taskSelect(),
@@ -208,27 +244,50 @@ export class OrderAreaTaskService {
   ) {
     const task = await this.prisma.orderAreaTask.findUnique({
       where: { id: taskId },
-      select: { id: true, orderId: true, area: true, status: true },
+      select: {
+        id: true,
+        orderId: true,
+        area: true,
+        status: true,
+        assignedUserId: true,
+      },
     });
     if (!task) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
     this.assertCanWorkArea(task.area, requestingUser);
+    this.assertValidTransition(task.status, status);
+
+    // "Empezar" es "tomar" (WORKFLOW.md §3, paso 7): si la tarea está sin
+    // asignar o todavía en la cuenta compartida del área, al pasarla a
+    // en_proceso queda a nombre de quien la arrancó.
+    // ...pero SOLO si quien la mueve pertenece al área: Recepción/admin
+    // pueden mover el estado de cualquier tarea, y si se la quedaran el área
+    // perdería su bandeja (mismo criterio que `assign`).
+    const shouldClaim =
+      status === AreaTaskStatus.en_proceso &&
+      requestingUser.roles.includes(task.area) &&
+      (await this.isUnclaimed(task.area, task.assignedUserId));
 
     const now = new Date();
     const updated = await this.prisma.orderAreaTask.update({
       where: { id: taskId },
       data: {
         status,
+        ...(shouldClaim && { assignedUserId: requestingUser.userId }),
         ...(status === AreaTaskStatus.en_proceso && { startedAt: now }),
         ...(status === AreaTaskStatus.terminado && { completedAt: now }),
       },
       select: this.taskSelect(),
     });
 
-    await this.syncOrderStatusFromTasks(task.orderId);
+    await this.syncOrderStatusFromTasks(task.orderId, requestingUser.userId);
     if (status === AreaTaskStatus.terminado) {
-      await this.notifyReceptionOfProgress(task.orderId, task.area);
+      await this.notifyReceptionOfProgress(
+        task.orderId,
+        task.area,
+        requestingUser.userId,
+      );
     }
     return updated;
   }
@@ -307,7 +366,7 @@ export class OrderAreaTaskService {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
     await this.prisma.orderAreaTask.delete({ where: { id: taskId } });
-    await this.syncOrderStatusFromTasks(task.orderId);
+    await this.syncOrderStatusFromTasks(task.orderId, requestingUser.userId);
     return { deleted: true };
   }
 
@@ -328,54 +387,147 @@ export class OrderAreaTaskService {
     }
   }
 
+  /** Rechaza saltos de estado que no existen en el ciclo de la tarea. */
+  private assertValidTransition(from: AreaTaskStatus, to: AreaTaskStatus) {
+    if (from === to) return;
+    if (!ALLOWED_TASK_TRANSITIONS[from].includes(to)) {
+      throw new BadRequestException(
+        `No se puede pasar la tarea de "${from}" a "${to}"`,
+      );
+    }
+  }
+
+  /**
+   * Si la tarea todavía no la tomó nadie: sin responsable, o a nombre de la
+   * cuenta compartida del área (que representa "cualquiera del área").
+   */
+  private async isUnclaimed(
+    area: string,
+    assignedUserId: number | null,
+  ): Promise<boolean> {
+    if (assignedUserId === null) return true;
+    const sharedId = await this.sharedAccountIdForArea(area);
+    return sharedId !== null && sharedId === assignedUserId;
+  }
+
   /**
    * Deriva el estado global del pedido de sus tareas: si todas terminaron pasa
    * a "listo para entregar" (terminado). NUNCA lo marca como entregado: eso lo
    * confirma Recepción.
    *
-   * No toca pedidos ya entregados/cancelados ni pedidos sin tareas.
+   * Al revés también: si un área retrocede de `terminado` y el pedido ya
+   * estaba "listo para entregar", el pedido vuelve a "autorizado". Lo mismo si
+   * se quitó la última área del pedido: sin tareas no hay nada terminado.
+   *
+   * No toca pedidos ya entregados/cancelados.
    */
-  private async syncOrderStatusFromTasks(orderId: number) {
+  private async syncOrderStatusFromTasks(orderId: number, actorId?: number) {
     const tasks = await this.prisma.orderAreaTask.findMany({
       where: { orderId },
       select: { status: true },
     });
-    if (tasks.length === 0) return;
 
-    const allDone = tasks.every((t) => t.status === AreaTaskStatus.terminado);
-    if (!allDone) return;
-
+    const readyId = await this.statusIds.idFor(STATUS_NAME_TERMINADO);
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: { statusId: true },
     });
-    // 5 = entregado, 10 = cancelado: estados finales que no se pisan.
-    if (!order || order.statusId === 5 || order.statusId === 10) return;
-    if (order.statusId === READY_FOR_DELIVERY_STATUS_ID) return;
+    if (!order) return;
+    // Estados finales, que no se pisan.
+    const finalIds = await this.finalStatusIds();
+    if (finalIds.includes(order.statusId)) return;
 
-    await this.prisma.$transaction([
-      this.prisma.order.update({
-        where: { id: orderId },
-        data: { statusId: READY_FOR_DELIVERY_STATUS_ID },
-      }),
-      this.prisma.orderHistory.create({
-        data: {
-          orderId,
-          previousStatusId: order.statusId,
-          newStatusId: READY_FOR_DELIVERY_STATUS_ID,
-        },
-      }),
+    // Sin tareas no queda nada "terminado": si el pedido había quedado listo
+    // para entregar (se borró la última área), vuelve a "autorizado".
+    const allDone =
+      tasks.length > 0 &&
+      tasks.every((t) => t.status === AreaTaskStatus.terminado);
+
+    if (!allDone) {
+      // Un área retrocedió (o ya no hay áreas): el pedido deja de estar listo.
+      if (order.statusId !== readyId) return;
+      const autorizadoId = await this.statusIds.idFor(STATUS_NAME_AUTORIZADO);
+      await this.applyOrderStatus(orderId, order.statusId, autorizadoId);
+      return;
+    }
+
+    if (order.statusId === readyId) return;
+
+    // Sólo se notifica si ESTA llamada fue la que hizo la transición: dos
+    // áreas terminando a la vez no pueden generar dos avisos.
+    const applied = await this.applyOrderStatus(
+      orderId,
+      order.statusId,
+      readyId,
+    );
+    if (!applied) return;
+
+    await this.notifyReceptionOrderReady(orderId, actorId);
+  }
+
+  /**
+   * Cambia el estado global del pedido dejando rastro en el historial.
+   *
+   * El update es CONDICIONAL y va dentro de la transacción
+   * (`updateMany` con el estado previo en el `where`): si otra área ya movió
+   * el pedido entre el read y el write, `count` es 0, no se escribe historial
+   * y el llamador sabe que la transición no fue suya. Evita dos
+   * `OrderHistory` y dos notificaciones de la misma transición.
+   */
+  private async applyOrderStatus(
+    orderId: number,
+    previousStatusId: number,
+    newStatusId: number,
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.order.updateMany({
+        where: { id: orderId, statusId: previousStatusId },
+        data: { statusId: newStatusId },
+      });
+      if (count !== 1) return false;
+      await tx.orderHistory.create({
+        data: { orderId, previousStatusId, newStatusId },
+      });
+      return true;
+    });
+  }
+
+  /** Ids de los estados finales, que este servicio nunca pisa. */
+  private async finalStatusIds(): Promise<number[]> {
+    return Promise.all([
+      this.statusIds.idFor(STATUS_NAME_ENTREGADO),
+      this.statusIds.idFor(STATUS_NAME_CANCELADO),
     ]);
+  }
 
-    await this.notifyReceptionOrderReady(orderId);
+  /**
+   * Destinatario EFECTIVO de los avisos que van "a Recepción" en este pedido:
+   * quien lo ATIENDE hoy (`attendedByUserId`) o, si nadie lo tomó, quien lo
+   * creó (`userId`). Ver `OrderService.receptionOwnerIdOf` y WORKFLOW.md §2.
+   */
+  private async orderReceptionOwnerId(orderId: number): Promise<number | null> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { userId: true, attendedByUserId: true },
+    });
+    if (!order) return null;
+    return order.attendedByUserId ?? order.userId;
   }
 
   /** Recepción sigue el avance global: aviso por cada etapa completada. */
-  private async notifyReceptionOfProgress(orderId: number, area: string) {
-    const receptionIds = await this.notificationService.userIdsForArea(
-      Role.RECEPCION,
-    );
-    await this.notificationService.createNotificationForUsers(receptionIds, {
+  private async notifyReceptionOfProgress(
+    orderId: number,
+    area: string,
+    actorId?: number,
+  ) {
+    // Va SÓLO a UNA recepcionista, no a todo el área: la que le está
+    // siguiendo el rastro a ese cliente, o sea quien atiende el pedido
+    // (WORKFLOW.md §2).
+    const receptionOwnerId = await this.orderReceptionOwnerId(orderId);
+    // Nadie recibe el aviso de su propia acción.
+    if (receptionOwnerId === null || receptionOwnerId === actorId) return;
+    await this.notificationService.createNotification({
+      userId: receptionOwnerId,
       type: 'area_task_completed',
       title: `${area} terminó su parte`,
       body: `Pedido #${orderId}: el área ${area} completó su tarea`,
@@ -383,11 +535,12 @@ export class OrderAreaTaskService {
     });
   }
 
-  private async notifyReceptionOrderReady(orderId: number) {
-    const receptionIds = await this.notificationService.userIdsForArea(
-      Role.RECEPCION,
-    );
-    await this.notificationService.createNotificationForUsers(receptionIds, {
+  private async notifyReceptionOrderReady(orderId: number, actorId?: number) {
+    const receptionOwnerId = await this.orderReceptionOwnerId(orderId);
+    // Nadie recibe el aviso de su propia acción.
+    if (receptionOwnerId === null || receptionOwnerId === actorId) return;
+    await this.notificationService.createNotification({
+      userId: receptionOwnerId,
       type: 'order_ready',
       title: 'Pedido listo para entregar',
       body: `Pedido #${orderId}: todas las áreas terminaron, falta confirmar la entrega`,

@@ -8,6 +8,8 @@ import {
   Delete,
   Query,
   Res,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
@@ -46,7 +48,7 @@ export class OrderController {
 
   // Límite más estricto que el default global: creación de pedidos es una
   // escritura "cara" (valida cliente/productos, puede incluir el archivo de
-  // autorización) y no debería dispararse en ráfaga.
+  // recursos que mandó el cliente) y no debería dispararse en ráfaga.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Auth(Role.RECEPCION)
   @Post()
@@ -256,6 +258,49 @@ export class OrderController {
     return this.orderService.remove(+id);
   }
 
+  /**
+   * Recepción "atiende" el pedido: otra recepcionista lo toma para que el
+   * circuito no se trabe si la que lo creó está de franco. El creador
+   * (`userId`) no cambia; los avisos pasan a ir a quien lo tomó.
+   * Idempotente: volver a tomarlo no es un error (WORKFLOW.md §2).
+   *
+   * Sin ADMIN a propósito: admin genera pedidos pero no los trabaja. El
+   * único rol que puede hacer de todo es SUPERUSER.
+   */
+  @HttpCode(HttpStatus.OK)
+  @Auth(Role.RECEPCION, Role.SUPERUSER)
+  @Post(':id/take-reception')
+  takeReception(
+    @Param('id') id: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.takeReception(+id, {
+      userId: user.sub,
+      roles: user.roles,
+      username: user.username,
+    });
+  }
+
+  /**
+   * Un diseñador toma un pedido que quedó en la cuenta compartida del área
+   * ("Cualquier diseñador"). Botón explícito, no automático al subir el
+   * montaje. No se le roba el pedido a un compañero: si ya lo tiene otra
+   * persona real, 400 (WORKFLOW.md §1.a).
+   *
+   * Sin ADMIN a propósito: admin genera pedidos pero no los trabaja. El
+   * único rol que puede hacer de todo es SUPERUSER.
+   */
+  @HttpCode(HttpStatus.OK)
+  @Auth(Role.DISENO, Role.SUPERUSER)
+  @Post(':id/take-design')
+  takeDesign(@Param('id') id: string, @ActiveUser() user: AccessTokenPayload) {
+    return this.orderService.takeDesign(+id, {
+      userId: user.sub,
+      roles: user.roles,
+      username: user.username,
+    });
+  }
+
   @Auth(
     Role.RECEPCION,
     Role.ADMIN,
@@ -404,6 +449,35 @@ export class OrderController {
     });
   }
 
+  /**
+   * Descarga de UN archivo puntual de la ronda. Una ronda puede llevar varias
+   * imágenes o un PDF (WORKFLOW.md §2); los endpoints `/montage` y
+   * `/feedback-file` siguen devolviendo el primero de cada tipo.
+   */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/design-revisions/:revisionId/files/:fileId')
+  getDesignRevisionFile(
+    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
+    @Param('fileId') fileId: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.getDesignRevisionFile(+id, +revisionId, +fileId, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
   /** Recepción carga el feedback del cliente sobre una ronda de montaje. */
   // Sube un archivo (base64, hasta 5MB): throttle más estricto que el
   // default global.
@@ -423,11 +497,11 @@ export class OrderController {
   }
 
   /**
-   * Se registra que el cliente autorizó el montaje. Lo puede hacer Recepción o
-   * el propio Diseño, que muchas veces recibe la respuesta directo
-   * (WORKFLOW.md §2).
+   * Se registra que el cliente autorizó el montaje. Es exclusivo de Recepción
+   * (o admin/superuser): es quien habla con el cliente y recibe la respuesta.
+   * Diseño ya no puede autorizar (WORKFLOW.md §2).
    */
-  @Auth(Role.RECEPCION, Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
   @Patch(':id/design-revisions/:revisionId/approve')
   approveDesignRevision(
     @Param('id') id: string,

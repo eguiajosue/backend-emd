@@ -41,17 +41,18 @@ model Role {
 }
 
 model User {
-  id              Int     @id @default(autoincrement()) // Identificador único del usuario.
+  id              Int       @id @default(autoincrement()) // Identificador único del usuario.
   firstName       String // Nombre del usuario.
   lastName        String? // Apellido del usuario.
-  username        String  @unique // Nombre de usuario único para iniciar sesión.
+  username        String    @unique // Nombre de usuario único para iniciar sesión.
   password        String // Contraseña del usuario.
-  isSharedAccount Boolean @default(false) // Cuenta compartida por varias personas de un área (ej. "Taller"), en vez de una persona.
+  isSharedAccount Boolean   @default(false) // Cuenta compartida por varias personas de un área (ej. "Taller"), en vez de una persona.
   lastSeenAt      DateTime? // Última vez que se desconectó el último socket vivo de este usuario (ver NotificationsGateway.handleDisconnect). Null si nunca se conectó por WebSocket.
 
   roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
   orders                  Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
   assignedOrders          Order[]                  @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
+  attendedOrders          Order[]                  @relation("AttendedOrders") // Pedidos de Recepción que esta persona está atendiendo (los tomó de otra recepcionista).
   assignedAreaTasks       OrderAreaTask[]          @relation("AssignedAreaTasks") // Tareas de área de producción asignadas a este usuario (o a su cuenta de área).
   logs                    Log[] // Relación uno a muchos con Log.
   orderNotes              OrderNote[] // Notas internas de pedidos escritas por este usuario.
@@ -95,6 +96,7 @@ model Order {
   clientNameOverride String? // Nombre de cliente escrito a mano cuando no se selecciona un cliente registrado.
   userId             Int // Clave foránea que referencia al User que creó la orden.
   assignedUserId     Int? // Clave foránea que referencia al User asignado para trabajar la orden.
+  attendedByUserId   Int? // Clave foránea que referencia a la recepcionista que TOMÓ el pedido ("atender"). El creador (`userId`) no cambia nunca; este campo dice quién lo lleva hoy y es el destinatario efectivo de los avisos del circuito (ver WORKFLOW.md §2).
   statusId           Int // Clave foránea que referencia a Status (flujo: pendiente→en proceso→terminado→entregado, o el flujo con diseño: en diseño→esperando autorización→cambios solicitados→autorizado→...).
   area               String? // Departamento DONDE ESTÁ AHORA el pedido (gobierna visibilidad): taller | dtf | bordado | diseno | laser | impresiones.
   description        String // Descripción de la orden.
@@ -104,13 +106,20 @@ model Order {
   requiresDesign Boolean @default(true) // Si el pedido pasa por la fase de Diseño antes de producción (decidido por Recepción al crear el pedido).
   productionArea String? // Área de producción destino una vez autorizado el diseño (uno de ORDER_AREAS salvo 'diseno'). Editable por recepción/admin/superuser y por usuarios con rol diseno.
 
-  authorizationFileData String? // Contenido en base64 (sin prefijo data:) de la hoja de autorización.
-  authorizationFileName String? // Nombre de archivo original de la hoja de autorización.
-  authorizationFileMime String? // Mime type de la hoja de autorización (image/png, image/jpeg, application/pdf).
+  archivedAt DateTime? // Momento en que el pedido salió del tablero activo de Diseño al autorizarse el montaje. Queda en el historial, pero ya no es trabajo pendiente de Diseño (ver WORKFLOW.md §2).
+
+  // Recursos que manda el CLIENTE para poder hacer el diseño (logo,
+  // referencias, arte previo). Es opcional y lo carga Recepción en el alta.
+  // NO es la hoja de autorización: esa es el montaje que sube Diseño en cada
+  // ronda (ver `DesignRevision`). Ver WORKFLOW.md §1.
+  clientResourceFileData String? // Contenido en base64 (sin prefijo data:) del archivo que mandó el cliente.
+  clientResourceFileName String? // Nombre de archivo original del archivo del cliente.
+  clientResourceFileMime String? // Mime type del archivo del cliente (image/png, image/jpeg, application/pdf).
 
   client          Client?          @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
   user            User             @relation(fields: [userId], references: [id]) // Relación con User (creador).
   assignedUser    User?            @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
+  attendedBy      User?            @relation("AttendedOrders", fields: [attendedByUserId], references: [id]) // Relación con la recepcionista que atiende el pedido.
   status          Status           @relation(fields: [statusId], references: [id]) // Relación con Status.
   histories       OrderHistory[] // Relación uno a muchos con OrderHistory.
   orderProducts   OrderProduct[] // Líneas de producto del pedido.
@@ -125,6 +134,7 @@ model Order {
   @@index([clientId])
   @@index([userId])
   @@index([assignedUserId])
+  @@index([attendedByUserId])
   @@index([deliveryDate])
   @@index([creationDate])
   @@index([area])
@@ -157,13 +167,37 @@ model DesignRevision {
 
   createdAt DateTime @default(now()) // Fecha de creación de la ronda.
 
-  order          Order @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order (se borra en cascada si se borra el pedido).
-  sentByUser     User? @relation("DesignRevisionSentBy", fields: [sentByUserId], references: [id]) // Relación con User que envió el montaje.
-  feedbackByUser User? @relation("DesignRevisionFeedbackBy", fields: [feedbackByUserId], references: [id]) // Relación con User que cargó el feedback.
-  approvedByUser User? @relation("DesignRevisionApprovedBy", fields: [approvedByUserId], references: [id]) // Relación con User que autorizó.
+  order          Order                @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order (se borra en cascada si se borra el pedido).
+  sentByUser     User?                @relation("DesignRevisionSentBy", fields: [sentByUserId], references: [id]) // Relación con User que envió el montaje.
+  feedbackByUser User?                @relation("DesignRevisionFeedbackBy", fields: [feedbackByUserId], references: [id]) // Relación con User que cargó el feedback.
+  approvedByUser User?                @relation("DesignRevisionApprovedBy", fields: [approvedByUserId], references: [id]) // Relación con User que autorizó.
+  files          DesignRevisionFile[] // Archivos de la ronda (montaje y/o feedback); una ronda admite varios (WORKFLOW.md §2).
 
   @@index([orderId])
   @@index([orderId, round])
+}
+
+/// Archivo adjunto de una ronda de diseño. Una ronda puede llevar VARIAS
+/// imágenes o un PDF, tanto en el montaje que manda Diseño como en el feedback
+/// que carga Recepción (WORKFLOW.md §2).
+///
+/// Los campos escalares `montageFile*`/`feedbackFile*` de `DesignRevision` se
+/// siguen poblando con el PRIMER archivo de cada tipo, para no romper a los
+/// clientes viejos que sólo conocen un archivo por ronda.
+model DesignRevisionFile {
+  id         Int      @id @default(autoincrement()) // Identificador único del archivo.
+  revisionId Int // Clave foránea que referencia a DesignRevision.
+  kind       String // Para qué lado de la ronda es: 'montage' | 'feedback'.
+  data       String // Contenido en base64 (sin prefijo data:).
+  filename   String // Nombre de archivo original.
+  mimeType   String // Mime type real del archivo (image/png, image/jpeg, application/pdf).
+  position   Int      @default(0) // Orden de visualización dentro de la ronda.
+  createdAt  DateTime @default(now()) // Fecha de carga del archivo.
+
+  revision DesignRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade) // Relación con la ronda (se borra en cascada).
+
+  @@index([revisionId])
+  @@index([revisionId, kind])
 }
 
 model OrderNote {
@@ -257,7 +291,7 @@ model OrderAreaTask {
 /// 20260907220000_remove_inventory.
 
 model OrderProduct {
-  id         Int     @id @default(autoincrement()) // Identificador único de la línea de producto del pedido.
+  id         Int    @id @default(autoincrement()) // Identificador único de la línea de producto del pedido.
   orderId    Int // Clave foránea que referencia a Order.
   customName String // Nombre del producto, escrito a mano o elegido de OrderProductPreset.
   quantity   Int // Cantidad del producto en la orden.
@@ -387,25 +421,25 @@ model ChatConversationMember {
 /// (NotificationsGateway.emitChatMessage), igual que las notificaciones:
 /// se persiste y además se emite, para que el historial sobreviva al reload.
 model ChatMessage {
-  id             Int      @id @default(autoincrement()) // Identificador único del mensaje.
-  conversationId Int // Clave foránea que referencia a ChatConversation.
-  senderId       Int // Clave foránea que referencia al User que lo envió.
-  body           String? // Contenido del mensaje (texto plano). Opcional si hay adjunto.
+  id                 Int      @id @default(autoincrement()) // Identificador único del mensaje.
+  conversationId     Int // Clave foránea que referencia a ChatConversation.
+  senderId           Int // Clave foránea que referencia al User que lo envió.
+  body               String? // Contenido del mensaje (texto plano). Opcional si hay adjunto.
   // Referencia opcional a un pedido, para dar contexto sin que sea
   // obligatorio en cada mensaje (ej. "che, mirá el pedido #123"). `SetNull`
   // en vez de `Cascade`: si el pedido se borra, el mensaje sobrevive sin la
   // referencia en lugar de desaparecer.
-  orderId        Int?
+  orderId            Int?
   // Adjunto opcional (foto, documento o audio). Mismo esquema que
-  // Order.authorizationFile*: el contenido va en base64 directo en la
+  // Order.clientResourceFile*: el contenido va en base64 directo en la
   // columna (sin storage externo), y el tipo/tamaño se validan en
   // ChatService.sendMessage (magic-byte sniffing con `file-type`, igual que
-  // OrderService.assertAuthorizationFileSize).
+  // OrderService.assertOrderFileValid).
   attachmentData     String?
   attachmentFilename String?
   attachmentMimeType String?
   attachmentSize     Int?
-  createdAt      DateTime @default(now()) // Fecha de envío.
+  createdAt          DateTime @default(now()) // Fecha de envío.
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User             @relation(fields: [senderId], references: [id])
@@ -424,13 +458,13 @@ model ChatMessage {
 // entidad referenciada, y no exige que `entityId` sea siempre un id de
 // pedido.
 model AuditLog {
-  id           Int      @id @default(autoincrement()) // Identificador único del registro.
-  actorUserId  Int // Id del usuario que ejecutó la acción (sin FK, ver nota arriba).
-  action       String // Acción realizada: "order.bulk_status_update" | "order.csv_export" | etc.
-  entityType   String // Tipo de entidad afectada: "order" | "order_bulk" | "order_export" | etc.
-  entityId     String // Id (o ids serializados/"bulk") de la entidad afectada.
-  metadata     Json? // Detalle adicional de la acción (ids afectados, filtros usados, resultado, etc.).
-  createdAt    DateTime @default(now()) // Fecha del registro.
+  id          Int      @id @default(autoincrement()) // Identificador único del registro.
+  actorUserId Int // Id del usuario que ejecutó la acción (sin FK, ver nota arriba).
+  action      String // Acción realizada: "order.bulk_status_update" | "order.csv_export" | etc.
+  entityType  String // Tipo de entidad afectada: "order" | "order_bulk" | "order_export" | etc.
+  entityId    String // Id (o ids serializados/"bulk") de la entidad afectada.
+  metadata    Json? // Detalle adicional de la acción (ids afectados, filtros usados, resultado, etc.).
+  createdAt   DateTime @default(now()) // Fecha del registro.
 
   @@index([entityType, entityId])
   @@index([actorUserId])

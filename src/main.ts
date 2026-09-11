@@ -30,9 +30,9 @@ function basicAuth(user: string, password: string) {
 }
 
 async function bootstrap() {
-  // bodyParser deshabilitado acá para poder fijar un límite explícito (la
-  // hoja de autorización de un pedido va en base64 dentro del JSON, ver
-  // MAX_AUTHORIZATION_FILE_BYTES en order.service.ts): 10mb cubre eso con
+  // bodyParser deshabilitado acá para poder fijar un límite explícito (los
+  // archivos de un pedido viajan en base64 dentro del JSON, ver
+  // MAX_ORDER_FILE_BYTES en order.service.ts): 10mb cubre eso con
   // margen sin dejar el límite sin techo (Express default es 100kb).
   const app = await NestFactory.create(AppModule, {
     bufferLogs: false,

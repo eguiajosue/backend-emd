@@ -20,14 +20,22 @@ import {
   TrimString,
 } from 'src/common/transformers/empty-to-undefined';
 
-/** Mime types permitidos para la hoja de autorización del pedido. */
-export const AUTHORIZATION_FILE_MIME_TYPES = [
+/** Mime types permitidos para cualquier archivo que viaje en base64 dentro de
+ * un pedido: los recursos del cliente del alta y los montajes/feedback de las
+ * rondas de diseño. */
+export const ORDER_FILE_MIME_TYPES = [
   'image/png',
   'image/jpeg',
   'application/pdf',
 ] as const;
 
-export class AuthorizationFileDto {
+/**
+ * Archivo en base64 dentro de un pedido. Nombre deliberadamente neutro: lo
+ * usan tanto los recursos que manda el cliente en el alta
+ * (`CreateOrderDto.clientResourceFile`) como los montajes y adjuntos de
+ * feedback de las rondas de diseño (ver design-revision.dto.ts).
+ */
+export class OrderFileDto {
   /** Contenido del archivo en base64, SIN el prefijo `data:...;base64,`. */
   @IsNotEmpty()
   @IsString()
@@ -39,7 +47,7 @@ export class AuthorizationFileDto {
   filename: string;
 
   @IsNotEmpty()
-  @IsIn(AUTHORIZATION_FILE_MIME_TYPES)
+  @IsIn(ORDER_FILE_MIME_TYPES)
   mimeType: string;
 }
 
@@ -152,10 +160,13 @@ export class CreateOrderDto {
   @Type(() => OrderProductDto)
   orderProducts?: OrderProductDto[];
 
+  // Recursos que manda el CLIENTE para poder hacer el diseño (logo,
+  // referencias, arte previo). Opcional. NO es la hoja de autorización: esa es
+  // el montaje que sube Diseño en cada ronda (ver WORKFLOW.md §1 y §2).
   @IsOptional()
   @ValidateNested()
-  @Type(() => AuthorizationFileDto)
-  authorizationFile?: AuthorizationFileDto;
+  @Type(() => OrderFileDto)
+  clientResourceFile?: OrderFileDto;
 
   // Si el pedido pasa por la fase de Diseño antes de producción. Default
   // true (comportamiento nuevo); Recepción puede desmarcarlo para ir
