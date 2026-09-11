@@ -263,9 +263,12 @@ export class OrderController {
    * circuito no se trabe si la que lo creó está de franco. El creador
    * (`userId`) no cambia; los avisos pasan a ir a quien lo tomó.
    * Idempotente: volver a tomarlo no es un error (WORKFLOW.md §2).
+   *
+   * Sin ADMIN a propósito: admin genera pedidos pero no los trabaja. El
+   * único rol que puede hacer de todo es SUPERUSER.
    */
   @HttpCode(HttpStatus.OK)
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Auth(Role.RECEPCION, Role.SUPERUSER)
   @Post(':id/take-reception')
   takeReception(
     @Param('id') id: string,
@@ -283,9 +286,12 @@ export class OrderController {
    * ("Cualquier diseñador"). Botón explícito, no automático al subir el
    * montaje. No se le roba el pedido a un compañero: si ya lo tiene otra
    * persona real, 400 (WORKFLOW.md §1.a).
+   *
+   * Sin ADMIN a propósito: admin genera pedidos pero no los trabaja. El
+   * único rol que puede hacer de todo es SUPERUSER.
    */
   @HttpCode(HttpStatus.OK)
-  @Auth(Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Auth(Role.DISENO, Role.SUPERUSER)
   @Post(':id/take-design')
   takeDesign(@Param('id') id: string, @ActiveUser() user: AccessTokenPayload) {
     return this.orderService.takeDesign(+id, {

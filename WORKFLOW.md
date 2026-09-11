@@ -25,7 +25,8 @@ Al crear un pedido, Recepción decide primero si **requiere montaje/diseño**.
   **No** es automático al subir el montaje. Sólo se puede tomar si está en la
   cuenta compartida o sin asignar: si ya lo tiene **otra persona real** se
   rechaza con 400 (no se le roba el pedido a un compañero). Tomar un pedido
-  que ya se tenía no es error: es idempotente.
+  que ya se tenía no es error: es idempotente. **Admin NO puede tomarlo**
+  (ver §5): admin genera pedidos, no los trabaja.
 
 ### 1.b No requiere montaje (`requiresDesign = false`)
 
@@ -160,16 +161,22 @@ paralelo**, no en secuencia.
 
 ## 5. Permisos de reasignación
 
-Pueden reasignar un pedido/tarea:
+Pueden reasignar un pedido/tarea **a otra persona** (rol de manager):
 
 - **Recepción**
 - **Admin / superuser**
 - **El propio empleado**, para tomarse una tarea que está en la cuenta de área
-- **Cualquier diseñador**, para tomarse un pedido que está en la cuenta
-  compartida de Diseño (`POST /orders/:id/take-design`); nunca uno que ya tiene
-  otra persona
-- **Cualquier recepcionista**, para pasar a atender un pedido que dio de alta
-  otra (`POST /orders/:id/take-reception`); el creador del pedido no cambia
+
+**Tomar un pedido para sí mismo y trabajarlo** es otra cosa, y **admin queda
+afuera a propósito**: admin genera pedidos, no los trabaja. El único rol que
+puede hacer de todo (incluido tomar) es **superuser**.
+
+- **Cualquier diseñador (o superuser)**, para tomarse un pedido que está en la
+  cuenta compartida de Diseño (`POST /orders/:id/take-design`); nunca uno que
+  ya tiene otra persona. `@Auth(DISENO, SUPERUSER)` — sin `ADMIN`.
+- **Cualquier recepcionista (o superuser)**, para pasar a atender un pedido
+  que dio de alta otra (`POST /orders/:id/take-reception`); el creador del
+  pedido no cambia. `@Auth(RECEPCION, SUPERUSER)` — sin `ADMIN`.
 
 ## 6. Plan de implementación (3 fases)
 
