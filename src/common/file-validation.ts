@@ -21,7 +21,7 @@ export interface Base64FileInput {
  * decodificado sea realmente uno de los formatos permitidos, y que coincida
  * con lo declarado.
  *
- * Extraído de `OrderService.assertAuthorizationFileSize` para reusarlo
+ * Extraído de `OrderService.assertOrderFileValid` para reusarlo
  * también en adjuntos de chat (fotos/documentos/audios).
  */
 export async function assertBase64FileValid(

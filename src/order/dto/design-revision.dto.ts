@@ -10,7 +10,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { AuthorizationFileDto, PRODUCTION_AREAS } from './create-order.dto';
+import { OrderFileDto, PRODUCTION_AREAS } from './create-order.dto';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
 
 /** Máximo de archivos que admite una ronda, por lado (montaje / feedback). */
@@ -18,8 +18,9 @@ export const MAX_DESIGN_REVISION_FILES = 10;
 
 /**
  * Body de `POST /orders/:id/design-revisions`: el montaje que Diseño arma
- * para una nueva ronda. Mismo shape/cap de tamaño (5MB por archivo) que
- * `AuthorizationFileDto` (ver `assertAuthorizationFileSize`).
+ * para una nueva ronda — la HOJA DE AUTORIZACIÓN real que Recepción le manda
+ * al cliente. Mismo shape/cap de tamaño (5MB por archivo) que cualquier otro
+ * `OrderFileDto` (ver `assertOrderFileValid`).
  *
  * Una ronda admite VARIOS archivos (varias imágenes o un PDF, WORKFLOW.md §2):
  * el contrato nuevo es `montageFiles`. `montageFile` (singular) se mantiene
@@ -29,16 +30,16 @@ export const MAX_DESIGN_REVISION_FILES = 10;
 export class CreateDesignRevisionDto {
   @IsOptional()
   @ValidateNested()
-  @Type(() => AuthorizationFileDto)
-  montageFile?: AuthorizationFileDto;
+  @Type(() => OrderFileDto)
+  montageFile?: OrderFileDto;
 
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(MAX_DESIGN_REVISION_FILES)
   @ValidateNested({ each: true })
-  @Type(() => AuthorizationFileDto)
-  montageFiles?: AuthorizationFileDto[];
+  @Type(() => OrderFileDto)
+  montageFiles?: OrderFileDto[];
 }
 
 /**
@@ -56,16 +57,16 @@ export class AddDesignFeedbackDto {
 
   @IsOptional()
   @ValidateNested()
-  @Type(() => AuthorizationFileDto)
-  feedbackFile?: AuthorizationFileDto;
+  @Type(() => OrderFileDto)
+  feedbackFile?: OrderFileDto;
 
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(MAX_DESIGN_REVISION_FILES)
   @ValidateNested({ each: true })
-  @Type(() => AuthorizationFileDto)
-  feedbackFiles?: AuthorizationFileDto[];
+  @Type(() => OrderFileDto)
+  feedbackFiles?: OrderFileDto[];
 }
 
 /**

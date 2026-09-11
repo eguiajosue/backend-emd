@@ -13,9 +13,9 @@ import {
  * Pedido embebido en el historial, acotado.
  *
  * Con `order: true` Prisma trae TODOS los escalares del pedido, incluida
- * `authorizationFileData`: la hoja de autorización entera en base64 viajaba en
- * cada item de `GET /order-histories`, visible para cualquier rol operativo y
- * multiplicando el peso de la respuesta.
+ * `clientResourceFileData`: el archivo que mandó el cliente entero en base64
+ * viajaba en cada item de `GET /order-histories`, visible para cualquier rol
+ * operativo y multiplicando el peso de la respuesta.
  */
 const ORDER_SELECT_FOR_HISTORY = {
   select: {

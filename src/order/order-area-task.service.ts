@@ -500,13 +500,18 @@ export class OrderAreaTaskService {
     ]);
   }
 
-  /** Aviso dirigido al creador del pedido (ver notifyReceptionOfProgress). */
-  private async orderCreatorId(orderId: number): Promise<number | null> {
+  /**
+   * Destinatario EFECTIVO de los avisos que van "a Recepción" en este pedido:
+   * quien lo ATIENDE hoy (`attendedByUserId`) o, si nadie lo tomó, quien lo
+   * creó (`userId`). Ver `OrderService.receptionOwnerIdOf` y WORKFLOW.md §2.
+   */
+  private async orderReceptionOwnerId(orderId: number): Promise<number | null> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { userId: true },
+      select: { userId: true, attendedByUserId: true },
     });
-    return order?.userId ?? null;
+    if (!order) return null;
+    return order.attendedByUserId ?? order.userId;
   }
 
   /** Recepción sigue el avance global: aviso por cada etapa completada. */
@@ -515,13 +520,14 @@ export class OrderAreaTaskService {
     area: string,
     actorId?: number,
   ) {
-    // Va SÓLO a la recepcionista que creó el pedido, no a todo el área: es
-    // quien le está siguiendo el rastro a ese cliente (WORKFLOW.md §2).
-    const creatorId = await this.orderCreatorId(orderId);
+    // Va SÓLO a UNA recepcionista, no a todo el área: la que le está
+    // siguiendo el rastro a ese cliente, o sea quien atiende el pedido
+    // (WORKFLOW.md §2).
+    const receptionOwnerId = await this.orderReceptionOwnerId(orderId);
     // Nadie recibe el aviso de su propia acción.
-    if (creatorId === null || creatorId === actorId) return;
+    if (receptionOwnerId === null || receptionOwnerId === actorId) return;
     await this.notificationService.createNotification({
-      userId: creatorId,
+      userId: receptionOwnerId,
       type: 'area_task_completed',
       title: `${area} terminó su parte`,
       body: `Pedido #${orderId}: el área ${area} completó su tarea`,
@@ -530,11 +536,11 @@ export class OrderAreaTaskService {
   }
 
   private async notifyReceptionOrderReady(orderId: number, actorId?: number) {
-    const creatorId = await this.orderCreatorId(orderId);
+    const receptionOwnerId = await this.orderReceptionOwnerId(orderId);
     // Nadie recibe el aviso de su propia acción.
-    if (creatorId === null || creatorId === actorId) return;
+    if (receptionOwnerId === null || receptionOwnerId === actorId) return;
     await this.notificationService.createNotification({
-      userId: creatorId,
+      userId: receptionOwnerId,
       type: 'order_ready',
       title: 'Pedido listo para entregar',
       body: `Pedido #${orderId}: todas las áreas terminaron, falta confirmar la entrega`,

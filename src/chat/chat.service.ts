@@ -23,7 +23,7 @@ import {
 } from './chat.constants';
 
 /** Tamaño máximo (en bytes, ya decodificado) para un adjunto de chat. Mismo
- * límite que la hoja de autorización de pedidos (ver order.service.ts). */
+ * límite que los archivos de un pedido (ver order.service.ts). */
 const MAX_CHAT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
 /** Selección de columnas de adjunto reusada en varios lados. */
@@ -44,7 +44,7 @@ interface MessageAttachmentFields {
 /**
  * Arma el objeto `attachment` expuesto en las respuestas/eventos de chat a
  * partir de las columnas crudas de `ChatMessage`. Sigue el mismo patrón que
- * `OrderService.findOne` con `authorizationFile`: el binario en base64 se
+ * `OrderService.findOne` con `clientResourceFile`: el binario en base64 se
  * expone como `dataUrl` (`data:<mime>;base64,<...>`), listo para usar en un
  * `<img>`/`<audio>`/link de descarga en el cliente.
  */
@@ -711,24 +711,23 @@ export class ChatService {
       .map((m) => m.userId)
       .filter((id) => id !== user.userId);
     if (recipientIds.length > 0) {
-      void this.notificationService.createNotificationForUsers(
-        recipientIds,
-        {
-          type: 'chat_message',
-          title: senderName,
-          body:
-            message.body ??
-            (attachmentDto ? `Adjuntó ${attachmentDto.filename}` : 'Nuevo mensaje'),
-          orderId: message.orderId ?? undefined,
-        },
-      );
+      void this.notificationService.createNotificationForUsers(recipientIds, {
+        type: 'chat_message',
+        title: senderName,
+        body:
+          message.body ??
+          (attachmentDto
+            ? `Adjuntó ${attachmentDto.filename}`
+            : 'Nuevo mensaje'),
+        orderId: message.orderId ?? undefined,
+      });
     }
 
     return { ...messageRest, attachment: attachmentDto };
   }
 
   /** Valida tamaño y tipo real (magic bytes) de un adjunto de chat, igual
-   * que `OrderService.assertAuthorizationFileSize` pero con la lista de
+   * que `OrderService.assertOrderFileValid` pero con la lista de
    * mime types ampliada a audio (fotos, documentos y audios). */
   private async assertChatAttachmentValid(
     attachment: ChatAttachmentDto,

@@ -3,8 +3,8 @@ import { assertBase64FileValid } from 'src/common/file-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateOrderDto,
-  AuthorizationFileDto,
-  AUTHORIZATION_FILE_MIME_TYPES,
+  OrderFileDto,
+  ORDER_FILE_MIME_TYPES,
 } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Prisma } from '@prisma/client';
@@ -40,8 +40,12 @@ export interface RequestingUser {
   username?: string;
 }
 
-/** Tamaño máximo (en bytes, ya decodificado) para la hoja de autorización. */
-const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
+/**
+ * Tamaño máximo (en bytes, ya decodificado) de cualquier archivo de un
+ * pedido: los recursos del cliente del alta y cada archivo de una ronda de
+ * diseño.
+ */
+const MAX_ORDER_FILE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Tope AGREGADO de una ronda de diseño: 5MB por archivo está bien para un
@@ -130,6 +134,33 @@ const ASSIGNED_USER_SELECT = {
  */
 const CREATOR_USER_SELECT = ASSIGNED_USER_SELECT;
 
+/**
+ * Selección de la recepcionista que ATIENDE el pedido (`attendedBy`): quien lo
+ * tomó de la que lo creó, para que el circuito no se trabe si esa persona no
+ * está (WORKFLOW.md §2).
+ */
+const ATTENDED_BY_USER_SELECT = {
+  select: {
+    id: true,
+    username: true,
+    firstName: true,
+    lastName: true,
+  },
+} satisfies { select: Prisma.UserSelect };
+
+/**
+ * Relaciones que acompañan al pedido devuelto por las escrituras
+ * (create/update/tomas), para que el cliente reciba siempre la misma forma.
+ */
+const ORDER_WRITE_INCLUDE = {
+  client: true,
+  user: CREATOR_USER_SELECT,
+  assignedUser: ASSIGNED_USER_SELECT,
+  attendedBy: ATTENDED_BY_USER_SELECT,
+  status: true,
+  orderProducts: true,
+} satisfies Prisma.OrderInclude;
+
 @Injectable()
 export class OrderService {
   /** Resolución de ids de Status por nombre, con cache (ver `resolveStatusIdByName`). */
@@ -182,6 +213,22 @@ export class OrderService {
         HttpStatus.BAD_REQUEST,
       );
     }
+  }
+
+  /**
+   * Destinatario EFECTIVO de los avisos que van "a Recepción" en el circuito
+   * de un pedido: quien lo está atendiendo hoy (`attendedByUserId`) o, si
+   * nadie lo tomó, quien lo creó (`userId`).
+   *
+   * Existe porque las notificaciones iban sólo a la creadora: si esa persona
+   * estaba de franco o enferma, el pedido se trababa porque nadie más se
+   * enteraba. Ver WORKFLOW.md §2.
+   */
+  static receptionOwnerIdOf(order: {
+    userId: number;
+    attendedByUserId: number | null;
+  }): number {
+    return order.attendedByUserId ?? order.userId;
   }
 
   /** Valida que cada línea de producto traiga nombre y cantidad. */
@@ -275,12 +322,20 @@ export class OrderService {
     id: number;
     area: string | null;
     assignedUserId: number | null;
-    /** Creador del pedido: destinatario de los avisos dirigidos (WORKFLOW.md §2). */
+    /** Creador del pedido: no cambia nunca (WORKFLOW.md §2). */
     userId: number;
+    /** Recepcionista que TOMÓ el pedido, si alguien lo hizo. */
+    attendedByUserId: number | null;
   }> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, area: true, assignedUserId: true, userId: true },
+      select: {
+        id: true,
+        area: true,
+        assignedUserId: true,
+        userId: true,
+        attendedByUserId: true,
+      },
     });
     if (!order) {
       throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
@@ -294,22 +349,21 @@ export class OrderService {
 
   /**
    * Valida el tamaño decodificado y el tipo REAL (por contenido, no por el
-   * `mimeType` que manda el cliente) del archivo de autorización -- reusado
-   * también para el montaje/feedback de diseño.
+   * `mimeType` que manda el cliente) de un archivo del pedido: tanto los
+   * recursos que manda el cliente en el alta como el montaje/feedback de una
+   * ronda de diseño.
    *
-   * `mimeType` en el DTO ya está restringido por `@IsIn(AUTHORIZATION_FILE_MIME_TYPES)`,
+   * `mimeType` en el DTO ya está restringido por `@IsIn(ORDER_FILE_MIME_TYPES)`,
    * pero eso sólo valida el STRING declarado por el cliente: nada impide
    * mandar un .html o un binario ejecutable con `mimeType: 'image/png'` y
    * `filename: 'x.png'`. `file-type` (magic bytes) confirma que el
    * contenido decodificado sea realmente uno de los formatos permitidos, y
    * que coincida con lo declarado.
    */
-  private async assertAuthorizationFileSize(
-    file: AuthorizationFileDto,
-  ): Promise<Buffer> {
+  private async assertOrderFileValid(file: OrderFileDto): Promise<Buffer> {
     return assertBase64FileValid(file, {
-      maxBytes: MAX_AUTHORIZATION_FILE_BYTES,
-      allowedMimeTypes: AUTHORIZATION_FILE_MIME_TYPES,
+      maxBytes: MAX_ORDER_FILE_BYTES,
+      allowedMimeTypes: ORDER_FILE_MIME_TYPES,
       sizeErrorMessage: 'El archivo no puede superar 5MB',
       typeErrorMessage:
         'El contenido del archivo no coincide con un tipo permitido (PNG, JPEG o PDF)',
@@ -318,10 +372,10 @@ export class OrderService {
 
   /**
    * Valida un lote de archivos de una ronda de diseño: cada uno con la misma
-   * validación real (magic bytes + 5MB) que la hoja de autorización, más un
-   * tope agregado por ronda (MAX_DESIGN_REVISION_TOTAL_BYTES).
+   * validación real (magic bytes + 5MB) que cualquier archivo del pedido, más
+   * un tope agregado por ronda (MAX_DESIGN_REVISION_TOTAL_BYTES).
    */
-  private async assertDesignRevisionFilesValid(files: AuthorizationFileDto[]) {
+  private async assertDesignRevisionFilesValid(files: OrderFileDto[]) {
     if (files.length > MAX_DESIGN_REVISION_FILES) {
       throw new HttpException(
         `No se pueden subir más de ${MAX_DESIGN_REVISION_FILES} archivos por ronda`,
@@ -332,7 +386,7 @@ export class OrderService {
     for (const file of files) {
       // El base64 se decodifica UNA sola vez por archivo: el Buffer que
       // devuelve la validación es el mismo que se mide acá.
-      const buffer = await this.assertAuthorizationFileSize(file);
+      const buffer = await this.assertOrderFileValid(file);
       totalBytes += buffer.length;
     }
     if (totalBytes > MAX_DESIGN_REVISION_TOTAL_BYTES) {
@@ -354,10 +408,10 @@ export class OrderService {
    * sin error.
    */
   private resolveRevisionFiles(
-    many: AuthorizationFileDto[] | undefined,
-    single: AuthorizationFileDto | undefined,
+    many: OrderFileDto[] | undefined,
+    single: OrderFileDto | undefined,
     fieldNames: { many: string; single: string },
-  ): AuthorizationFileDto[] {
+  ): OrderFileDto[] {
     if (many && many.length > 0 && single) {
       throw new HttpException(
         `No se pueden mandar "${fieldNames.single}" y "${fieldNames.many}" a la vez: usá sólo "${fieldNames.many}"`,
@@ -435,7 +489,7 @@ export class OrderService {
         description,
         deliveryDate,
         orderProducts,
-        authorizationFile,
+        clientResourceFile,
       } = createOrderDto;
 
       // Default true: si no viene explícito, el pedido pasa por Diseño
@@ -458,8 +512,8 @@ export class OrderService {
         );
       }
 
-      if (authorizationFile) {
-        await this.assertAuthorizationFileSize(authorizationFile);
+      if (clientResourceFile) {
+        await this.assertOrderFileValid(clientResourceFile);
       }
 
       this.assertOrderProductsValid(orderProducts);
@@ -519,22 +573,16 @@ export class OrderService {
               })),
             }
           : undefined,
-        ...(authorizationFile && {
-          authorizationFileData: authorizationFile.data,
-          authorizationFileName: authorizationFile.filename,
-          authorizationFileMime: authorizationFile.mimeType,
+        ...(clientResourceFile && {
+          clientResourceFileData: clientResourceFile.data,
+          clientResourceFileName: clientResourceFile.filename,
+          clientResourceFileMime: clientResourceFile.mimeType,
         }),
       };
 
       const order = await this.prisma.order.create({
         data,
-        include: {
-          client: true,
-          user: CREATOR_USER_SELECT,
-          assignedUser: ASSIGNED_USER_SELECT,
-          status: true,
-          orderProducts: true,
-        },
+        include: ORDER_WRITE_INCLUDE,
       });
 
       // Tareas de área (WORKFLOW.md §3). Las áreas que trabajan el pedido las
@@ -653,9 +701,9 @@ export class OrderService {
    * Paginación OPT-IN: sin `page`/`limit` devuelve el array plano de siempre.
    */
   /**
-   * Listado: NO trae `authorizationFileData` de la DB (es potencialmente
+   * Listado: NO trae `clientResourceFileData` de la DB (es potencialmente
    * pesado en base64 y rompería el rendimiento del listado). En su lugar
-   * expone un booleano `hasAuthorizationFile` calculado.
+   * expone un booleano `hasClientResourceFile` calculado.
    */
   /** Select común para listados: incluye `histories` liviano para calcular `deliveredAt`. */
   private orderListSelect() {
@@ -665,6 +713,9 @@ export class OrderService {
       clientNameOverride: true,
       userId: true,
       assignedUserId: true,
+      // Quién atiende el pedido en Recepción (WORKFLOW.md §2): el creador
+      // (`userId`) no cambia nunca, pero los avisos van a quien lo tomó.
+      attendedByUserId: true,
       statusId: true,
       area: true,
       requiresDesign: true,
@@ -676,7 +727,7 @@ export class OrderService {
       description: true,
       creationDate: true,
       deliveryDate: true,
-      authorizationFileName: true,
+      clientResourceFileName: true,
       client: true,
       // Trabajo de producción partido por área. Va en el LISTADO (no sólo en el
       // detalle) porque el tablero de producción del frontend agrupa por el
@@ -693,6 +744,7 @@ export class OrderService {
       },
       user: CREATOR_USER_SELECT,
       assignedUser: ASSIGNED_USER_SELECT,
+      attendedBy: ATTENDED_BY_USER_SELECT,
       status: true,
       orderProducts: true,
       histories: HISTORY_SELECT_FOR_DELIVERED_AT,
@@ -714,14 +766,14 @@ export class OrderService {
   }
 
   private toListItem = (order: {
-    authorizationFileName: string | null;
+    clientResourceFileName: string | null;
     histories?: { changeDate: Date; newStatusId: number }[];
     [key: string]: unknown;
   }) => {
-    const { authorizationFileName, histories, ...rest } = order;
+    const { clientResourceFileName, histories, ...rest } = order;
     return {
       ...rest,
-      hasAuthorizationFile: authorizationFileName != null,
+      hasClientResourceFile: clientResourceFileName != null,
       deliveredAt: this.computeDeliveredAt(histories),
     };
   };
@@ -817,11 +869,7 @@ export class OrderService {
       const order = await this.prisma.order.findUnique({
         where: { id },
         include: {
-          client: true,
-          user: CREATOR_USER_SELECT,
-          assignedUser: ASSIGNED_USER_SELECT,
-          status: true,
-          orderProducts: true,
+          ...ORDER_WRITE_INCLUDE,
           histories: HISTORY_SELECT_FOR_DELIVERED_AT,
         },
       });
@@ -830,20 +878,23 @@ export class OrderService {
       }
 
       const {
-        authorizationFileData,
-        authorizationFileName,
-        authorizationFileMime,
+        clientResourceFileData,
+        clientResourceFileName,
+        clientResourceFileMime,
         histories,
         ...rest
       } = order;
 
       return {
         ...rest,
-        authorizationFile: authorizationFileData
+        // Los recursos que mandó el cliente en el alta (logo, referencias).
+        // NO es la hoja de autorización: esa es el montaje de cada ronda de
+        // diseño (ver WORKFLOW.md §1 y §2).
+        clientResourceFile: clientResourceFileData
           ? {
-              filename: authorizationFileName,
-              mimeType: authorizationFileMime,
-              dataUrl: `data:${authorizationFileMime};base64,${authorizationFileData}`,
+              filename: clientResourceFileName,
+              mimeType: clientResourceFileMime,
+              dataUrl: `data:${clientResourceFileMime};base64,${clientResourceFileData}`,
             }
           : null,
         deliveredAt: this.computeDeliveredAt(histories),
@@ -866,6 +917,7 @@ export class OrderService {
     description: 'la descripción',
     deliveryDate: 'la fecha de entrega',
     assignedUserId: 'la asignación',
+    attendedByUserId: 'quién atiende el pedido',
     statusId: 'el estado',
     area: 'el área',
     productionArea: 'el área de producción',
@@ -974,7 +1026,7 @@ export class OrderService {
         description,
         deliveryDate,
         orderProducts,
-        authorizationFile,
+        clientResourceFile,
       } = updateOrderDto;
       const hasAssignedUserId = 'assignedUserId' in updateOrderDto;
       const { assignedUserId } = updateOrderDto;
@@ -993,8 +1045,8 @@ export class OrderService {
       // habilita para cualquier área, pero el cierre del pedido no.
       this.assertCanMarkDelivered(statusId, requestingUser);
 
-      if (authorizationFile) {
-        await this.assertAuthorizationFileSize(authorizationFile);
+      if (clientResourceFile) {
+        await this.assertOrderFileValid(clientResourceFile);
       }
 
       this.assertOrderProductsValid(orderProducts);
@@ -1112,23 +1164,17 @@ export class OrderService {
             })),
           },
         }),
-        ...(authorizationFile && {
-          authorizationFileData: authorizationFile.data,
-          authorizationFileName: authorizationFile.filename,
-          authorizationFileMime: authorizationFile.mimeType,
+        ...(clientResourceFile && {
+          clientResourceFileData: clientResourceFile.data,
+          clientResourceFileName: clientResourceFile.filename,
+          clientResourceFileMime: clientResourceFile.mimeType,
         }),
       };
 
       const updatedOrder = await this.prisma.order.update({
         where: { id },
         data,
-        include: {
-          client: true,
-          user: CREATOR_USER_SELECT,
-          assignedUser: ASSIGNED_USER_SELECT,
-          status: true,
-          orderProducts: true,
-        },
+        include: ORDER_WRITE_INCLUDE,
       });
 
       // Verificar si el estatus de la orden ha cambiado y notificar al administrador
@@ -1203,6 +1249,132 @@ export class OrderService {
       // detalles internos (Prisma, stack) al cliente en producción.
       throw error;
     }
+  }
+
+  /** Vuelve a leer el pedido con las relaciones que devuelven las escrituras. */
+  private async findOrderForWriteResponse(orderId: number) {
+    return this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: ORDER_WRITE_INCLUDE,
+    });
+  }
+
+  /**
+   * POST /orders/:id/take-reception — otra recepcionista TOMA (atiende) el
+   * pedido.
+   *
+   * Los avisos del circuito iban sólo a la recepcionista que lo creó: si esa
+   * persona estaba de franco o enferma, el pedido se trababa porque nadie más
+   * se enteraba. Ahora se guardan las DOS cosas: quién lo creó (`userId`, que
+   * no cambia nunca) y quién lo atiende hoy (`attendedByUserId`), que pasa a
+   * ser el destinatario efectivo de las notificaciones (ver
+   * `receptionOwnerIdOf`). La VISIBILIDAD no cambia: todo Recepción sigue
+   * viendo todos los pedidos. Ver WORKFLOW.md §2.
+   *
+   * Idempotente: si quien llama ya lo estaba atendiendo no es un error, sólo
+   * no hay nada que escribir ni que auditar.
+   */
+  async takeReception(orderId: number, requestingUser: RequestingUser) {
+    const order = await this.assertOrderAccess(orderId, requestingUser);
+
+    if (order.attendedByUserId !== requestingUser.userId) {
+      await this.prisma.$transaction([
+        this.prisma.order.update({
+          where: { id: orderId },
+          data: { attendedBy: { connect: { id: requestingUser.userId } } },
+        }),
+        this.prisma.orderAuditLog.create({
+          data: {
+            action: 'reception_taken',
+            changes: {
+              attendedByUserId: {
+                before: order.attendedByUserId,
+                after: requestingUser.userId,
+              },
+            } as Prisma.InputJsonValue,
+            order: { connect: { id: orderId } },
+            user: { connect: { id: requestingUser.userId } },
+          },
+        }),
+      ]);
+    }
+
+    return this.findOrderForWriteResponse(orderId);
+  }
+
+  /**
+   * POST /orders/:id/take-design — un diseñador TOMA un pedido que quedó en la
+   * cuenta compartida del área ("Cualquier diseñador", WORKFLOW.md §1.a).
+   *
+   * Es un botón explícito, no algo automático al subir el montaje: el pedido
+   * queda a su nombre desde que lo agarra. No se le roba el pedido a un
+   * compañero: si ya está asignado a una persona real, 400.
+   *
+   * Idempotente: tomar un pedido que ya se está trabajando no es un error.
+   */
+  async takeDesign(orderId: number, requestingUser: RequestingUser) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    // Tomar el pedido es asignárselo, así que quien lo toma tiene que ser de
+    // Diseño (mismo criterio que la asignación del alta).
+    await this.assertUserBelongsToArea(requestingUser.userId, Role.DISENO);
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        assignedUserId: true,
+        assignedUser: {
+          select: {
+            id: true,
+            isSharedAccount: true,
+            roles: { select: { name: true } },
+          },
+        },
+      },
+    });
+    if (!order) {
+      throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
+    }
+
+    if (order.assignedUserId === requestingUser.userId) {
+      return this.findOrderForWriteResponse(orderId);
+    }
+
+    // La cuenta compartida del área Diseño representa "cualquier diseñador":
+    // tomar el pedido de ahí (o de nadie) es justamente lo que habilita este
+    // endpoint.
+    const heldByDesignSharedAccount =
+      order.assignedUser?.isSharedAccount === true &&
+      order.assignedUser.roles.some((r) => r.name === Role.DISENO);
+
+    if (order.assignedUserId !== null && !heldByDesignSharedAccount) {
+      throw new HttpException(
+        'El pedido ya lo está trabajando otro diseñador: pedile a Recepción que lo reasigne',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: { assignedUser: { connect: { id: requestingUser.userId } } },
+      }),
+      this.prisma.orderAuditLog.create({
+        data: {
+          action: 'design_taken',
+          changes: {
+            assignedUserId: {
+              before: order.assignedUserId,
+              after: requestingUser.userId,
+            },
+          } as Prisma.InputJsonValue,
+          order: { connect: { id: orderId } },
+          user: { connect: { id: requestingUser.userId } },
+        },
+      }),
+    ]);
+
+    return this.findOrderForWriteResponse(orderId);
   }
 
   /**
@@ -1432,6 +1604,8 @@ export class OrderService {
   private static readonly AUDIT_ID_FIELDS = {
     statusId: 'statuses',
     assignedUserId: 'users',
+    // Quién pasó a atender el pedido en Recepción (acción `reception_taken`).
+    attendedByUserId: 'users',
     clientId: 'clients',
   } as const;
 
@@ -1689,20 +1863,22 @@ export class OrderService {
       }),
     ]);
 
-    // El aviso va SÓLO a la recepcionista que creó el pedido, no a todo el
-    // área: es ella la que está hablando con ese cliente (WORKFLOW.md §2).
+    // El aviso va SÓLO a UNA recepcionista, no a todo el área: la que está
+    // hablando con ese cliente (WORKFLOW.md §2). Es la que ATIENDE el pedido
+    // (`attendedByUserId`) o, si nadie lo tomó, la que lo creó.
     // La VISIBILIDAD del pedido no cambia: todo Recepción lo sigue viendo.
-    // Si quien subió el montaje es la misma persona que creó el pedido no se
-    // le manda un aviso de su propia acción.
-    if (order.userId !== requestingUser.userId) {
+    // Si quien subió el montaje es esa misma persona no se le manda un aviso
+    // de su propia acción.
+    const receptionOwnerId = OrderService.receptionOwnerIdOf(order);
+    if (receptionOwnerId !== requestingUser.userId) {
       await this.notificationService.createNotification({
-        userId: order.userId,
+        userId: receptionOwnerId,
         type: 'design_montage_sent',
         title: 'Montaje listo para enviar al cliente',
         body: `Pedido #${orderId}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
         orderId,
       });
-      this.notificationsGateway.notifyNewAssignedOrder(order.userId, {
+      this.notificationsGateway.notifyNewAssignedOrder(receptionOwnerId, {
         orderId,
         description: `Montaje ronda ${round} listo para enviar al cliente`,
         area: 'recepcion',

@@ -8,6 +8,8 @@ import {
   Delete,
   Query,
   Res,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
@@ -46,7 +48,7 @@ export class OrderController {
 
   // Límite más estricto que el default global: creación de pedidos es una
   // escritura "cara" (valida cliente/productos, puede incluir el archivo de
-  // autorización) y no debería dispararse en ráfaga.
+  // recursos que mandó el cliente) y no debería dispararse en ráfaga.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Auth(Role.RECEPCION)
   @Post()
@@ -254,6 +256,43 @@ export class OrderController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.orderService.remove(+id);
+  }
+
+  /**
+   * Recepción "atiende" el pedido: otra recepcionista lo toma para que el
+   * circuito no se trabe si la que lo creó está de franco. El creador
+   * (`userId`) no cambia; los avisos pasan a ir a quien lo tomó.
+   * Idempotente: volver a tomarlo no es un error (WORKFLOW.md §2).
+   */
+  @HttpCode(HttpStatus.OK)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Post(':id/take-reception')
+  takeReception(
+    @Param('id') id: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.takeReception(+id, {
+      userId: user.sub,
+      roles: user.roles,
+      username: user.username,
+    });
+  }
+
+  /**
+   * Un diseñador toma un pedido que quedó en la cuenta compartida del área
+   * ("Cualquier diseñador"). Botón explícito, no automático al subir el
+   * montaje. No se le roba el pedido a un compañero: si ya lo tiene otra
+   * persona real, 400 (WORKFLOW.md §1.a).
+   */
+  @HttpCode(HttpStatus.OK)
+  @Auth(Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Post(':id/take-design')
+  takeDesign(@Param('id') id: string, @ActiveUser() user: AccessTokenPayload) {
+    return this.orderService.takeDesign(+id, {
+      userId: user.sub,
+      roles: user.roles,
+      username: user.username,
+    });
   }
 
   @Auth(

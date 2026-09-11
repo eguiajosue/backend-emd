@@ -15,8 +15,8 @@ import {
 import { MAX_CHAT_MESSAGE_LENGTH } from '../chat.constants';
 
 /**
- * Mime types permitidos para un adjunto de chat: mismas imágenes/PDF que la
- * hoja de autorización de pedidos (ver AUTHORIZATION_FILE_MIME_TYPES en
+ * Mime types permitidos para un adjunto de chat: mismas imágenes/PDF que los
+ * archivos de un pedido (ver ORDER_FILE_MIME_TYPES en
  * order/dto/create-order.dto.ts) más audio, ya que el chat necesita soportar
  * fotos, documentos y audios (notas de voz).
  */
@@ -71,7 +71,7 @@ export class SendMessageDto {
   orderId?: number;
 
   /** Adjunto opcional (foto, documento o audio), en base64 igual que
-   * `AuthorizationFileDto` en pedidos. */
+   * `OrderFileDto` en pedidos. */
   @ApiPropertyOptional({ type: ChatAttachmentDto })
   @IsOptional()
   @ValidateNested()
