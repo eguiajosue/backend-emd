@@ -39,10 +39,21 @@ Estados: `en diseño` → `esperando autorización` → (`cambios solicitados` �
 `en diseño`)\* → `autorizado`.
 
 - Diseño sube un montaje (ronda N) y el pedido queda **esperando autorización**.
-- **Quién registra la respuesta del cliente**: Recepción **o** Diseño.
+  Una ronda admite **varios archivos**: una o varias imágenes, o un PDF (hasta
+  10 archivos, 5MB cada uno y 20MB en total por ronda). Lo mismo vale para el
+  adjunto del feedback.
+- El aviso de **"Diseño mandó la hoja de autorización"** va **solo a la
+  recepcionista que creó el pedido** (`Order.userId`), no a todo el rol
+  Recepción. La **visibilidad no cambia**: todo Recepción sigue viendo todos
+  los pedidos; lo que se dirige es la notificación.
+- **Quién marca AUTORIZADO**: **solo Recepción** (o admin/superuser). Diseño ya
+  no puede autorizar: quien habla con el cliente es Recepción.
+- Al autorizar, el pedido se **archiva** (`Order.archivedAt`): **sale del
+  tablero activo de Diseño** pero queda en el historial y en las consultas
+  generales. El frontend filtra el tablero de Diseño por `archivedAt IS NULL`.
 - Si el cliente **pide cambios**, el pedido vuelve **al mismo diseñador que
-  hizo esa ronda**; Recepción puede **redirigirlo** a otro si esa persona no
-  está disponible.
+  hizo esa ronda** y el aviso va **a ese diseñador**, no a todo el área;
+  Recepción puede **redirigirlo** a otro si esa persona no está disponible.
 - Este ciclo de estados es visible **solo para el rol Diseño** (ver §4).
 
 ## 3. Autorizado → producción (multi-área)
@@ -54,21 +65,29 @@ paralelo**, no en secuencia.
   Diseño al autorizar el montaje.
 - Cada área participante genera una **tarea de área** con su **propio estado y
   su propio responsable**:
-  - Estados de la tarea: **Pendiente → En proceso → Terminado**.
+  - Estados de la tarea: **Pendiente → En proceso → Terminado**. Sólo se
+    avanza (o se retrocede) de a un paso; cualquier otro salto se rechaza con
+    400. Si un área **retrocede** desde Terminado y el pedido ya estaba "listo
+    para entregar", el pedido vuelve a **autorizado**.
   - Asignación por defecto: la **cuenta compartida de esa área**; cualquiera
-    del área puede tomarla.
+    del área puede tomarla. **Empezar es tomar**: al pasar la tarea a "en
+    proceso", si estaba sin asignar o en la cuenta del área, queda a nombre de
+    quien la arrancó.
 - El **diseñador deja de ser el responsable** al pasar a producción, pero queda
   registrado en el **historial/auditoría** del pedido y en las rondas de
   montaje.
 - **Cierre**: cuando **todas** las tareas de área quedan en Terminado, el
   pedido pasa automáticamente a **listo para entregar**; la **entrega la
-  confirma Recepción** manualmente.
+  confirma Recepción** manualmente. Marcar **ENTREGADO** está restringido a
+  Recepción/admin/superuser, tanto en `PATCH /orders/:id` como en las acciones
+  masivas: producción termina su tarea, pero no cierra el pedido.
 
 ### Notificaciones
 
 - Una notificación **por tarea de área**, dirigida **solo al área que le toca**.
-- **Recepción recibe además** el aviso de cada etapa completada, para seguir el
-  avance global.
+- El aviso de **cada etapa completada** y el de **pedido terminado / listo para
+  entregar** van **solo a la recepcionista que creó el pedido**
+  (`Order.userId`), no a todo el rol Recepción.
 
 ## 4. Vistas por rol
 
@@ -119,5 +138,7 @@ Los pedidos existentes no tienen datos que preservar: la migración a tareas de
 | Modelo | `prisma/schema.prisma` → `OrderAreaTask`, enum `AreaTaskStatus` |
 | Validación de asignación por área | `OrderService.assertUserBelongsToArea` |
 | Preferencia de vista | `User.areaViewMode` (`'unified' \| 'split'`) |
-| Bandeja del usuario (frontend) | `src/app/dashboard/mi-trabajo/page.tsx` |
+| Bandeja del usuario (frontend) | `src/app/dashboard/orders/page.tsx` (`mi-trabajo/page.tsx` es hoy sólo un redirect) |
+| Archivos de una ronda de diseño | `prisma/schema.prisma` → `DesignRevisionFile`; `GET /orders/:id/design-revisions/:revisionId/files/:fileId` |
+| Archivado al autorizar | `Order.archivedAt`, seteado en `OrderService.approveDesignRevision` |
 | Áreas en el detalle del pedido | `src/components/orders/AreaTasksSection.tsx` |

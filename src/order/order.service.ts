@@ -23,6 +23,7 @@ import {
   CreateDesignRevisionDto,
   AddDesignFeedbackDto,
   ApproveDesignRevisionDto,
+  MAX_DESIGN_REVISION_FILES,
 } from './dto/design-revision.dto';
 import { NotificationService } from 'src/notification/notification.service';
 import { Role } from 'src/common/enums/roles.enum';
@@ -40,6 +41,28 @@ export interface RequestingUser {
 
 /** Tamaño máximo (en bytes, ya decodificado) para la hoja de autorización. */
 const MAX_AUTHORIZATION_FILE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Tope AGREGADO de una ronda de diseño: 5MB por archivo está bien para un
+ * archivo suelto, pero 10 archivos de 5MB serían 50MB de base64 en un solo
+ * request. Se corta antes, con un error explícito.
+ */
+const MAX_DESIGN_REVISION_TOTAL_BYTES = 20 * 1024 * 1024;
+
+/** Tipo de archivo dentro de una ronda de diseño. */
+const REVISION_FILE_KIND_MONTAGE = 'montage';
+const REVISION_FILE_KIND_FEEDBACK = 'feedback';
+
+/**
+ * Roles que pueden marcar un pedido como ENTREGADO. La entrega la confirma
+ * Recepción a mano (WORKFLOW.md §3): producción termina su tarea de área, pero
+ * no cierra el pedido.
+ */
+const DELIVERY_CONFIRMER_ROLES: string[] = [
+  Role.RECEPCION,
+  Role.ADMIN,
+  Role.SUPERUSER,
+];
 
 /**
  * Id del estado "entregado", sembrado por prisma/seed.ts (ver STATUS_SEEDS,
@@ -242,10 +265,12 @@ export class OrderService {
     id: number;
     area: string | null;
     assignedUserId: number | null;
+    /** Creador del pedido: destinatario de los avisos dirigidos (WORKFLOW.md §2). */
+    userId: number;
   }> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, area: true, assignedUserId: true },
+      select: { id: true, area: true, assignedUserId: true, userId: true },
     });
     if (!order) {
       throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
@@ -277,6 +302,45 @@ export class OrderService {
       typeErrorMessage:
         'El contenido del archivo no coincide con un tipo permitido (PNG, JPEG o PDF)',
     });
+  }
+
+  /**
+   * Valida un lote de archivos de una ronda de diseño: cada uno con la misma
+   * validación real (magic bytes + 5MB) que la hoja de autorización, más un
+   * tope agregado por ronda (MAX_DESIGN_REVISION_TOTAL_BYTES).
+   */
+  private async assertDesignRevisionFilesValid(files: AuthorizationFileDto[]) {
+    if (files.length > MAX_DESIGN_REVISION_FILES) {
+      throw new HttpException(
+        `No se pueden subir más de ${MAX_DESIGN_REVISION_FILES} archivos por ronda`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    let totalBytes = 0;
+    for (const file of files) {
+      await this.assertAuthorizationFileSize(file);
+      totalBytes += Buffer.from(file.data, 'base64').length;
+    }
+    if (totalBytes > MAX_DESIGN_REVISION_TOTAL_BYTES) {
+      throw new HttpException(
+        `El total de archivos de la ronda no puede superar ${
+          MAX_DESIGN_REVISION_TOTAL_BYTES / (1024 * 1024)
+        }MB`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  /**
+   * Unifica el contrato nuevo (varios archivos) con el legacy (uno solo):
+   * devuelve la lista en orden, o `[]` si no vino ninguno.
+   */
+  private resolveRevisionFiles(
+    many: AuthorizationFileDto[] | undefined,
+    single: AuthorizationFileDto | undefined,
+  ): AuthorizationFileDto[] {
+    if (many && many.length > 0) return many;
+    return single ? [single] : [];
   }
 
   /**
@@ -313,6 +377,31 @@ export class OrderService {
     if (!allowed) {
       throw new HttpException(
         'Sin permiso para editar el área de producción',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
+  /**
+   * Verifica que el usuario pueda marcar un pedido como ENTREGADO. La entrega
+   * la confirma Recepción (o admin/superuser) a mano: producción termina su
+   * tarea de área, pero no cierra el pedido. Ver WORKFLOW.md §3.
+   *
+   * `requestingUser` puede faltar en llamadas internas/seed: en ese caso no se
+   * restringe (mismo criterio que el resto de las guardias del servicio).
+   */
+  private assertCanMarkDelivered(
+    statusId: number | undefined,
+    requestingUser?: RequestingUser,
+  ) {
+    if (statusId !== DELIVERED_STATUS_ID) return;
+    if (!requestingUser) return;
+    const allowed = requestingUser.roles.some((r) =>
+      DELIVERY_CONFIRMER_ROLES.includes(r),
+    );
+    if (!allowed) {
+      throw new HttpException(
+        'Sólo Recepción o un administrador pueden marcar el pedido como entregado',
         HttpStatus.FORBIDDEN,
       );
     }
@@ -567,6 +656,10 @@ export class OrderService {
       area: true,
       requiresDesign: true,
       productionArea: true,
+      // Marcador de "salió del tablero activo de Diseño" (se setea al
+      // autorizar el montaje). El frontend filtra por esto; el pedido sigue
+      // existiendo en el historial. Ver WORKFLOW.md §2.
+      archivedAt: true,
       description: true,
       creationDate: true,
       deliveryDate: true,
@@ -883,6 +976,10 @@ export class OrderService {
         this.assertCanEditProductionArea(requestingUser);
       }
 
+      // Marcar ENTREGADO es exclusivo de Recepción/admin: el PATCH genérico lo
+      // habilita para cualquier área, pero el cierre del pedido no.
+      this.assertCanMarkDelivered(statusId, requestingUser);
+
       if (authorizationFile) {
         await this.assertAuthorizationFileSize(authorizationFile);
       }
@@ -1122,6 +1219,9 @@ export class OrderService {
     if (dto.area !== undefined) {
       this.assertCanEditProductionArea(requestingUser);
     }
+
+    // Igual que en PATCH /orders/:id: la entrega la confirma Recepción.
+    this.assertCanMarkDelivered(dto.statusId, requestingUser);
 
     const results: Array<{
       orderId: number;
@@ -1438,18 +1538,40 @@ export class OrderService {
       approvedAt: true,
       approvedByUserId: true,
       createdAt: true,
+      // Archivos de la ronda SIN el blob base64: el listado sólo necesita
+      // saber cuáles hay para linkear la descarga uno por uno.
+      files: {
+        select: { id: true, kind: true, filename: true, mimeType: true },
+        orderBy: [{ kind: 'asc' as const }, { position: 'asc' as const }],
+      },
     } satisfies Prisma.DesignRevisionSelect;
   }
 
   private toDesignRevisionListItem(revision: {
     montageFileName: string | null;
     feedbackFileName: string | null;
+    files?: {
+      id: number;
+      kind: string;
+      filename: string;
+      mimeType: string;
+    }[];
     [key: string]: unknown;
   }) {
+    const { files, ...rest } = revision;
+    const byKind = (kind: string) =>
+      (files ?? [])
+        .filter((f) => f.kind === kind)
+        .map((f) => ({ id: f.id, filename: f.filename, mimeType: f.mimeType }));
     return {
-      ...revision,
+      ...rest,
       hasMontageFile: revision.montageFileName != null,
       hasFeedbackFile: revision.feedbackFileName != null,
+      // Contrato nuevo: una ronda puede tener varias imágenes o un PDF de cada
+      // lado. Los campos `montageFile*`/`feedbackFile*` de arriba siguen
+      // reflejando el PRIMER archivo (compatibilidad).
+      montageFiles: byKind(REVISION_FILE_KIND_MONTAGE),
+      feedbackFiles: byKind(REVISION_FILE_KIND_FEEDBACK),
     };
   }
 
@@ -1487,8 +1609,18 @@ export class OrderService {
     dto: CreateDesignRevisionDto,
     requestingUser: RequestingUser,
   ) {
-    await this.assertOrderAccess(orderId, requestingUser);
-    await this.assertAuthorizationFileSize(dto.montageFile);
+    const order = await this.assertOrderAccess(orderId, requestingUser);
+    const montageFiles = this.resolveRevisionFiles(
+      dto.montageFiles,
+      dto.montageFile,
+    );
+    if (montageFiles.length === 0) {
+      throw new HttpException(
+        'Hay que adjuntar al menos un archivo de montaje',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    await this.assertDesignRevisionFilesValid(montageFiles);
 
     const last = await this.prisma.designRevision.findFirst({
       where: { orderId },
@@ -1498,17 +1630,29 @@ export class OrderService {
     const statusId = await this.resolveStatusIdByName(
       STATUS_NAME_ESPERANDO_AUTORIZACION,
     );
+    // Los escalares legacy quedan con el PRIMER archivo, para que los clientes
+    // que sólo conocen un montaje por ronda sigan funcionando.
+    const [firstMontage] = montageFiles;
 
     const [revision] = await this.prisma.$transaction([
       this.prisma.designRevision.create({
         data: {
           round,
-          montageFileData: dto.montageFile.data,
-          montageFileName: dto.montageFile.filename,
-          montageFileMime: dto.montageFile.mimeType,
+          montageFileData: firstMontage.data,
+          montageFileName: firstMontage.filename,
+          montageFileMime: firstMontage.mimeType,
           sentAt: new Date(),
           order: { connect: { id: orderId } },
           sentByUser: { connect: { id: requestingUser.userId } },
+          files: {
+            create: montageFiles.map((file, index) => ({
+              kind: REVISION_FILE_KIND_MONTAGE,
+              data: file.data,
+              filename: file.filename,
+              mimeType: file.mimeType,
+              position: index,
+            })),
+          },
         },
       }),
       this.prisma.order.update({
@@ -1525,18 +1669,17 @@ export class OrderService {
       }),
     ]);
 
-    const recepcionUserIds =
-      await this.notificationService.userIdsForArea('recepcion');
-    await this.notificationService.createNotificationForUsers(
-      recepcionUserIds,
-      {
-        type: 'design_montage_sent',
-        title: 'Montaje listo para enviar al cliente',
-        body: `Pedido #${orderId}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
-        orderId,
-      },
-    );
-    this.notificationsGateway.notifyNewOrderToArea('recepcion', {
+    // El aviso va SÓLO a la recepcionista que creó el pedido, no a todo el
+    // área: es ella la que está hablando con ese cliente (WORKFLOW.md §2).
+    // La VISIBILIDAD del pedido no cambia: todo Recepción lo sigue viendo.
+    await this.notificationService.createNotification({
+      userId: order.userId,
+      type: 'design_montage_sent',
+      title: 'Montaje listo para enviar al cliente',
+      body: `Pedido #${orderId}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
+      orderId,
+    });
+    this.notificationsGateway.notifyNewAssignedOrder(order.userId, {
       orderId,
       description: `Montaje ronda ${round} listo para enviar al cliente`,
       area: 'recepcion',
@@ -1566,9 +1709,15 @@ export class OrderService {
       orderId,
       revisionId,
     );
-    if (dto.feedbackFile) {
-      await this.assertAuthorizationFileSize(dto.feedbackFile);
+    const feedbackFiles = this.resolveRevisionFiles(
+      dto.feedbackFiles,
+      dto.feedbackFile,
+    );
+    if (feedbackFiles.length > 0) {
+      await this.assertDesignRevisionFilesValid(feedbackFiles);
     }
+    // Escalares legacy = PRIMER archivo (ver createDesignRevision).
+    const [firstFeedbackFile] = feedbackFiles;
 
     const statusId = await this.resolveStatusIdByName(
       STATUS_NAME_CAMBIOS_SOLICITADOS,
@@ -1586,10 +1735,21 @@ export class OrderService {
           feedbackText: dto.feedbackText,
           feedbackAt: new Date(),
           feedbackByUser: { connect: { id: requestingUser.userId } },
-          ...(dto.feedbackFile && {
-            feedbackFileData: dto.feedbackFile.data,
-            feedbackFileName: dto.feedbackFile.filename,
-            feedbackFileMime: dto.feedbackFile.mimeType,
+          ...(firstFeedbackFile && {
+            feedbackFileData: firstFeedbackFile.data,
+            feedbackFileName: firstFeedbackFile.filename,
+            feedbackFileMime: firstFeedbackFile.mimeType,
+          }),
+          ...(feedbackFiles.length > 0 && {
+            files: {
+              create: feedbackFiles.map((file, index) => ({
+                kind: REVISION_FILE_KIND_FEEDBACK,
+                data: file.data,
+                filename: file.filename,
+                mimeType: file.mimeType,
+                position: index,
+              })),
+            },
           }),
         },
       }),
@@ -1617,20 +1777,39 @@ export class OrderService {
       }),
     ]);
 
-    const disenoUserIds =
-      await this.notificationService.userIdsForArea('diseno');
-    await this.notificationService.createNotificationForUsers(disenoUserIds, {
-      type: 'design_feedback_added',
-      title: 'El cliente pidió cambios',
-      body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
-      orderId,
-    });
-    this.notificationsGateway.notifyNewOrderToArea('diseno', {
-      orderId,
-      description: 'El cliente pidió cambios sobre el montaje',
-      area: 'diseno',
-      deliveryDate: null,
-    });
+    // El pedido vuelve al diseñador que hizo esa ronda, así que el aviso va a
+    // esa persona y no a todo el área. Si la ronda no tiene diseñador
+    // registrado (datos viejos), se cae al aviso por área de siempre.
+    if (previousDesignerId) {
+      await this.notificationService.createNotification({
+        userId: previousDesignerId,
+        type: 'design_feedback_added',
+        title: 'El cliente pidió cambios',
+        body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
+        orderId,
+      });
+      this.notificationsGateway.notifyNewAssignedOrder(previousDesignerId, {
+        orderId,
+        description: 'El cliente pidió cambios sobre el montaje',
+        area: 'diseno',
+        deliveryDate: null,
+      });
+    } else {
+      const disenoUserIds =
+        await this.notificationService.userIdsForArea('diseno');
+      await this.notificationService.createNotificationForUsers(disenoUserIds, {
+        type: 'design_feedback_added',
+        title: 'El cliente pidió cambios',
+        body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
+        orderId,
+      });
+      this.notificationsGateway.notifyNewOrderToArea('diseno', {
+        orderId,
+        description: 'El cliente pidió cambios sobre el montaje',
+        area: 'diseno',
+        deliveryDate: null,
+      });
+    }
 
     const updated = await this.prisma.designRevision.findUnique({
       where: { id: revision.id },
@@ -1698,6 +1877,9 @@ export class OrderService {
           // manda cada tarea de área con su propio asignado (WORKFLOW.md §3).
           // Queda registrado abajo en la auditoría y en las rondas de montaje.
           assignedUser: { disconnect: true },
+          // Archivado: sale del tablero ACTIVO de Diseño (ya no es trabajo
+          // pendiente de esa área) pero sigue en el historial. WORKFLOW.md §2.
+          archivedAt: new Date(),
         },
       }),
       this.prisma.orderAuditLog.create({
@@ -1803,6 +1985,35 @@ export class OrderService {
       filename: revision.feedbackFileName,
       mimeType: revision.feedbackFileMime,
       dataUrl: `data:${revision.feedbackFileMime};base64,${revision.feedbackFileData}`,
+    };
+  }
+
+  /**
+   * GET /orders/:id/design-revisions/:revisionId/files/:fileId — descarga de
+   * UN archivo puntual de la ronda (montaje o feedback). Misma forma de
+   * respuesta que el endpoint de montaje de siempre.
+   */
+  async getDesignRevisionFile(
+    orderId: number,
+    revisionId: number,
+    fileId: number,
+    requestingUser: RequestingUser,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    await this.getDesignRevisionOrThrow(orderId, revisionId);
+    const file = await this.prisma.designRevisionFile.findUnique({
+      where: { id: fileId },
+    });
+    if (!file || file.revisionId !== revisionId) {
+      throw new HttpException(
+        'Archivo de la ronda no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return {
+      filename: file.filename,
+      mimeType: file.mimeType,
+      dataUrl: `data:${file.mimeType};base64,${file.data}`,
     };
   }
 

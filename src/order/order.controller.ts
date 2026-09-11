@@ -404,6 +404,35 @@ export class OrderController {
     });
   }
 
+  /**
+   * Descarga de UN archivo puntual de la ronda. Una ronda puede llevar varias
+   * imágenes o un PDF (WORKFLOW.md §2); los endpoints `/montage` y
+   * `/feedback-file` siguen devolviendo el primero de cada tipo.
+   */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/design-revisions/:revisionId/files/:fileId')
+  getDesignRevisionFile(
+    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
+    @Param('fileId') fileId: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.getDesignRevisionFile(+id, +revisionId, +fileId, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
+
   /** Recepción carga el feedback del cliente sobre una ronda de montaje. */
   // Sube un archivo (base64, hasta 5MB): throttle más estricto que el
   // default global.
@@ -423,11 +452,11 @@ export class OrderController {
   }
 
   /**
-   * Se registra que el cliente autorizó el montaje. Lo puede hacer Recepción o
-   * el propio Diseño, que muchas veces recibe la respuesta directo
-   * (WORKFLOW.md §2).
+   * Se registra que el cliente autorizó el montaje. Es exclusivo de Recepción
+   * (o admin/superuser): es quien habla con el cliente y recibe la respuesta.
+   * Diseño ya no puede autorizar (WORKFLOW.md §2).
    */
-  @Auth(Role.RECEPCION, Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
   @Patch(':id/design-revisions/:revisionId/approve')
   approveDesignRevision(
     @Param('id') id: string,

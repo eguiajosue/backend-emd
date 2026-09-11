@@ -1,5 +1,6 @@
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsIn,
   IsNotEmpty,
@@ -12,21 +13,39 @@ import { Type } from 'class-transformer';
 import { AuthorizationFileDto, PRODUCTION_AREAS } from './create-order.dto';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
 
+/** Máximo de archivos que admite una ronda, por lado (montaje / feedback). */
+export const MAX_DESIGN_REVISION_FILES = 10;
+
 /**
  * Body de `POST /orders/:id/design-revisions`: el montaje que Diseño arma
- * para una nueva ronda. Mismo shape/cap de tamaño (5MB) que
+ * para una nueva ronda. Mismo shape/cap de tamaño (5MB por archivo) que
  * `AuthorizationFileDto` (ver `assertAuthorizationFileSize`).
+ *
+ * Una ronda admite VARIOS archivos (varias imágenes o un PDF, WORKFLOW.md §2):
+ * el contrato nuevo es `montageFiles`. `montageFile` (singular) se mantiene
+ * por compatibilidad con los clientes viejos; hay que mandar al menos uno de
+ * los dos (lo valida `OrderService.resolveRevisionFiles`).
  */
 export class CreateDesignRevisionDto {
-  @IsNotEmpty()
+  @IsOptional()
   @ValidateNested()
   @Type(() => AuthorizationFileDto)
-  montageFile: AuthorizationFileDto;
+  montageFile?: AuthorizationFileDto;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_DESIGN_REVISION_FILES)
+  @ValidateNested({ each: true })
+  @Type(() => AuthorizationFileDto)
+  montageFiles?: AuthorizationFileDto[];
 }
 
 /**
  * Body de `PATCH /orders/:id/design-revisions/:revisionId/feedback`: lo que
- * Recepción carga después de que el cliente pidió cambios.
+ * Recepción carga después de que el cliente pidió cambios. El adjunto es
+ * opcional, pero si viene puede ser uno (`feedbackFile`) o varios
+ * (`feedbackFiles`).
  */
 export class AddDesignFeedbackDto {
   @TrimString()
@@ -39,6 +58,14 @@ export class AddDesignFeedbackDto {
   @ValidateNested()
   @Type(() => AuthorizationFileDto)
   feedbackFile?: AuthorizationFileDto;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_DESIGN_REVISION_FILES)
+  @ValidateNested({ each: true })
+  @Type(() => AuthorizationFileDto)
+  feedbackFiles?: AuthorizationFileDto[];
 }
 
 /**
