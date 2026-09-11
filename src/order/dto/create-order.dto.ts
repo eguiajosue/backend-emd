@@ -1,5 +1,6 @@
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -153,12 +154,16 @@ export class CreateOrderDto {
   @IsDateString()
   deliveryDate?: string;
 
-  @IsOptional()
+  // Al menos un producto por pedido (ver WORKFLOW.md / auditoría UX): antes
+  // era opcional y una fila con nombre pero sin cantidad se descartaba en
+  // silencio en el frontend, así que un pedido podía crearse vacío de
+  // productos sin que nadie lo notara.
   @IsArray()
+  @ArrayMinSize(1, { message: 'Agregar al menos un producto' })
   @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => OrderProductDto)
-  orderProducts?: OrderProductDto[];
+  orderProducts: OrderProductDto[];
 
   // Recursos que manda el CLIENTE para poder hacer el diseño (logo,
   // referencias, arte previo). Opcional. NO es la hoja de autorización: esa es
