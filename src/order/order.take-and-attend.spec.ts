@@ -535,6 +535,7 @@ describe('Alta del pedido: archivo de recursos del cliente (rename)', () => {
     clientNameOverride: 'Juan',
     assignedUserId: designer.userId,
     requiresDesign: true,
+    orderProducts: [{ customName: 'Remera', quantity: 1 }],
   };
 
   it('guarda el archivo del cliente en las columnas clientResourceFile*', async () => {
