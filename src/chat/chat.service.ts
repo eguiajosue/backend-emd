@@ -6,6 +6,7 @@ import {
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { NotificationService } from 'src/notification/notification.service';
 import { Role } from 'src/common/enums/roles.enum';
 import { OrderService } from 'src/order/order.service';
 import { assertBase64FileValid } from 'src/common/file-validation';
@@ -102,6 +103,7 @@ export class ChatService {
     private readonly prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
     private readonly orderService: OrderService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -680,6 +682,10 @@ export class ChatService {
     const { attachmentData, ...messageRest } = message;
     const attachmentDto = toAttachmentDto({ attachmentData, ...messageRest });
 
+    const senderName =
+      `${message.sender.firstName} ${message.sender.lastName ?? ''}`.trim() ||
+      message.sender.username;
+
     this.notificationsGateway.emitChatMessage(
       members.map((m) => m.userId),
       {
@@ -689,13 +695,34 @@ export class ChatService {
         createdAt: message.createdAt,
         senderId: message.senderId,
         senderUsername: message.sender.username,
-        senderName:
-          `${message.sender.firstName} ${message.sender.lastName ?? ''}`.trim(),
+        senderName,
         orderId: message.orderId,
         order: message.order,
         attachment: attachmentDto,
       },
     );
+
+    // Persistencia + push real (Fase 3), mismo patrón dual que el resto de
+    // las notificaciones: el emit de arriba sólo llega si el destinatario
+    // tiene la app abierta y conectada por socket, así que sin esto un
+    // mensaje mandado con el celular bloqueado o la pestaña cerrada nunca
+    // generaba notificación de ningún tipo.
+    const recipientIds = members
+      .map((m) => m.userId)
+      .filter((id) => id !== user.userId);
+    if (recipientIds.length > 0) {
+      void this.notificationService.createNotificationForUsers(
+        recipientIds,
+        {
+          type: 'chat_message',
+          title: senderName,
+          body:
+            message.body ??
+            (attachmentDto ? `Adjuntó ${attachmentDto.filename}` : 'Nuevo mensaje'),
+          orderId: message.orderId ?? undefined,
+        },
+      );
+    }
 
     return { ...messageRest, attachment: attachmentDto };
   }

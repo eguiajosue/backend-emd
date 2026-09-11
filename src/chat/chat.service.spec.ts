@@ -2,6 +2,7 @@ import { ChatService } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { OrderService } from 'src/order/order.service';
+import { NotificationService } from 'src/notification/notification.service';
 
 /**
  * Conversaciones de prueba: el canal Recepción↔Taller, el canal
@@ -36,6 +37,7 @@ describe('ChatService - autorización', () => {
   let prisma: any;
   let gateway: { emitChatMessage: jest.Mock };
   let orderService: { findOne: jest.Mock };
+  let notificationService: { createNotificationForUsers: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -92,11 +94,13 @@ describe('ChatService - autorización', () => {
     };
     gateway = { emitChatMessage: jest.fn() };
     orderService = { findOne: jest.fn().mockResolvedValue({ id: 1 }) };
+    notificationService = { createNotificationForUsers: jest.fn() };
 
     chatService = new ChatService(
       prisma as unknown as PrismaService,
       gateway as unknown as NotificationsGateway,
       orderService as unknown as OrderService,
+      notificationService as unknown as NotificationService,
     );
   });
 
@@ -226,6 +230,20 @@ describe('ChatService - autorización', () => {
     );
   });
 
+  it('enviar un mensaje persiste + pushea una notificación a los demás miembros, no a quien lo mandó', async () => {
+    await chatService.sendMessage(1, 'hola', {
+      userId: 5,
+      roles: ['recepcion'],
+    });
+
+    expect(notificationService.createNotificationForUsers).toHaveBeenCalledTimes(1);
+    const [recipientIds, payload] =
+      notificationService.createNotificationForUsers.mock.calls[0];
+    expect(recipientIds).not.toContain(5);
+    expect(recipientIds).toEqual(expect.arrayContaining([7, 99]));
+    expect(payload).toMatchObject({ type: 'chat_message', body: 'hola' });
+  });
+
   it('leer el historial de una conversación ajena es rechazado', async () => {
     await expect(
       chatService.findMessages(2, { userId: 7, roles: ['taller'] }),
@@ -252,6 +270,7 @@ describe('ChatService - checks y presencia', () => {
     isUserOnline: jest.Mock;
   };
   let orderService: { findOne: jest.Mock };
+  let notificationService: { createNotificationForUsers: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -300,11 +319,13 @@ describe('ChatService - checks y presencia', () => {
       isUserOnline: jest.fn().mockReturnValue(false),
     };
     orderService = { findOne: jest.fn().mockResolvedValue({ id: 1 }) };
+    notificationService = { createNotificationForUsers: jest.fn() };
 
     chatService = new ChatService(
       prisma as unknown as PrismaService,
       gateway as unknown as NotificationsGateway,
       orderService as unknown as OrderService,
+      notificationService as unknown as NotificationService,
     );
   });
 
