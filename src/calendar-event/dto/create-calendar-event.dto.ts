@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -15,6 +16,7 @@ import {
   EmptyToUndefined,
   TrimString,
 } from 'src/common/transformers/empty-to-undefined';
+import { ORDER_AREAS } from 'src/order/dto/create-order.dto';
 
 /**
  * Alta de un evento del calendario de equipo de Recepción (instalaciones,
@@ -49,6 +51,15 @@ export class CreateCalendarEventDto {
   @IsOptional()
   @IsEnum(CalendarEventCategory)
   category?: CalendarEventCategory;
+
+  /**
+   * Área de producción involucrada (uno de ORDER_AREAS), independiente de
+   * `category`: filtro adicional del calendario (ej. una "instalación" la
+   * puede hacer Taller o Bordado, según el pedido).
+   */
+  @IsOptional()
+  @IsIn(ORDER_AREAS)
+  area?: (typeof ORDER_AREAS)[number];
 
   /** Fecha (y hora, si `hasTime`) del evento, en ISO 8601. */
   @IsDateString()
