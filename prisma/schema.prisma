@@ -29,6 +29,7 @@ model Client {
 
   company Company? @relation(fields: [companyId], references: [id]) // Relación con Company.
   orders  Order[] // Relación uno a muchos con el modelo Order.
+  calendarEvents CalendarEvent[] // Eventos del calendario de Recepción vinculados a este cliente.
 
   @@index([companyId])
   @@index([last_name, first_name])
@@ -67,6 +68,7 @@ model User {
   chatMessages            ChatMessage[] // Mensajes de chat enviados por este usuario.
   chatDirectAsUserA       ChatConversation[]       @relation("ChatDirectUserA") // DMs donde es el participante de id menor.
   chatDirectAsUserB       ChatConversation[]       @relation("ChatDirectUserB") // DMs donde es el participante de id mayor.
+  calendarEvents          CalendarEvent[]          @relation("CalendarEventCreatedBy") // Eventos del calendario de Recepción creados por este usuario.
 
   themePreference    String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor        String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -304,6 +306,42 @@ model OrderProduct {
 model OrderProductPreset {
   id   Int    @id @default(autoincrement()) // Identificador único del preset.
   name String @unique // Nombre del producto frecuente (ej. "Lona", "X-Banner").
+}
+
+/// Calendario de equipo de Recepción: reemplaza la lista de tareas por
+/// WhatsApp (instalaciones, juntas, visitas a clientes) por eventos con
+/// fecha/hora, compartidos por todo el equipo (recepcion/admin/superuser
+/// pueden ver y editar cualquier evento, no sólo el propio). Reusa
+/// `AreaTaskStatus` (pendiente → en_proceso → terminado) para el mismo ciclo
+/// de "❌ / 🟠 / ✅" que ya usaban a mano.
+model CalendarEvent {
+  id         Int     @id @default(autoincrement())
+  title      String // Qué hay que hacer (ej. "Instalar anuncio", "Visita a planta").
+  clientName String? // Cliente/empresa escrito a mano, igual que hoy en WhatsApp.
+  clientId   Int? // Cliente real vinculado, opcional (combobox "usar como texto libre" u elegir de la lista).
+
+  eventDate DateTime // Fecha (y hora, si `hasTime`) del evento.
+  hasTime   Boolean  @default(true) // Si `eventDate` lleva una hora real; si es false, es un evento "todo el día" y la hora se ignora.
+
+  status AreaTaskStatus @default(pendiente) // pendiente | en_proceso | terminado.
+
+  // Recordatorio push: además del aviso fijo 1h antes (ver
+  // CalendarEventReminderService), el usuario puede pedir uno con más
+  // anticipación (minutos/horas/días/semanas antes, guardado en minutos).
+  reminderMinutesBefore Int?
+  reminderSentAt        DateTime? // Cuándo se mandó el recordatorio con anticipación custom (evita reenviarlo).
+  finalReminderSentAt   DateTime? // Cuándo se mandó el aviso fijo de 1h antes (evita reenviarlo).
+
+  createdById Int
+  createdAt   DateTime @default(now())
+
+  client    Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdBy User    @relation("CalendarEventCreatedBy", fields: [createdById], references: [id])
+
+  @@index([eventDate])
+  @@index([clientId])
+  @@index([createdById])
+  @@index([status])
 }
 
 model AreaVisibilitySetting {

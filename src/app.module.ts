@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { CompanyModule } from './company/company.module';
@@ -23,6 +24,7 @@ import { SettingsModule } from './settings/settings.module';
 import { ChatModule } from './chat/chat.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { PushModule } from './push/push.module';
+import { CalendarEventModule } from './calendar-event/calendar-event.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -34,6 +36,7 @@ import { AppController } from './app.controller';
       cache: true,
       validate: validateEnv,
     }),
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => [
@@ -64,6 +67,7 @@ import { AppController } from './app.controller';
     ChatModule,
     AuditLogModule,
     PushModule,
+    CalendarEventModule,
   ],
   providers: [
     {
