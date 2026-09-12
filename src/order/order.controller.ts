@@ -32,6 +32,11 @@ import {
   AssignAreaTaskDto,
 } from './dto/order-area-task.dto';
 import { OrderAreaTaskService } from './order-area-task.service';
+import {
+  CreateOrderMaterialItemDto,
+  UpdateOrderMaterialItemDto,
+} from './dto/order-material-item.dto';
+import { OrderMaterialItemService } from './order-material-item.service';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
@@ -44,6 +49,7 @@ export class OrderController {
   constructor(
     private readonly orderService: OrderService,
     private readonly orderAreaTaskService: OrderAreaTaskService,
+    private readonly orderMaterialItemService: OrderMaterialItemService,
   ) {}
 
   // Límite más estricto que el default global: creación de pedidos es una
@@ -602,5 +608,52 @@ export class OrderController {
       userId: user.sub,
       roles: user.roles,
     });
+  }
+
+  /**
+   * Hoja de materiales del pedido: opcional, no bloquea autorizar el
+   * montaje. La carga Recepción (o admin/superuser) cuando el pedido pasa
+   * a producción, para que el área sepa qué se va a usar.
+   */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/materials')
+  getMaterialItems(@Param('id') id: string) {
+    return this.orderMaterialItemService.findByOrder(+id);
+  }
+
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Post(':id/materials')
+  addMaterialItem(
+    @Param('id') id: string,
+    @Body() dto: CreateOrderMaterialItemDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderMaterialItemService.create(+id, dto, user.sub);
+  }
+
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Patch(':id/materials/:itemId')
+  updateMaterialItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: UpdateOrderMaterialItemDto,
+  ) {
+    return this.orderMaterialItemService.update(+id, +itemId, dto);
+  }
+
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Delete(':id/materials/:itemId')
+  removeMaterialItem(@Param('id') id: string, @Param('itemId') itemId: string) {
+    return this.orderMaterialItemService.remove(+id, +itemId);
   }
 }

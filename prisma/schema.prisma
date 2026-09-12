@@ -70,6 +70,7 @@ model User {
   chatDirectAsUserB       ChatConversation[]       @relation("ChatDirectUserB") // DMs donde es el participante de id mayor.
   calendarEvents          CalendarEvent[]          @relation("CalendarEventCreatedBy") // Eventos del calendario de Recepción creados por este usuario.
   calendarTasks           CalendarTask[]           @relation("CalendarTaskCreatedBy") // Tareas pendientes (sin fecha) del calendario de equipo creadas por este usuario.
+  orderMaterialItems      OrderMaterialItem[]      @relation("OrderMaterialItemCreatedBy") // Líneas de hoja de materiales cargadas por este usuario.
 
   themePreference      String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor          String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -120,11 +121,11 @@ model Order {
   clientResourceFileName String? // Nombre de archivo original del archivo del cliente.
   clientResourceFileMime String? // Mime type del archivo del cliente (image/png, image/jpeg, application/pdf).
 
-  client          Client?          @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
-  user            User             @relation(fields: [userId], references: [id]) // Relación con User (creador).
-  assignedUser    User?            @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
-  attendedBy      User?            @relation("AttendedOrders", fields: [attendedByUserId], references: [id]) // Relación con la recepcionista que atiende el pedido.
-  status          Status           @relation(fields: [statusId], references: [id]) // Relación con Status.
+  client          Client?             @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
+  user            User                @relation(fields: [userId], references: [id]) // Relación con User (creador).
+  assignedUser    User?               @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
+  attendedBy      User?               @relation("AttendedOrders", fields: [attendedByUserId], references: [id]) // Relación con la recepcionista que atiende el pedido.
+  status          Status              @relation(fields: [statusId], references: [id]) // Relación con Status.
   histories       OrderHistory[] // Relación uno a muchos con OrderHistory.
   orderProducts   OrderProduct[] // Líneas de producto del pedido.
   notes           OrderNote[] // Notas/comentarios internos sobre el pedido.
@@ -134,6 +135,7 @@ model Order {
   chatMessages    ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
   areaTasks       OrderAreaTask[] // Trabajo de producción por área; varias áreas avanzan en paralelo (ver WORKFLOW.md §3).
   calendarTasks   CalendarTask[] // Tareas pendientes del calendario de equipo vinculadas a este pedido (opcional, ej. "confirmar medidas").
+  materialItems   OrderMaterialItem[] // Hoja de materiales del pedido: qué se va a usar en producción (opcional, la carga Recepción).
 
   @@index([statusId])
   @@index([clientId])
@@ -552,4 +554,94 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([actorUserId])
   @@index([createdAt])
+}
+
+/// Categoría de material (ej. "Lámina/Panel", "Perfil metálico"): catálogo
+/// que arranca con valores sembrados (ver seed.ts) y crece solo cuando se
+/// escribe un nombre nuevo al dar de alta un Material (mismo patrón que
+/// OrderProductPreset con los productos de un pedido).
+model MaterialCategory {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  materials Material[]
+}
+
+/// Unidad de medida de un material (ej. "Hoja", "Metro", "Kilogramo"):
+/// mismo patrón de catálogo que crece solo que MaterialCategory.
+model MaterialUnit {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  materials Material[]
+}
+
+/// Proveedor de materiales/insumos. `location` clasifica el alcance
+/// (nacional/local/internacional) — la hoja de materiales de un pedido lee
+/// esta ubicación EN VIVO desde acá, no guarda una copia.
+model Supplier {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String?
+  phone     String?
+  website   String?
+  location  String // "nacional" | "local" | "internacional"
+  createdAt DateTime @default(now())
+
+  materials          Material[]
+  orderMaterialItems OrderMaterialItem[]
+
+  @@index([location])
+}
+
+/// Catálogo de materiales/insumos de la empresa (PVC, acrílico, MDF,
+/// perfiles metálicos, tornillería, consumibles de DTF/Bordado, etc.).
+/// `measure` es texto libre porque el "grosor"/"calibre"/"medida" varía
+/// demasiado entre tipos de material como para modelarlo con un tipo
+/// estructurado único. `areas` es un array nativo de Postgres: un material
+/// puede usarse en varias áreas de producción a la vez (ver ORDER_AREAS).
+model Material {
+  id         Int      @id @default(autoincrement())
+  name       String // "PVC", "Acrílico", "MDF", "Epanel", "Hilo de bordado", "Film DTF"...
+  categoryId Int?
+  unitId     Int?
+  measure    String? // "6mm", "3/16 x 1 1/4", texto libre.
+  color      String?
+  brand      String?
+  supplierId Int? // Proveedor preferido, opcional — la hoja de materiales de un pedido puede usar otro.
+  areas      String[] // Subconjunto de ORDER_AREAS (taller/dtf/bordado/diseno/laser/impresiones).
+  createdAt  DateTime @default(now())
+
+  category MaterialCategory? @relation(fields: [categoryId], references: [id])
+  unit     MaterialUnit?     @relation(fields: [unitId], references: [id])
+  supplier Supplier?         @relation(fields: [supplierId], references: [id])
+
+  orderMaterialItems OrderMaterialItem[]
+
+  @@index([categoryId])
+  @@index([unitId])
+  @@index([supplierId])
+}
+
+/// Línea de la hoja de materiales de un pedido: qué material, cuánto, de
+/// dónde sale y a nombre de quién queda. La carga Recepción cuando el
+/// pedido pasa a producción (opcional, no bloquea la autorización del
+/// montaje). `description` se autogenera desde el Material elegido pero es
+/// editable, así que queda copiada acá (no se recalcula si el material
+/// cambia después).
+model OrderMaterialItem {
+  id          Int      @id @default(autoincrement())
+  orderId     Int
+  materialId  Int
+  quantity    Int
+  description String
+  supplierId  Int? // Puede diferir del proveedor preferido del material.
+  createdById Int
+  createdAt   DateTime @default(now())
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  material  Material  @relation(fields: [materialId], references: [id])
+  supplier  Supplier? @relation(fields: [supplierId], references: [id])
+  createdBy User      @relation("OrderMaterialItemCreatedBy", fields: [createdById], references: [id])
+
+  @@index([orderId])
+  @@index([materialId])
 }

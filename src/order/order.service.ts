@@ -742,6 +742,16 @@ export class OrderService {
           assignedUserId: true,
         },
       },
+      // Hoja de materiales: liviana en el listado (sólo lo que necesita el
+      // badge de "tareas/materiales pendientes"); el detalle completo con
+      // material/proveedor sale de GET /orders/:id/materials.
+      materialItems: {
+        select: {
+          id: true,
+          quantity: true,
+          description: true,
+        },
+      },
       user: CREATOR_USER_SELECT,
       assignedUser: ASSIGNED_USER_SELECT,
       attendedBy: ATTENDED_BY_USER_SELECT,
