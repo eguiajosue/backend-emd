@@ -1,4 +1,4 @@
-import { AreaTaskStatus } from '@prisma/client';
+import { AreaTaskStatus, CalendarEventCategory } from '@prisma/client';
 import { HttpException } from '@nestjs/common';
 import { CalendarEventService } from './calendar-event.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -43,6 +43,39 @@ describe('CalendarEventService', () => {
     expect(prisma.calendarEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ createdById: 7 }),
+      }),
+    );
+  });
+
+  it('pasa la categoría elegida al crear', async () => {
+    await service.create(
+      {
+        title: 'Junta de proveedores',
+        eventDate: '2026-09-15T15:00:00.000Z',
+        category: CalendarEventCategory.junta,
+      },
+      7,
+    );
+    expect(prisma.calendarEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          category: CalendarEventCategory.junta,
+        }),
+      }),
+    );
+  });
+
+  it('permite cambiar la categoría de un evento existente', async () => {
+    prisma.calendarEvent.findUnique.mockResolvedValue({
+      id: 1,
+      status: AreaTaskStatus.pendiente,
+    });
+    await service.update(1, { category: CalendarEventCategory.entrega });
+    expect(prisma.calendarEvent.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          category: CalendarEventCategory.entrega,
+        }),
       }),
     );
   });

@@ -314,16 +314,31 @@ model OrderProductPreset {
 /// pueden ver y editar cualquier evento, no sólo el propio). Reusa
 /// `AreaTaskStatus` (pendiente → en_proceso → terminado) para el mismo ciclo
 /// de "❌ / 🟠 / ✅" que ya usaban a mano.
+/// Categoría de un evento del calendario, para diferenciar de un vistazo
+/// instalaciones/visitas/entregas (que sí llevan seguimiento de estado) de
+/// juntas (que son sólo informativas: una junta no tiene "pendiente" o
+/// "terminado", sólo pasa o no pasa). Qué categorías llevan seguimiento de
+/// estado es una decisión de UI (ver CATEGORY_META en el frontend), no algo
+/// que valide este enum.
+enum CalendarEventCategory {
+  instalacion
+  visita
+  entrega
+  junta
+  otro
+}
+
 model CalendarEvent {
   id         Int     @id @default(autoincrement())
   title      String // Qué hay que hacer (ej. "Instalar anuncio", "Visita a planta").
   clientName String? // Cliente/empresa escrito a mano, igual que hoy en WhatsApp.
   clientId   Int? // Cliente real vinculado, opcional (combobox "usar como texto libre" u elegir de la lista).
+  category   CalendarEventCategory @default(otro) // Color/naturaleza del evento en el calendario de equipo.
 
   eventDate DateTime // Fecha (y hora, si `hasTime`) del evento.
   hasTime   Boolean  @default(true) // Si `eventDate` lleva una hora real; si es false, es un evento "todo el día" y la hora se ignora.
 
-  status AreaTaskStatus @default(pendiente) // pendiente | en_proceso | terminado.
+  status AreaTaskStatus @default(pendiente) // pendiente | en_proceso | terminado. Categorías sin seguimiento (ej. junta) simplemente no lo muestran en la UI.
 
   // Recordatorio push: además del aviso fijo 1h antes (ver
   // CalendarEventReminderService), el usuario puede pedir uno con más

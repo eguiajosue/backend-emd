@@ -52,4 +52,22 @@ describe('CreateCalendarEventDto', () => {
       true,
     );
   });
+
+  it('acepta una categoría válida', async () => {
+    const dto = plainToInstance(CreateCalendarEventDto, {
+      ...base,
+      category: 'junta',
+    });
+    const errors = await validate(dto);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rechaza una categoría que no existe', async () => {
+    const dto = plainToInstance(CreateCalendarEventDto, {
+      ...base,
+      category: 'cumpleanos',
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'category')).toBe(true);
+  });
 });

@@ -1,6 +1,8 @@
+import { CalendarEventCategory } from '@prisma/client';
 import {
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -37,6 +39,16 @@ export class CreateCalendarEventDto {
   @IsInt()
   @IsPositive()
   clientId?: number;
+
+  /**
+   * Categoría del evento (instalación/visita/entrega/junta/otro): define su
+   * color en el calendario y si el frontend le muestra seguimiento de
+   * estado (una junta no tiene "pendiente"/"terminado"). Default 'otro' si
+   * no se manda.
+   */
+  @IsOptional()
+  @IsEnum(CalendarEventCategory)
+  category?: CalendarEventCategory;
 
   /** Fecha (y hora, si `hasTime`) del evento, en ISO 8601. */
   @IsDateString()
