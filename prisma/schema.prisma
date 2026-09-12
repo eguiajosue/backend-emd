@@ -133,6 +133,7 @@ model Order {
   designRevisions DesignRevision[] // Rondas de montaje/feedback/autorización de la fase de Diseño.
   chatMessages    ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
   areaTasks       OrderAreaTask[] // Trabajo de producción por área; varias áreas avanzan en paralelo (ver WORKFLOW.md §3).
+  calendarTasks   CalendarTask[] // Tareas pendientes del calendario de equipo vinculadas a este pedido (opcional, ej. "confirmar medidas").
 
   @@index([statusId])
   @@index([clientId])
@@ -336,6 +337,7 @@ model CalendarEvent {
   clientName String? // Cliente/empresa escrito a mano, igual que hoy en WhatsApp.
   clientId   Int? // Cliente real vinculado, opcional (combobox "usar como texto libre" u elegir de la lista).
   category   CalendarEventCategory @default(otro) // Color/naturaleza del evento en el calendario de equipo.
+  area       String? // Área de producción involucrada (uno de ORDER_AREAS), opcional — filtro adicional del calendario, independiente de `category`.
 
   eventDate DateTime // Fecha (y hora, si `hasTime`) del evento.
   hasTime   Boolean  @default(true) // Si `eventDate` lleva una hora real; si es false, es un evento "todo el día" y la hora se ignora.
@@ -359,6 +361,7 @@ model CalendarEvent {
   @@index([clientId])
   @@index([createdById])
   @@index([status])
+  @@index([area])
 }
 
 /// Lista de tareas pendientes del calendario de equipo: actividades sin
@@ -373,13 +376,17 @@ model CalendarTask {
   completed   Boolean   @default(false)
   completedAt DateTime? // Cuándo se marcó como completada (null si sigue pendiente).
 
+  orderId Int? // Pedido relacionado, opcional (ej. "confirmar medidas" de un pedido puntual). Si el pedido se borra, la tarea sigue existiendo sin vínculo.
+
   createdById Int
   createdAt   DateTime @default(now())
 
-  createdBy User @relation("CalendarTaskCreatedBy", fields: [createdById], references: [id])
+  order     Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdBy User   @relation("CalendarTaskCreatedBy", fields: [createdById], references: [id])
 
   @@index([completed])
   @@index([createdById])
+  @@index([orderId])
 }
 
 model AreaVisibilitySetting {

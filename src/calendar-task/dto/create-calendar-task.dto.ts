@@ -1,4 +1,11 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsPositive,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import {
   EmptyToUndefined,
   TrimString,
@@ -21,4 +28,10 @@ export class CreateCalendarTaskDto {
   @IsString()
   @MaxLength(2000)
   description?: string;
+
+  /** Pedido relacionado, opcional (ej. "confirmar medidas" de un pedido puntual). */
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  orderId?: number;
 }

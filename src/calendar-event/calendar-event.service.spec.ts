@@ -65,6 +65,22 @@ describe('CalendarEventService', () => {
     );
   });
 
+  it('pasa el área elegida al crear', async () => {
+    await service.create(
+      {
+        title: 'Instalar anuncio',
+        eventDate: '2026-09-15T15:00:00.000Z',
+        area: 'bordado',
+      },
+      7,
+    );
+    expect(prisma.calendarEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ area: 'bordado' }),
+      }),
+    );
+  });
+
   it('permite cambiar la categoría de un evento existente', async () => {
     prisma.calendarEvent.findUnique.mockResolvedValue({
       id: 1,

@@ -22,8 +22,12 @@ export class CalendarTaskService {
       description: true,
       completed: true,
       completedAt: true,
+      orderId: true,
       createdById: true,
       createdAt: true,
+      order: {
+        select: { id: true, description: true },
+      },
       createdBy: {
         select: { id: true, firstName: true, lastName: true, username: true },
       },
@@ -35,6 +39,7 @@ export class CalendarTaskService {
       data: {
         title: dto.title,
         description: dto.description,
+        orderId: dto.orderId,
         createdById,
       },
       select: this.select(),
@@ -67,6 +72,7 @@ export class CalendarTaskService {
       data: {
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.orderId !== undefined && { orderId: dto.orderId }),
       },
       select: this.select(),
     });

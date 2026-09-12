@@ -37,6 +37,7 @@ export class CalendarEventService {
       clientName: true,
       clientId: true,
       category: true,
+      area: true,
       eventDate: true,
       hasTime: true,
       status: true,
@@ -59,6 +60,7 @@ export class CalendarEventService {
         clientName: dto.clientName,
         clientId: dto.clientId,
         category: dto.category,
+        area: dto.area,
         eventDate: new Date(dto.eventDate),
         hasTime: dto.hasTime ?? true,
         reminderMinutesBefore: dto.reminderMinutesBefore,
@@ -106,6 +108,7 @@ export class CalendarEventService {
         ...(dto.clientName !== undefined && { clientName: dto.clientName }),
         ...(dto.clientId !== undefined && { clientId: dto.clientId }),
         ...(dto.category !== undefined && { category: dto.category }),
+        ...(dto.area !== undefined && { area: dto.area }),
         ...(dto.eventDate !== undefined && {
           eventDate: new Date(dto.eventDate),
         }),

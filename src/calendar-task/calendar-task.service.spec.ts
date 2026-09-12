@@ -43,6 +43,18 @@ describe('CalendarTaskService', () => {
     );
   });
 
+  it('pasa el pedido vinculado al crear', async () => {
+    await service.create(
+      { title: 'Confirmar medidas con cliente', orderId: 42 },
+      7,
+    );
+    expect(prisma.calendarTask.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ orderId: 42 }),
+      }),
+    );
+  });
+
   it('permite crear sin descripción', async () => {
     await service.create({ title: 'Preparar material' }, 7);
     expect(prisma.calendarTask.create).toHaveBeenCalledWith(

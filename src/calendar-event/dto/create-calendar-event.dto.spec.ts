@@ -70,4 +70,22 @@ describe('CreateCalendarEventDto', () => {
     const errors = await validate(dto);
     expect(errors.some((e) => e.property === 'category')).toBe(true);
   });
+
+  it('acepta un área de producción válida', async () => {
+    const dto = plainToInstance(CreateCalendarEventDto, {
+      ...base,
+      area: 'bordado',
+    });
+    const errors = await validate(dto);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rechaza un área que no existe', async () => {
+    const dto = plainToInstance(CreateCalendarEventDto, {
+      ...base,
+      area: 'cocina',
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'area')).toBe(true);
+  });
 });
