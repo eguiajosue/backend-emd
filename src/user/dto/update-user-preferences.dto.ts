@@ -61,6 +61,11 @@ export class UpdateUserPreferencesDto {
   @IsIn(['unified', 'split'])
   areaViewMode?: string;
 
+  @ApiPropertyOptional({ enum: ['24h', '12h'] })
+  @IsOptional()
+  @IsIn(['24h', '12h'])
+  timeFormatPreference?: string;
+
   // Preferencias de notificaciones (Fase 4). Ver NotificationService para
   // cómo se aplican al decidir si se persiste/pushea cada notificación.
   @ApiPropertyOptional({

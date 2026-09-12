@@ -33,6 +33,7 @@ export const USER_PREFERENCES_SELECT = {
   density: true,
   hasSeenOnboarding: true,
   areaViewMode: true,
+  timeFormatPreference: true,
   notificationsMuted: true,
   notifyMentionsOnly: true,
   notifyProductionUpdates: true,

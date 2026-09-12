@@ -27,8 +27,8 @@ model Client {
   email      String? // Dirección de correo electrónico del cliente.
   address    String? // Dirección física del cliente.
 
-  company Company? @relation(fields: [companyId], references: [id]) // Relación con Company.
-  orders  Order[] // Relación uno a muchos con el modelo Order.
+  company        Company?        @relation(fields: [companyId], references: [id]) // Relación con Company.
+  orders         Order[] // Relación uno a muchos con el modelo Order.
   calendarEvents CalendarEvent[] // Eventos del calendario de Recepción vinculados a este cliente.
 
   @@index([companyId])
@@ -70,13 +70,14 @@ model User {
   chatDirectAsUserB       ChatConversation[]       @relation("ChatDirectUserB") // DMs donde es el participante de id mayor.
   calendarEvents          CalendarEvent[]          @relation("CalendarEventCreatedBy") // Eventos del calendario de Recepción creados por este usuario.
 
-  themePreference    String? // Preferencia de tema: 'light' | 'dark' | 'system'.
-  accentColor        String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
-  languagePreference String? // Idioma preferido: 'es' | 'en'.
-  glassIntensity     Int? // Intensidad del efecto Liquid Glass, 0-100.
-  density            String? // Densidad de UI: 'comfortable' | 'compact'.
-  hasSeenOnboarding  Boolean? // Si ya completó/cerró el tour de onboarding.
-  areaViewMode       String? // Cómo ver las tareas de producción: 'unified' (todo junto, etiquetado por área) | 'split' (una vista por área). Preferencia personal, ver WORKFLOW.md §4.
+  themePreference      String? // Preferencia de tema: 'light' | 'dark' | 'system'.
+  accentColor          String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
+  languagePreference   String? // Idioma preferido: 'es' | 'en'.
+  glassIntensity       Int? // Intensidad del efecto Liquid Glass, 0-100.
+  density              String? // Densidad de UI: 'comfortable' | 'compact'.
+  hasSeenOnboarding    Boolean? // Si ya completó/cerró el tour de onboarding.
+  areaViewMode         String? // Cómo ver las tareas de producción: 'unified' (todo junto, etiquetado por área) | 'split' (una vista por área). Preferencia personal, ver WORKFLOW.md §4.
+  timeFormatPreference String? // Formato de hora: '24h' | '12h' (AM/PM).
 
   notificationsMuted      Boolean @default(false) // Modo silencio general: si está activo, no se persisten ni pushean notificaciones (salvo menciones directas, cuando ese tipo exista).
   notifyMentionsOnly      Boolean @default(false) // Sólo notificar menciones directas. Sin efecto práctico hoy: el sistema no tiene un tipo de notificación de "mención" implementado aún (ver NotificationService).
@@ -329,7 +330,7 @@ enum CalendarEventCategory {
 }
 
 model CalendarEvent {
-  id         Int     @id @default(autoincrement())
+  id         Int                   @id @default(autoincrement())
   title      String // Qué hay que hacer (ej. "Instalar anuncio", "Visita a planta").
   clientName String? // Cliente/empresa escrito a mano, igual que hoy en WhatsApp.
   clientId   Int? // Cliente real vinculado, opcional (combobox "usar como texto libre" u elegir de la lista).
