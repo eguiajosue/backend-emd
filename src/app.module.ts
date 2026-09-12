@@ -25,6 +25,7 @@ import { ChatModule } from './chat/chat.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { PushModule } from './push/push.module';
 import { CalendarEventModule } from './calendar-event/calendar-event.module';
+import { CalendarTaskModule } from './calendar-task/calendar-task.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -68,6 +69,7 @@ import { AppController } from './app.controller';
     AuditLogModule,
     PushModule,
     CalendarEventModule,
+    CalendarTaskModule,
   ],
   providers: [
     {
