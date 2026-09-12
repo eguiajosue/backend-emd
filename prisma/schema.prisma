@@ -69,6 +69,7 @@ model User {
   chatDirectAsUserA       ChatConversation[]       @relation("ChatDirectUserA") // DMs donde es el participante de id menor.
   chatDirectAsUserB       ChatConversation[]       @relation("ChatDirectUserB") // DMs donde es el participante de id mayor.
   calendarEvents          CalendarEvent[]          @relation("CalendarEventCreatedBy") // Eventos del calendario de Recepción creados por este usuario.
+  calendarTasks           CalendarTask[]           @relation("CalendarTaskCreatedBy") // Tareas pendientes (sin fecha) del calendario de equipo creadas por este usuario.
 
   themePreference      String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor          String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -358,6 +359,27 @@ model CalendarEvent {
   @@index([clientId])
   @@index([createdById])
   @@index([status])
+}
+
+/// Lista de tareas pendientes del calendario de equipo: actividades sin
+/// fecha todavía definida (ej. "Confirmar medidas con cliente"), separadas
+/// conceptualmente de `CalendarEvent` (que sí tiene fecha/hora). Mismo
+/// equipo/visibilidad que el calendario (recepcion/admin/superuser), sin
+/// asignación a una persona en particular.
+model CalendarTask {
+  id          Int       @id @default(autoincrement())
+  title       String // Qué hay que hacer (ej. "Confirmar medidas con cliente").
+  description String? // Detalle opcional.
+  completed   Boolean   @default(false)
+  completedAt DateTime? // Cuándo se marcó como completada (null si sigue pendiente).
+
+  createdById Int
+  createdAt   DateTime @default(now())
+
+  createdBy User @relation("CalendarTaskCreatedBy", fields: [createdById], references: [id])
+
+  @@index([completed])
+  @@index([createdById])
 }
 
 model AreaVisibilitySetting {
