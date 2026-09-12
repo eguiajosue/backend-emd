@@ -26,6 +26,10 @@ import { AuditLogModule } from './audit-log/audit-log.module';
 import { PushModule } from './push/push.module';
 import { CalendarEventModule } from './calendar-event/calendar-event.module';
 import { CalendarTaskModule } from './calendar-task/calendar-task.module';
+import { SupplierModule } from './supplier/supplier.module';
+import { MaterialCategoryModule } from './material-category/material-category.module';
+import { MaterialUnitModule } from './material-unit/material-unit.module';
+import { MaterialModule } from './material/material.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -70,6 +74,10 @@ import { AppController } from './app.controller';
     PushModule,
     CalendarEventModule,
     CalendarTaskModule,
+    SupplierModule,
+    MaterialCategoryModule,
+    MaterialUnitModule,
+    MaterialModule,
   ],
   providers: [
     {

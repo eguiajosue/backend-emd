@@ -129,6 +129,37 @@ const DEMO_CLIENTS = [
 // crece sola cuando recepción escribe un customName nuevo al crear un pedido.
 const ORDER_PRODUCT_PRESET_NAMES = ['Lona', 'X-Banner', 'Playera', 'Gorra'];
 
+// Punto de partida del catálogo de materiales: crece solo cuando se escribe
+// un nombre nuevo al dar de alta un Material (ver MaterialCategoryService/
+// MaterialUnitService.ensureExists), igual que los productos de un pedido.
+const MATERIAL_CATEGORY_NAMES = [
+  'Lámina/Panel',
+  'Perfil metálico',
+  'Tornillería/Anclaje',
+  'Pintura y químicos',
+  'Abrasivos/Corte',
+  'Consumible DTF',
+  'Consumible Bordado',
+  'Consumible Impresión',
+  'Combustible',
+  'Herramienta',
+  'Otros',
+];
+
+const MATERIAL_UNIT_NAMES = [
+  'Hoja',
+  'Metro',
+  'Metro lineal',
+  'Kilogramo',
+  'Litro',
+  'Galón',
+  'Pieza/Unidad',
+  'Rollo',
+  'Bote',
+  'Caja',
+  'Par',
+];
+
 const DEMO_ORDER_DESCRIPTIONS = [
   '50 camisas bordadas con logo',
   'Chalecos institucionales talla M-L',
@@ -270,6 +301,25 @@ async function main() {
     });
     console.log(`  order product preset "${name}" ready (id=${preset.id})`);
   }
+
+  console.log('Seeding material categories and units...');
+  for (const name of MATERIAL_CATEGORY_NAMES) {
+    await prisma.materialCategory.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+  }
+  for (const name of MATERIAL_UNIT_NAMES) {
+    await prisma.materialUnit.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+  }
+  console.log(
+    `  ${MATERIAL_CATEGORY_NAMES.length} material categories, ${MATERIAL_UNIT_NAMES.length} material units ready`,
+  );
 
   console.log('Seeding demo companies, clients and orders...');
   const existingOrderCount = await prisma.order.count();
