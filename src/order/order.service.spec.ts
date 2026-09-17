@@ -43,7 +43,19 @@ describe('OrderService - visibilidad por área (findAll)', () => {
   beforeEach(() => {
     prisma = {
       order: {
-        findMany: jest.fn().mockResolvedValue(orders),
+        // Simula el filtro por área que ahora arma `orderVisibilityWhere`
+        // (antes se filtraba en memoria con `filterOrdersForUser` DESPUÉS
+        // de traer todo; ahora se resuelve en el `where`, así que el mock
+        // tiene que aplicarlo para seguir probando el mismo comportamiento).
+        findMany: jest.fn(({ where }: any = {}) => {
+          const allowedAreas: string[] | undefined = where?.area?.in;
+          const result = allowedAreas
+            ? orders.filter(
+                (o) => o.area != null && allowedAreas.includes(o.area),
+              )
+            : orders;
+          return Promise.resolve(result);
+        }),
       },
     };
 
@@ -173,5 +185,105 @@ describe('OrderService - visibilidad por área (findAll)', () => {
       roles: [],
     });
     expect(result as any[]).toEqual([]);
+  });
+});
+
+describe('OrderService - exportOrders no permite saltar el filtro de área con ?area=', () => {
+  // Regresión para el fix de perf(pedidos) que introdujo `AND: [visibilityWhere,
+  // requestedFilters]` en vez de spread: con spread, `requestedFilters.area`
+  // (el filtro pedido por query param) pisaba a `visibilityWhere.area` (el rol
+  // operativo), y un usuario operativo podía ver pedidos de otra área con
+  // `?area=otraArea`. Sin este test, alguien podría "simplificar" el AND de
+  // vuelta a un spread sin que nada lo detecte.
+  let orderService: OrderService;
+  let prisma: { order: { findMany: jest.Mock } };
+
+  const orders = [
+    {
+      id: 1,
+      area: 'taller',
+      description: 'a',
+      creationDate: new Date('2026-01-01'),
+      deliveryDate: null,
+      clientNameOverride: null,
+      client: null,
+      assignedUser: null,
+      status: { name: 'pendiente' },
+    },
+    {
+      id: 2,
+      area: 'diseno',
+      description: 'b',
+      creationDate: new Date('2026-01-02'),
+      deliveryDate: null,
+      clientNameOverride: null,
+      client: null,
+      assignedUser: null,
+      status: { name: 'pendiente' },
+    },
+  ];
+
+  beforeEach(() => {
+    prisma = {
+      order: {
+        // Simula un `where` de Prisma con `AND: [visibilityWhere, requestedFilters]`
+        // (o un `where` plano, para el caso sin restricción de visibilidad).
+        findMany: jest.fn(({ where }: any = {}) => {
+          const clauses: any[] = where?.AND ?? [where ?? {}];
+          const result = orders.filter((o) =>
+            clauses.every((clause) => {
+              if (clause?.area?.in) return clause.area.in.includes(o.area);
+              if (typeof clause?.area === 'string')
+                return o.area === clause.area;
+              return true;
+            }),
+          );
+          return Promise.resolve(result);
+        }),
+      },
+    };
+
+    orderService = new OrderService(
+      prisma as unknown as PrismaService,
+      { notifyNewOrderToAdmin: jest.fn() } as unknown as NotificationsGateway,
+      {
+        findAll: jest.fn(),
+        update: jest.fn(),
+      } as unknown as AreaVisibilityService,
+      { ensureExists: jest.fn() } as unknown as OrderProductPresetService,
+      {
+        createNotification: jest.fn(),
+        createNotificationForUsers: jest.fn(),
+        userIdsForArea: jest.fn().mockResolvedValue([]),
+      } as unknown as NotificationService,
+      { record: jest.fn() } as unknown as AuditLogService,
+      {
+        createTasksForAreas: jest.fn().mockResolvedValue([]),
+      } as unknown as OrderAreaTaskService,
+    );
+  });
+
+  it('rol operativo: pedir ?area=otraArea no devuelve pedidos de esa otra área (sin bypass)', async () => {
+    const result = await orderService.exportOrders(
+      { area: 'diseno' },
+      { userId: 7, roles: ['taller'] },
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('rol operativo: sin filtro explícito, sólo exporta los pedidos de su propia área', async () => {
+    const result = await orderService.exportOrders(
+      {},
+      { userId: 7, roles: ['taller'] },
+    );
+    expect((result as any[]).map((o: any) => o.id)).toEqual([1]);
+  });
+
+  it('admin: ?area= sí filtra (visibilidad total, sin restricción propia que combinar)', async () => {
+    const result = await orderService.exportOrders(
+      { area: 'diseno' },
+      { userId: 99, roles: ['admin'] },
+    );
+    expect((result as any[]).map((o: any) => o.id)).toEqual([2]);
   });
 });

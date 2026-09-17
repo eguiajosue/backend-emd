@@ -61,6 +61,7 @@ describe('ChatService - autorización', () => {
         upsert: jest.fn(),
         updateMany: jest.fn(),
         findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       chatMessage: {
         create: jest.fn().mockResolvedValue({
@@ -236,7 +237,9 @@ describe('ChatService - autorización', () => {
       roles: ['recepcion'],
     });
 
-    expect(notificationService.createNotificationForUsers).toHaveBeenCalledTimes(1);
+    expect(
+      notificationService.createNotificationForUsers,
+    ).toHaveBeenCalledTimes(1);
     const [recipientIds, payload] =
       notificationService.createNotificationForUsers.mock.calls[0];
     expect(recipientIds).not.toContain(5);
@@ -403,6 +406,56 @@ describe('ChatService - checks y presencia', () => {
       isOnline: true,
       lastSeenAt: new Date('2026-01-05T10:00:00Z'),
     });
+  });
+
+  // Regresión: antes se pedía la membresía (`findUnique`) y el último
+  // mensaje (`findFirst`) UNO POR CONVERSACIÓN visible -- un N+1 que crecía
+  // con la cantidad de canales de área + DMs. Ahora se resuelven ambos con
+  // una sola query batcheada (`findMany` con `in`/`distinct`) sin importar
+  // cuántas conversaciones haya, y el resultado por conversación sigue
+  // siendo el correcto (cada una con SU propio último mensaje y SU propia
+  // membresía, no la de otra).
+  it('findConversationsForUser resuelve membresía y último mensaje en una sola query batcheada, no una por conversación', async () => {
+    prisma.chatConversationMember.findMany = jest.fn().mockResolvedValue([
+      {
+        conversationId: 1,
+        lastReadAt: new Date('2026-01-01'),
+        isMonitor: false,
+      },
+      { conversationId: 2, lastReadAt: null, isMonitor: true },
+    ]);
+    prisma.chatMessage.findMany = jest.fn().mockResolvedValue([
+      {
+        conversationId: 1,
+        id: 501,
+        body: 'último de taller',
+        createdAt: new Date('2026-01-03'),
+        sender: { id: 7, username: 'op', firstName: 'Juan', lastName: null },
+      },
+      {
+        conversationId: 2,
+        id: 502,
+        body: 'último de diseño',
+        createdAt: new Date('2026-01-04'),
+        sender: { id: 5, username: 'recep', firstName: 'Ana', lastName: null },
+      },
+    ]);
+
+    const conversations = await chatService.findConversationsForUser({
+      userId: 5,
+      roles: ['recepcion'],
+    });
+
+    // Una sola llamada a cada uno, con `in: [ids visibles]` -- no N llamadas.
+    expect(prisma.chatConversationMember.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.chatMessage.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.chatConversationMember.findUnique).not.toHaveBeenCalled();
+    expect(prisma.chatMessage.findFirst).not.toHaveBeenCalled();
+
+    const byId = new Map(conversations.map((c) => [c.id, c]));
+    expect(byId.get(1)?.lastMessage).toMatchObject({ id: 501 });
+    expect(byId.get(2)?.lastMessage).toMatchObject({ id: 502 });
+    expect(byId.get(2)?.isMonitor).toBe(true);
   });
 
   it('findConversationsForUser expone isOnline=false y lastSeenAt=null si el otro usuario nunca se conectó', async () => {

@@ -257,22 +257,28 @@ export class ChatService {
       where: { conversationId: conversation.id, userId: { notIn: ids } },
     });
 
-    for (const member of members) {
-      await this.prisma.chatConversationMember.upsert({
-        where: {
-          conversationId_userId: {
+    // Cada upsert es una escritura independiente (fila propia), así que se
+    // mandan en paralelo en vez de uno por uno -- antes esto serializaba un
+    // round-trip por miembro (hasta un upsert por persona del área), y se
+    // repite por cada conversación visible en `findConversationsForUser`.
+    await Promise.all(
+      members.map((member) =>
+        this.prisma.chatConversationMember.upsert({
+          where: {
+            conversationId_userId: {
+              conversationId: conversation.id,
+              userId: member.userId,
+            },
+          },
+          create: {
             conversationId: conversation.id,
             userId: member.userId,
+            isMonitor: member.isMonitor,
           },
-        },
-        create: {
-          conversationId: conversation.id,
-          userId: member.userId,
-          isMonitor: member.isMonitor,
-        },
-        update: { isMonitor: member.isMonitor },
-      });
-    }
+          update: { isMonitor: member.isMonitor },
+        }),
+      ),
+    );
     return members;
   }
 
@@ -351,31 +357,51 @@ export class ChatService {
     });
 
     const visible = conversations.filter((c) => this.canAccess(c, user));
+    // Materializa membresía de cada conversación visible en paralelo (en vez
+    // de una tras otra): son escrituras independientes entre sí, no hay
+    // razón para serializarlas.
+    await Promise.all(visible.map((c) => this.syncMembers(c)));
+
+    const visibleIds = visible.map((c) => c.id);
+    if (visibleIds.length === 0) return [];
+
+    // Antes: un `findUnique` de membresía + un `findFirst` de último mensaje
+    // POR conversación (2 * N queries, más el N+1 dentro de `syncMembers`
+    // que ya corría antes de este fix). Con un puñado de canales de área +
+    // varios DMs esto se sentía en cada apertura de la lista de chats.
+    // Ahora: 1 query para todas las membresías del usuario + 1 query con
+    // `distinct` para el último mensaje de cada conversación, sin importar
+    // cuántas conversaciones sean visibles.
+    const [memberships, lastMessages] = await Promise.all([
+      this.prisma.chatConversationMember.findMany({
+        where: { conversationId: { in: visibleIds }, userId: user.userId },
+        select: { conversationId: true, lastReadAt: true, isMonitor: true },
+      }),
+      this.prisma.chatMessage.findMany({
+        where: { conversationId: { in: visibleIds } },
+        orderBy: [{ conversationId: 'asc' }, { createdAt: 'desc' }],
+        distinct: ['conversationId'],
+        select: {
+          conversationId: true,
+          id: true,
+          body: true,
+          createdAt: true,
+          sender: { select: USER_SUMMARY_SELECT },
+        },
+      }),
+    ]);
+    const membershipByConversationId = new Map(
+      memberships.map((m) => [m.conversationId, m]),
+    );
+    const lastMessageByConversationId = new Map(
+      lastMessages.map((m) => [m.conversationId, m]),
+    );
 
     return Promise.all(
       visible.map(async (conversation) => {
-        await this.syncMembers(conversation);
-        const [membership, lastMessage] = await Promise.all([
-          this.prisma.chatConversationMember.findUnique({
-            where: {
-              conversationId_userId: {
-                conversationId: conversation.id,
-                userId: user.userId,
-              },
-            },
-            select: { lastReadAt: true, isMonitor: true },
-          }),
-          this.prisma.chatMessage.findFirst({
-            where: { conversationId: conversation.id },
-            orderBy: { createdAt: 'desc' },
-            select: {
-              id: true,
-              body: true,
-              createdAt: true,
-              sender: { select: USER_SUMMARY_SELECT },
-            },
-          }),
-        ]);
+        const membership = membershipByConversationId.get(conversation.id);
+        const lastMessage =
+          lastMessageByConversationId.get(conversation.id) ?? null;
 
         const unreadCount = await this.prisma.chatMessage.count({
           where: {

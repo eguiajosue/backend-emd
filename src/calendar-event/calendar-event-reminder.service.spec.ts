@@ -8,7 +8,7 @@ import { NotificationService } from 'src/notification/notification.service';
 describe('CalendarEventReminderService', () => {
   let service: CalendarEventReminderService;
   let prisma: {
-    calendarEvent: { findMany: jest.Mock; update: jest.Mock };
+    calendarEvent: { findMany: jest.Mock; updateMany: jest.Mock };
     user: { findMany: jest.Mock };
   };
   let notificationService: { createNotificationForUsers: jest.Mock };
@@ -20,7 +20,7 @@ describe('CalendarEventReminderService', () => {
     prisma = {
       calendarEvent: {
         findMany: jest.fn().mockResolvedValue([]),
-        update: jest.fn(),
+        updateMany: jest.fn(),
       },
       user: {
         findMany: jest.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]),
@@ -59,8 +59,8 @@ describe('CalendarEventReminderService', () => {
         body: 'MEDLINE · Instalar torniquetes',
       }),
     );
-    expect(prisma.calendarEvent.update).toHaveBeenCalledWith({
-      where: { id: 1 },
+    expect(prisma.calendarEvent.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [1] } },
       data: { reminderSentAt: now },
     });
   });
@@ -103,9 +103,88 @@ describe('CalendarEventReminderService', () => {
       [1, 2],
       expect.objectContaining({ body: 'NLDC · Entregar sello' }),
     );
-    expect(prisma.calendarEvent.update).toHaveBeenCalledWith({
-      where: { id: 2 },
+    expect(prisma.calendarEvent.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [2] } },
       data: { finalReminderSentAt: now },
+    });
+  });
+
+  // Regresión: antes `teamUserIds()` (un `user.findMany`) se volvía a
+  // ejecutar POR CADA evento vencido -- con varios eventos vencidos en el
+  // mismo tick del cron, la misma query se repetía N veces por el mismo
+  // resultado. Ahora se resuelve una sola vez por corrida de
+  // `sendDueReminders`, sin importar cuántos eventos (custom + final) haya.
+  it('resuelve el equipo destinatario una sola vez aunque haya varios eventos vencidos', async () => {
+    prisma.calendarEvent.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 1,
+          title: 'Instalar torniquetes',
+          clientName: 'MEDLINE',
+          eventDate: new Date('2026-09-15T14:20:00.000Z'),
+          reminderMinutesBefore: 30,
+        },
+        {
+          id: 3,
+          title: 'Visita técnica',
+          clientName: 'ACME',
+          eventDate: new Date('2026-09-15T14:10:00.000Z'),
+          reminderMinutesBefore: 15,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 2,
+          title: 'Entregar sello',
+          clientName: 'NLDC',
+          eventDate: new Date('2026-09-15T14:45:00.000Z'),
+        },
+      ]);
+
+    await service.sendDueReminders();
+
+    expect(prisma.user.findMany).toHaveBeenCalledTimes(1);
+    expect(
+      notificationService.createNotificationForUsers,
+    ).toHaveBeenCalledTimes(3);
+    expect(prisma.calendarEvent.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [1, 3] } },
+      data: { reminderSentAt: now },
+    });
+    expect(prisma.calendarEvent.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [2] } },
+      data: { finalReminderSentAt: now },
+    });
+  });
+
+  it('un evento cuyo aviso falla no se marca como enviado, pero no bloquea a los demás', async () => {
+    prisma.calendarEvent.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 1,
+          title: 'Falla',
+          clientName: null,
+          eventDate: new Date('2026-09-15T14:20:00.000Z'),
+          reminderMinutesBefore: 30,
+        },
+        {
+          id: 2,
+          title: 'OK',
+          clientName: null,
+          eventDate: new Date('2026-09-15T14:10:00.000Z'),
+          reminderMinutesBefore: 15,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    notificationService.createNotificationForUsers
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce(undefined);
+
+    await service.sendDueReminders();
+
+    expect(prisma.calendarEvent.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [2] } },
+      data: { reminderSentAt: now },
     });
   });
 });

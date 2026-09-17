@@ -8,9 +8,12 @@ import {
 import { Request, Response } from 'express';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { recordRequestDuration } from 'src/common/metrics/request-latency.tracker';
 
 /**
- * Loguea cada request HTTP con su request id, método, ruta, status y duración.
+ * Loguea cada request HTTP con su request id, método, ruta, status y
+ * duración, y alimenta el tracker de p50/p90/p95/p99 (ver
+ * `GET /performance/latency`).
  */
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
@@ -40,6 +43,7 @@ export class LoggingInterceptor implements NestInterceptor {
     start: number,
   ) {
     const duration = Date.now() - start;
+    recordRequestDuration(duration);
     this.logger.log(
       `[${request.id ?? '-'}] ${request.method} ${request.originalUrl} ${statusCode} ${duration}ms`,
     );

@@ -27,13 +27,18 @@ export class StatusService {
     }
   }
 
+  /**
+   * Sin `include: { orders: true }`: eso traía TODOS los pedidos de cada
+   * estado con todos sus escalares (incluido `clientResourceFileData`, el
+   * archivo del cliente en base64) en cada respuesta de `GET /status` —
+   * mismo problema que tenía `OrderHistoryService` con `order: true` (ver
+   * `ORDER_SELECT_FOR_HISTORY`). El frontend sólo consume `id`/`name` del
+   * catálogo de estados (ver `packages/types/src/index.ts`, `Status =
+   * NamedEntity`), así que los pedidos anidados nunca se usaron acá.
+   */
   async findAll() {
     try {
-      return await this.prisma.status.findMany({
-        include: {
-          orders: true,
-        },
-      });
+      return await this.prisma.status.findMany();
     } catch (error) {
       // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
       // detalles internos (Prisma, stack) al cliente en producción.
@@ -45,9 +50,6 @@ export class StatusService {
     try {
       const status = await this.prisma.status.findUnique({
         where: { id },
-        include: {
-          orders: true,
-        },
       });
       if (!status) {
         throw new HttpException('Estado no encontrado', HttpStatus.NOT_FOUND);

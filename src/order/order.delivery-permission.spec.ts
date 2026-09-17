@@ -35,6 +35,17 @@ describe('OrderService - quién puede marcar ENTREGADO', () => {
           deliveryDate: null,
           status: { id: 4, name: 'terminado' },
         }),
+        // Usado por bulkUpdateStatusOrArea para validar acceso en batch
+        // (ver order.bulk-actions.spec.ts para el detalle de ese flujo).
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 1,
+            area: 'bordado',
+            assignedUserId: null,
+            userId: 77,
+            attendedByUserId: null,
+          },
+        ]),
         update: jest.fn().mockResolvedValue({
           id: 1,
           assignedUserId: null,

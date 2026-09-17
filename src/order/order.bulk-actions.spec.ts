@@ -24,12 +24,14 @@ describe('OrderService.bulkUpdateStatusOrArea', () => {
     id,
     area: 'taller',
     assignedUserId: null,
+    userId: 1,
+    attendedByUserId: null,
   });
 
   beforeEach(() => {
     prisma = {
       order: {
-        findUnique: jest.fn(),
+        findMany: jest.fn(),
         update: jest.fn(),
       },
       $transaction: jest.fn(),
@@ -61,8 +63,8 @@ describe('OrderService.bulkUpdateStatusOrArea', () => {
   });
 
   it('aplica el cambio a todos los pedidos válidos en una sola transacción', async () => {
-    prisma.order.findUnique.mockImplementation(({ where: { id } }) =>
-      Promise.resolve(buildOrder(id)),
+    prisma.order.findMany.mockImplementation(({ where: { id } }) =>
+      Promise.resolve(id.in.map((orderId: number) => buildOrder(orderId))),
     );
     prisma.$transaction.mockResolvedValue([{}, {}]);
 
@@ -85,8 +87,12 @@ describe('OrderService.bulkUpdateStatusOrArea', () => {
   });
 
   it('reporta como fallido un id sin acceso, sin abortar el resto', async () => {
-    prisma.order.findUnique.mockImplementation(({ where: { id } }) =>
-      Promise.resolve(id === 2 ? null : buildOrder(id)),
+    // El pedido 2 no existe: la consulta batch `id IN (...)` simplemente no
+    // lo trae, igual que antes `findUnique` devolvía null para ese id.
+    prisma.order.findMany.mockImplementation(({ where: { id } }) =>
+      Promise.resolve(
+        id.in.filter((orderId: number) => orderId !== 2).map(buildOrder),
+      ),
     );
     prisma.$transaction.mockResolvedValue([{}]);
 
@@ -106,8 +112,8 @@ describe('OrderService.bulkUpdateStatusOrArea', () => {
   });
 
   it('si la transacción falla, marca todos los ids aceptados como fallidos', async () => {
-    prisma.order.findUnique.mockImplementation(({ where: { id } }) =>
-      Promise.resolve(buildOrder(id)),
+    prisma.order.findMany.mockImplementation(({ where: { id } }) =>
+      Promise.resolve(id.in.map((orderId: number) => buildOrder(orderId))),
     );
     prisma.$transaction.mockRejectedValue({ code: 'P2003' });
 
