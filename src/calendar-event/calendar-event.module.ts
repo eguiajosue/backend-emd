@@ -9,5 +9,6 @@ import { CalendarEventReminderService } from './calendar-event-reminder.service'
   imports: [PrismaModule, NotificationModule],
   controllers: [CalendarEventController],
   providers: [CalendarEventService, CalendarEventReminderService],
+  exports: [CalendarEventService],
 })
 export class CalendarEventModule {}

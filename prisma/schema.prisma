@@ -135,6 +135,7 @@ model Order {
   chatMessages    ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
   areaTasks       OrderAreaTask[] // Trabajo de producción por área; varias áreas avanzan en paralelo (ver WORKFLOW.md §3).
   calendarTasks   CalendarTask[] // Tareas pendientes del calendario de equipo vinculadas a este pedido (opcional, ej. "confirmar medidas").
+  calendarEvents  CalendarEvent[] // Eventos del calendario de equipo vinculados a este pedido (instalación, compra de materiales, etc.).
   materialItems   OrderMaterialItem[] // Hoja de materiales del pedido: qué se va a usar en producción (opcional, la carga Recepción).
 
   @@index([statusId])
@@ -330,6 +331,10 @@ enum CalendarEventCategory {
   visita
   entrega
   junta
+  // Evento auto-generado ("Compra de materiales") una semana antes de la
+  // entrega/instalación de un pedido — ver OrderMaterialItemService y
+  // CalendarEventService.
+  compras
   otro
 }
 
@@ -338,6 +343,7 @@ model CalendarEvent {
   title      String // Qué hay que hacer (ej. "Instalar anuncio", "Visita a planta").
   clientName String? // Cliente/empresa escrito a mano, igual que hoy en WhatsApp.
   clientId   Int? // Cliente real vinculado, opcional (combobox "usar como texto libre" u elegir de la lista).
+  orderId    Int? // Pedido vinculado, opcional. En categoría "compras" es lo que arma el checklist de materiales.
   category   CalendarEventCategory @default(otro) // Color/naturaleza del evento en el calendario de equipo.
   area       String? // Área de producción involucrada (uno de ORDER_AREAS), opcional — filtro adicional del calendario, independiente de `category`.
 
@@ -357,10 +363,12 @@ model CalendarEvent {
   createdAt   DateTime @default(now())
 
   client    Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  order     Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
   createdBy User    @relation("CalendarEventCreatedBy", fields: [createdById], references: [id])
 
   @@index([eventDate])
   @@index([clientId])
+  @@index([orderId])
   @@index([createdById])
   @@index([status])
   @@index([area])
@@ -599,16 +607,21 @@ model Supplier {
 /// estructurado único. `areas` es un array nativo de Postgres: un material
 /// puede usarse en varias áreas de producción a la vez (ver ORDER_AREAS).
 model Material {
-  id         Int      @id @default(autoincrement())
-  name       String // "PVC", "Acrílico", "MDF", "Epanel", "Hilo de bordado", "Film DTF"...
-  categoryId Int?
-  unitId     Int?
-  measure    String? // "6mm", "3/16 x 1 1/4", texto libre.
-  color      String?
-  brand      String?
-  supplierId Int? // Proveedor preferido, opcional — la hoja de materiales de un pedido puede usar otro.
-  areas      String[] // Subconjunto de ORDER_AREAS (taller/dtf/bordado/diseno/laser/impresiones).
-  createdAt  DateTime @default(now())
+  id             Int      @id @default(autoincrement())
+  name           String // "PVC", "Acrílico", "MDF", "Epanel", "Hilo de bordado", "Film DTF"...
+  categoryId     Int?
+  unitId         Int?
+  measure        String? // "6mm", "3/16 x 1 1/4", texto libre.
+  color          String?
+  brand          String?
+  supplierId     Int? // Proveedor preferido, opcional — la hoja de materiales de un pedido puede usar otro.
+  areas          String[] // Subconjunto de ORDER_AREAS (taller/dtf/bordado/diseno/laser/impresiones).
+  // Precio de referencia del material, en pesos mexicanos. Al agregar una
+  // línea a la hoja de materiales de un pedido se copia acá (ver
+  // OrderMaterialItem.price); si se edita después, se propaga a las líneas
+  // de pedidos no entregados que usan este material.
+  suggestedPrice Decimal? @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
 
   category MaterialCategory? @relation(fields: [categoryId], references: [id])
   unit     MaterialUnit?     @relation(fields: [unitId], references: [id])
@@ -627,6 +640,14 @@ model Material {
 /// montaje). `description` se autogenera desde el Material elegido pero es
 /// editable, así que queda copiada acá (no se recalcula si el material
 /// cambia después).
+/// `price` se copia del `Material.suggestedPrice` al agregar la línea y se
+/// mantiene sincronizado mientras el pedido no esté entregado: si cambia el
+/// precio sugerido del material, se propaga a todas las líneas de pedidos no
+/// entregados que lo usan (ver `MaterialService.update`). Al entregarse el
+/// pedido, el precio de sus líneas queda congelado para siempre (ver
+/// `OrderService` — el cambio de estado a "entregado" es el que congela).
+/// `purchased` es el checklist del evento de calendario "Compra de
+/// materiales": si ya se compró esta línea.
 model OrderMaterialItem {
   id          Int      @id @default(autoincrement())
   orderId     Int
@@ -634,6 +655,8 @@ model OrderMaterialItem {
   quantity    Int
   description String
   supplierId  Int? // Puede diferir del proveedor preferido del material.
+  price       Decimal  @default(0) @db.Decimal(10, 2)
+  purchased   Boolean  @default(false)
   createdById Int
   createdAt   DateTime @default(now())
 

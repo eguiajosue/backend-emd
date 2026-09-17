@@ -31,6 +31,7 @@ import { AuditLogService } from 'src/audit-log/audit-log.service';
 import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 import { OrderAreaTaskService } from './order-area-task.service';
 import { StatusIdResolver } from './status-id-resolver';
+import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -174,6 +175,7 @@ export class OrderService {
     private readonly notificationService: NotificationService,
     private readonly auditLogService: AuditLogService,
     private readonly orderAreaTaskService: OrderAreaTaskService,
+    private readonly calendarEventService: CalendarEventService,
   ) {
     this.statusIds = new StatusIdResolver(this.prisma);
   }
@@ -1285,6 +1287,23 @@ export class OrderService {
           requestingUser,
           auditChanges,
         );
+      }
+
+      // Recién se le puso fecha de entrega a un pedido que ya tenía
+      // materiales cargados (no se pudo calcular "una semana antes" al
+      // agregarlos, ver OrderMaterialItemService.create) -> crear ahora el
+      // aviso de compra de materiales.
+      if (!existingOrder.deliveryDate && updatedOrder.deliveryDate) {
+        const materialCount = await this.prisma.orderMaterialItem.count({
+          where: { orderId: id },
+        });
+        if (materialCount > 0) {
+          await this.calendarEventService.ensureMaterialsPurchaseEvent(
+            id,
+            updatedOrder.deliveryDate,
+            requestingUserId ?? updatedOrder.userId,
+          );
+        }
       }
 
       return updatedOrder;

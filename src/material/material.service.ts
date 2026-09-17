@@ -3,6 +3,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MaterialCategoryService } from '../material-category/material-category.service';
 import { MaterialUnitService } from '../material-unit/material-unit.service';
+import {
+  StatusIdResolver,
+  STATUS_NAME_ENTREGADO,
+} from '../order/status-id-resolver';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 
@@ -14,11 +18,15 @@ import { UpdateMaterialDto } from './dto/update-material.dto';
  */
 @Injectable()
 export class MaterialService {
+  private readonly statusIds: StatusIdResolver;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly materialCategoryService: MaterialCategoryService,
     private readonly materialUnitService: MaterialUnitService,
-  ) {}
+  ) {
+    this.statusIds = new StatusIdResolver(this.prisma);
+  }
 
   private select() {
     return {
@@ -28,6 +36,7 @@ export class MaterialService {
       color: true,
       brand: true,
       areas: true,
+      suggestedPrice: true,
       createdAt: true,
       category: true,
       unit: true,
@@ -63,6 +72,7 @@ export class MaterialService {
         brand: dto.brand,
         supplierId: dto.supplierId,
         areas: dto.areas ?? [],
+        suggestedPrice: dto.suggestedPrice,
       },
       select: this.select(),
     });
@@ -91,12 +101,12 @@ export class MaterialService {
   }
 
   async update(id: number, dto: UpdateMaterialDto) {
-    await this.findOrThrow(id);
+    const before = await this.findOrThrow(id);
     const [categoryId, unitId] = await Promise.all([
       this.resolveCategoryId(dto.category),
       this.resolveUnitId(dto.unit),
     ]);
-    return this.prisma.material.update({
+    const updated = await this.prisma.material.update({
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
@@ -107,9 +117,33 @@ export class MaterialService {
         ...(dto.brand !== undefined && { brand: dto.brand }),
         ...(dto.supplierId !== undefined && { supplierId: dto.supplierId }),
         ...(dto.areas !== undefined && { areas: dto.areas }),
+        ...(dto.suggestedPrice !== undefined && {
+          suggestedPrice: dto.suggestedPrice,
+        }),
       },
       select: this.select(),
     });
+
+    // El precio de cada línea de la hoja de materiales se copia del precio
+    // sugerido al agregarla y se mantiene sincronizado mientras el pedido no
+    // esté entregado (ver OrderMaterialItem.price). Un pedido ya entregado
+    // queda afuera de este UPDATE, así que su precio no se toca más: es lo
+    // que lo "congela".
+    const priceChanged =
+      dto.suggestedPrice !== undefined &&
+      Number(before.suggestedPrice ?? 0) !== dto.suggestedPrice;
+    if (priceChanged) {
+      const deliveredId = await this.statusIds.idFor(STATUS_NAME_ENTREGADO);
+      await this.prisma.orderMaterialItem.updateMany({
+        where: {
+          materialId: id,
+          order: { statusId: { not: deliveredId } },
+        },
+        data: { price: dto.suggestedPrice },
+      });
+    }
+
+    return updated;
   }
 
   async remove(id: number) {
