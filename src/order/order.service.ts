@@ -2370,7 +2370,12 @@ export class OrderService {
     },
     requestingUser?: RequestingUser,
   ) {
-    const where: Prisma.OrderWhereInput = {
+    const visibilityWhere = this.orderVisibilityWhere(requestingUser);
+    if (visibilityWhere === null) {
+      return [];
+    }
+
+    const requestedFilters: Prisma.OrderWhereInput = {
       ...(filters.statusId && { statusId: filters.statusId }),
       ...(filters.area && { area: filters.area }),
       ...(filters.clientId && { clientId: filters.clientId }),
@@ -2381,18 +2386,37 @@ export class OrderService {
         },
       }),
     };
+    // `AND` en vez de spread: tanto `requestedFilters.area` (filtro pedido
+    // por el cliente) como `visibilityWhere.area` (rol operativo) pueden
+    // setear la misma clave `area`; con spread una pisaría a la otra y un
+    // usuario operativo podría, pidiendo `?area=otraArea`, saltarse su
+    // propio filtro de visibilidad. Con `AND` ambas condiciones se exigen
+    // a la vez.
+    const where: Prisma.OrderWhereInput = {
+      AND: [visibilityWhere, requestedFilters],
+    };
 
+    // Export: sólo los campos que arma el CSV. Antes usaba `include`, que
+    // trae TODOS los escalares de `Order` -- incluido
+    // `clientResourceFileData`, el archivo del cliente en base64 (hasta
+    // ~5MB por pedido) -- para cada fila exportada, aunque el CSV nunca lo
+    // usa. Con muchos pedidos y archivos adjuntos eso multiplica varios MB
+    // de payload y de memoria por exportación.
     const orders = await this.prisma.order.findMany({
       where,
       orderBy: { id: 'desc' },
-      include: {
-        client: true,
+      select: {
+        id: true,
+        area: true,
+        description: true,
+        creationDate: true,
+        deliveryDate: true,
+        clientNameOverride: true,
+        client: { select: { first_name: true } },
         assignedUser: ASSIGNED_USER_SELECT,
-        status: true,
+        status: { select: { name: true } },
       },
     });
-
-    const visible = await this.filterOrdersForUser(orders, requestingUser);
 
     if (requestingUser) {
       await this.auditLogService.record({
@@ -2400,11 +2424,11 @@ export class OrderService {
         action: 'order.csv_export',
         entityType: 'order_export',
         entityId: 'bulk',
-        metadata: { filters, exportedCount: visible.length },
+        metadata: { filters, exportedCount: orders.length },
       });
     }
 
-    return visible.map((order) => ({
+    return orders.map((order) => ({
       id: order.id,
       cliente: order.client?.first_name ?? order.clientNameOverride ?? '',
       area: order.area ?? '',
