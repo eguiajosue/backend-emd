@@ -758,6 +758,7 @@ export class OrderService {
       // autorizar el montaje). El frontend filtra por esto; el pedido sigue
       // existiendo en el historial. Ver WORKFLOW.md §2.
       archivedAt: true,
+      materialsPriority: true,
       description: true,
       creationDate: true,
       deliveryDate: true,
@@ -1449,6 +1450,39 @@ export class OrderService {
     ]);
 
     return this.findOrderForWriteResponse(orderId);
+  }
+
+  /**
+   * PATCH /orders/materials-priority: guarda el orden de prioridad de
+   * compra que se arma arrastrando pedidos en "Hoja de Materiales".
+   * `orderIds` llega en el orden elegido (el primero es el más urgente) y
+   * se persiste como índice 0..n-1. No es parcial: cada llamada reemplaza
+   * la prioridad de TODOS los ids recibidos en una sola transacción.
+   */
+  async reorderMaterialsPriority(
+    orderIds: number[],
+  ): Promise<{ updated: number }> {
+    const existing = await this.prisma.order.findMany({
+      where: { id: { in: orderIds } },
+      select: { id: true },
+    });
+    if (existing.length !== orderIds.length) {
+      throw new HttpException(
+        'Uno o más pedidos no existen',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    await this.prisma.$transaction(
+      orderIds.map((id, index) =>
+        this.prisma.order.update({
+          where: { id },
+          data: { materialsPriority: index },
+        }),
+      ),
+    );
+
+    return { updated: orderIds.length };
   }
 
   /**

@@ -113,6 +113,8 @@ model Order {
 
   archivedAt DateTime? // Momento en que el pedido salió del tablero activo de Diseño al autorizarse el montaje. Queda en el historial, pero ya no es trabajo pendiente de Diseño (ver WORKFLOW.md §2).
 
+  materialsPriority Int? // Orden de prioridad de compra elegido a mano (drag & drop) en "Hoja de Materiales". null = todavía no se reordenó (va al final, por id). Se reasigna 0..n-1 sobre TODOS los pedidos activos cada vez que se reordena.
+
   // Recursos que manda el CLIENTE para poder hacer el diseño (logo,
   // referencias, arte previo). Es opcional y lo carga Recepción en el alta.
   // NO es la hoja de autorización: esa es el montaje que sube Diseño en cada
@@ -146,6 +148,7 @@ model Order {
   @@index([deliveryDate])
   @@index([creationDate])
   @@index([area])
+  @@index([materialsPriority])
 }
 
 model DesignRevision {
