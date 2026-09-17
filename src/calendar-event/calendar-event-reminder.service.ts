@@ -32,11 +32,16 @@ export class CalendarEventReminderService {
   @Cron(CronExpression.EVERY_MINUTE)
   async sendDueReminders() {
     const now = new Date();
-    await this.sendCustomReminders(now);
-    await this.sendFinalReminders(now);
+    // Se resuelve UNA vez por corrida (no una vez por evento vencido): el
+    // equipo destinatario es siempre el mismo (recepcion/admin/superuser)
+    // dentro de un mismo tick del cron, así que repetir la query por cada
+    // evento sólo la reejecutaba con el resultado idéntico.
+    const recipientIds = await this.teamUserIds();
+    await this.sendCustomReminders(now, recipientIds);
+    await this.sendFinalReminders(now, recipientIds);
   }
 
-  private async sendCustomReminders(now: Date) {
+  private async sendCustomReminders(now: Date, recipientIds: number[]) {
     const candidates = await this.prisma.calendarEvent.findMany({
       where: {
         reminderMinutesBefore: { not: null },
@@ -59,12 +64,10 @@ export class CalendarEventReminderService {
       return dueAt <= now;
     });
 
-    for (const event of due) {
-      await this.sendReminder(event, 'reminderSentAt');
-    }
+    await this.sendAndMarkSent(due, recipientIds, 'reminderSentAt');
   }
 
-  private async sendFinalReminders(now: Date) {
+  private async sendFinalReminders(now: Date, recipientIds: number[]) {
     const candidates = await this.prisma.calendarEvent.findMany({
       where: {
         finalReminderSentAt: null,
@@ -80,36 +83,53 @@ export class CalendarEventReminderService {
       return dueAt <= now;
     });
 
-    for (const event of due) {
-      await this.sendReminder(event, 'finalReminderSentAt');
-    }
+    await this.sendAndMarkSent(due, recipientIds, 'finalReminderSentAt');
   }
 
-  private async sendReminder(
-    event: { id: number; title: string; clientName: string | null },
+  /**
+   * Manda el aviso de cada evento vencido (contenido distinto por evento, no
+   * se puede batchear) y, al final, marca `sentField` de TODOS los que se
+   * notificaron con éxito en un solo `updateMany` -- antes era un
+   * `update` individual por evento dentro del mismo loop que mandaba el
+   * aviso. Un evento cuyo aviso falla queda afuera del `updateMany` (se
+   * reintenta en el próximo tick), igual que antes.
+   */
+  private async sendAndMarkSent(
+    due: { id: number; title: string; clientName: string | null }[],
+    recipientIds: number[],
     sentField: 'reminderSentAt' | 'finalReminderSentAt',
   ) {
-    try {
-      const recipientIds = await this.teamUserIds();
-      const body = event.clientName
-        ? `${event.clientName} · ${event.title}`
-        : event.title;
-      await this.notificationService.createNotificationForUsers(recipientIds, {
-        type: CALENDAR_EVENT_REMINDER_TYPE,
-        title: 'Recordatorio de calendario',
-        body,
-      });
-      await this.prisma.calendarEvent.update({
-        where: { id: event.id },
-        data: { [sentField]: new Date() },
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Fallo mandando recordatorio del evento ${event.id}: ${
-          (error as Error).message
-        }`,
-      );
+    if (due.length === 0) return;
+
+    const sentIds: number[] = [];
+    for (const event of due) {
+      try {
+        const body = event.clientName
+          ? `${event.clientName} · ${event.title}`
+          : event.title;
+        await this.notificationService.createNotificationForUsers(
+          recipientIds,
+          {
+            type: CALENDAR_EVENT_REMINDER_TYPE,
+            title: 'Recordatorio de calendario',
+            body,
+          },
+        );
+        sentIds.push(event.id);
+      } catch (error) {
+        this.logger.warn(
+          `Fallo mandando recordatorio del evento ${event.id}: ${
+            (error as Error).message
+          }`,
+        );
+      }
     }
+
+    if (sentIds.length === 0) return;
+    await this.prisma.calendarEvent.updateMany({
+      where: { id: { in: sentIds } },
+      data: { [sentField]: new Date() },
+    });
   }
 
   /** Todo el equipo con acceso al calendario: recepcion + admin + superuser. */
