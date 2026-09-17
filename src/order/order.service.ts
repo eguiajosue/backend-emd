@@ -2140,6 +2140,20 @@ export class OrderService {
     await this.getDesignRevisionOrThrow(orderId, revisionId);
     const order = await this.getOrderOrThrow(orderId);
 
+    // La hoja de materiales se tiene que cargar ANTES de autorizar: producción
+    // necesita saber qué se va a usar desde el momento en que arranca, no
+    // enterarse después. Al menos una línea alcanza — no hace falta que ya
+    // esté todo comprado.
+    const materialCount = await this.prisma.orderMaterialItem.count({
+      where: { orderId },
+    });
+    if (materialCount === 0) {
+      throw new HttpException(
+        'Cargá la hoja de materiales del pedido antes de autorizar el diseño',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     // Áreas que van a producir el pedido. Pueden ser varias y trabajan en
     // paralelo (WORKFLOW.md §3): las define Diseño acá, o vienen planificadas
     // por Recepción desde el alta como tareas ya creadas.

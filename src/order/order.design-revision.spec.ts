@@ -79,6 +79,7 @@ describe('OrderService - flujo de diseño', () => {
       },
       designRevisionFile: { findUnique: jest.fn() },
       orderAuditLog: { create: jest.fn() },
+      orderMaterialItem: { count: jest.fn().mockResolvedValue(1) },
       status: { findUnique: jest.fn().mockResolvedValue({ id: 9 }) },
       $transaction: jest.fn().mockResolvedValue([{ id: 100 }]),
     };
@@ -485,6 +486,23 @@ describe('OrderService - flujo de diseño', () => {
 
       const orderUpdate = prisma.order.update.mock.calls.at(-1)?.[0];
       expect(orderUpdate.data.archivedAt).toBeInstanceOf(Date);
+    });
+
+    it('rechaza autorizar sin ninguna línea cargada en la hoja de materiales', async () => {
+      prisma.orderMaterialItem.count.mockResolvedValue(0);
+
+      await expect(
+        orderService.approveDesignRevision(1, 100, {}, receptionist),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('con al menos un material cargado, autoriza sin problema', async () => {
+      prisma.orderMaterialItem.count.mockResolvedValue(3);
+
+      await expect(
+        orderService.approveDesignRevision(1, 100, {}, receptionist),
+      ).resolves.toBeDefined();
     });
   });
 
