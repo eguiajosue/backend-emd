@@ -1476,21 +1476,48 @@ export class OrderService {
     // Validación previa (acceso + existencia) por id, fuera de la
     // transacción: así un id inválido no aborta el batch completo, sólo
     // queda afuera de él.
+    //
+    // Antes esto llamaba `assertOrderAccess` (1 query) por cada id del
+    // batch, en serie -- hasta 100 round-trips a la base en un solo
+    // request (ver el tope de `BulkOrderActionDto`). Se resuelve con una
+    // sola consulta `id IN (...)` y el mismo filtro de visibilidad que
+    // `assertOrderAccess` aplica, pero evaluado en memoria sobre ese puñado
+    // de filas ya traídas (no sobre la tabla entera).
+    const candidateOrders = await this.prisma.order.findMany({
+      where: { id: { in: dto.orderIds } },
+      select: {
+        id: true,
+        area: true,
+        assignedUserId: true,
+        userId: true,
+        attendedByUserId: true,
+      },
+    });
+    const candidateById = new Map(candidateOrders.map((o) => [o.id, o]));
+    const visibleIds = new Set(
+      (await this.filterOrdersForUser(candidateOrders, requestingUser)).map(
+        (o) => o.id,
+      ),
+    );
+
     for (const orderId of dto.orderIds) {
-      try {
-        await this.assertOrderAccess(orderId, requestingUser);
-        acceptedIds.push(orderId);
-      } catch (error) {
+      if (!candidateById.has(orderId)) {
         results.push({
           orderId,
           success: false,
-          error:
-            error instanceof HttpException
-              ? ((error.getResponse() as { message?: string })?.message ??
-                error.message)
-              : 'No se pudo validar el acceso al pedido',
+          error: 'Orden no encontrada',
         });
+        continue;
       }
+      if (!visibleIds.has(orderId)) {
+        results.push({
+          orderId,
+          success: false,
+          error: 'Sin acceso a este pedido',
+        });
+        continue;
+      }
+      acceptedIds.push(orderId);
     }
 
     if (acceptedIds.length > 0) {
