@@ -310,6 +310,38 @@ export class OrderService {
   }
 
   /**
+   * Equivalente a `filterOrdersForUser` pero como cláusula `where` de
+   * Prisma, para los listados (`findAll`/`findHistory`/`findAllByClient`/
+   * `exportOrders`): permite que el filtrado por área/rol y la paginación
+   * se resuelvan en la base (con `skip`/`take`/`count`) en vez de traer
+   * SIEMPRE la tabla `Order` entera a memoria para filtrar ahí y recién
+   * después paginar sobre el array ya filtrado. El criterio es el mismo que
+   * `filterOrdersForUser` (que se mantiene para el caso de un único pedido,
+   * ver `assertOrderAccess`): sólo depende de los roles del usuario y de
+   * `order.area`, ya no de `AreaVisibilitySetting` (ver comentario en
+   * `filterOrdersForUser`).
+   *
+   * Devuelve `null` como sentinel cuando el usuario no tiene ningún rol que
+   * le dé acceso (no ve nada, sin necesidad de consultar la base).
+   */
+  private orderVisibilityWhere(
+    requestingUser?: RequestingUser,
+  ): Prisma.OrderWhereInput | null {
+    if (!requestingUser) {
+      return {};
+    }
+    const { roles } = requestingUser;
+    if (isFullVisibilityRole(roles)) {
+      return {};
+    }
+    const userAreas = operationalRolesOf(roles);
+    if (userAreas.length === 0) {
+      return null;
+    }
+    return { area: { in: userAreas } };
+  }
+
+  /**
    * Verifica que `requestingUser` tenga acceso al pedido `orderId` (mismo
    * criterio de visibilidad por área/rol que `findAll`/`findHistory`), y
    * devuelve el pedido base (`area`, `assignedUserId`) si es así. Usado por
@@ -792,31 +824,36 @@ export class OrderService {
     try {
       const select = this.orderListSelect();
       const { enabled, page, limit, skip } = resolvePagination(query);
+      const where = this.orderVisibilityWhere(requestingUser);
 
-      if (!enabled) {
-        const orders = await this.prisma.order.findMany({ select });
-        const visible = await this.filterOrdersForUser(orders, requestingUser);
-        return visible.map(this.toListItem);
+      if (where === null) {
+        // Sin ningún rol que le dé acceso: no ve nada. Se corta acá sin
+        // consultar la base (antes esto se resolvía filtrando en memoria
+        // DESPUÉS de traer toda la tabla).
+        return enabled ? buildPaginatedResult([], 0, page, limit) : [];
       }
 
-      // Con restricción de visibilidad por área, el filtrado depende de
-      // configuración dinámica (AreaVisibilitySetting) y no puede resolverse
-      // enteramente en el WHERE de Prisma sin duplicar esa lógica; con el
-      // volumen actual de datos se trae todo ordenado, se filtra en memoria
-      // y se pagina sobre el resultado ya filtrado.
-      const allMatching = await this.prisma.order.findMany({
-        select,
-        orderBy: { id: 'desc' },
-      });
-      const visible = await this.filterOrdersForUser(
-        allMatching,
-        requestingUser,
-      );
-      const total = visible.length;
-      const data = visible.slice(skip, skip + limit);
+      if (!enabled) {
+        const orders = await this.prisma.order.findMany({ where, select });
+        return orders.map(this.toListItem);
+      }
+
+      // Filtro por área/rol y paginación resueltos en la base (`where` +
+      // `skip`/`take`/`count`), no trayendo la tabla entera a memoria para
+      // filtrar y recién ahí paginar (ver `orderVisibilityWhere`).
+      const [orders, total] = await this.prisma.$transaction([
+        this.prisma.order.findMany({
+          where,
+          select,
+          orderBy: { id: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.order.count({ where }),
+      ]);
 
       return buildPaginatedResult(
-        data.map(this.toListItem),
+        orders.map(this.toListItem),
         total,
         page,
         limit,
@@ -845,20 +882,28 @@ export class OrderService {
       // Paginación siempre activa para /orders/history (a diferencia de
       // `findAll`, que es opt-in): evita traer todo el histórico sin límite.
       const { page, limit, skip } = resolvePagination(query ?? {});
+      const where = this.orderVisibilityWhere(requestingUser);
 
-      const allMatching = await this.prisma.order.findMany({
-        select,
-        orderBy: { creationDate: 'desc' },
-      });
-      const visible = await this.filterOrdersForUser(
-        allMatching,
-        requestingUser,
-      );
-      const total = visible.length;
-      const data = visible.slice(skip, skip + limit);
+      if (where === null) {
+        return buildPaginatedResult([], 0, page, limit);
+      }
+
+      // Filtro por área/rol y paginación resueltos en la base, no trayendo
+      // TODO el histórico a memoria para filtrar y recién ahí paginar (ver
+      // `orderVisibilityWhere`).
+      const [orders, total] = await this.prisma.$transaction([
+        this.prisma.order.findMany({
+          where,
+          select,
+          orderBy: { creationDate: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.order.count({ where }),
+      ]);
 
       return buildPaginatedResult(
-        data.map(this.toListItem),
+        orders.map(this.toListItem),
         total,
         page,
         limit,
@@ -2245,7 +2290,14 @@ export class OrderService {
   ) {
     const select = this.orderListSelect();
     const { enabled, page, limit, skip } = resolvePagination(query);
-    const where = { clientId };
+    const visibilityWhere = this.orderVisibilityWhere(requestingUser);
+
+    if (visibilityWhere === null) {
+      return enabled ? buildPaginatedResult([], 0, page, limit) : [];
+    }
+    // Sin colisión de claves con `visibilityWhere` (sólo trae `area`), así
+    // que se puede combinar con spread.
+    const where: Prisma.OrderWhereInput = { clientId, ...visibilityWhere };
 
     if (!enabled) {
       const orders = await this.prisma.order.findMany({
@@ -2253,19 +2305,25 @@ export class OrderService {
         select,
         orderBy: { id: 'desc' },
       });
-      const visible = await this.filterOrdersForUser(orders, requestingUser);
-      return visible.map(this.toListItem);
+      return orders.map(this.toListItem);
     }
 
-    const allMatching = await this.prisma.order.findMany({
-      where,
-      select,
-      orderBy: { id: 'desc' },
-    });
-    const visible = await this.filterOrdersForUser(allMatching, requestingUser);
-    const total = visible.length;
-    const data = visible.slice(skip, skip + limit);
-    return buildPaginatedResult(data.map(this.toListItem), total, page, limit);
+    const [orders, total] = await this.prisma.$transaction([
+      this.prisma.order.findMany({
+        where,
+        select,
+        orderBy: { id: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+    return buildPaginatedResult(
+      orders.map(this.toListItem),
+      total,
+      page,
+      limit,
+    );
   }
 
   /**

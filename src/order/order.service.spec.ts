@@ -43,7 +43,19 @@ describe('OrderService - visibilidad por área (findAll)', () => {
   beforeEach(() => {
     prisma = {
       order: {
-        findMany: jest.fn().mockResolvedValue(orders),
+        // Simula el filtro por área que ahora arma `orderVisibilityWhere`
+        // (antes se filtraba en memoria con `filterOrdersForUser` DESPUÉS
+        // de traer todo; ahora se resuelve en el `where`, así que el mock
+        // tiene que aplicarlo para seguir probando el mismo comportamiento).
+        findMany: jest.fn(({ where }: any = {}) => {
+          const allowedAreas: string[] | undefined = where?.area?.in;
+          const result = allowedAreas
+            ? orders.filter(
+                (o) => o.area != null && allowedAreas.includes(o.area),
+              )
+            : orders;
+          return Promise.resolve(result);
+        }),
       },
     };
 
