@@ -2,6 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { AreaTaskStatus } from '@prisma/client';
 import { OrderService, RequestingUser } from './order.service';
 import { OrderAreaTaskService } from './order-area-task.service';
+import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
@@ -61,6 +62,9 @@ const buildOrderService = (
     (overrides.areaTaskService ?? {
       createTasksForAreas: jest.fn().mockResolvedValue([]),
     }) as OrderAreaTaskService,
+    {
+      ensureMaterialsPurchaseEvent: jest.fn(),
+    } as unknown as CalendarEventService,
   );
 
 /**

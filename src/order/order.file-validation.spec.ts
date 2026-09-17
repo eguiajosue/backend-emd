@@ -1,6 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { OrderAreaTaskService } from './order-area-task.service';
+import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
@@ -28,6 +29,9 @@ describe('OrderService - validación de archivos subidos (MIME sniffing)', () =>
       {
         createTasksForAreas: jest.fn().mockResolvedValue([]),
       } as unknown as OrderAreaTaskService,
+      {
+        ensureMaterialsPurchaseEvent: jest.fn(),
+      } as unknown as CalendarEventService,
     );
   });
 

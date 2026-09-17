@@ -9,6 +9,7 @@ import { AreaVisibilityModule } from 'src/area-visibility/area-visibility.module
 import { OrderProductPresetModule } from 'src/order-product-preset/order-product-preset.module';
 import { NotificationModule } from 'src/notification/notification.module';
 import { AuditLogModule } from 'src/audit-log/audit-log.module';
+import { CalendarEventModule } from 'src/calendar-event/calendar-event.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AuditLogModule } from 'src/audit-log/audit-log.module';
     OrderProductPresetModule,
     NotificationModule,
     AuditLogModule,
+    CalendarEventModule,
   ],
   controllers: [OrderController],
   providers: [

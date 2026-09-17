@@ -43,6 +43,17 @@ export class CreateCalendarEventDto {
   clientId?: number;
 
   /**
+   * Pedido vinculado, opcional. En un evento de categoría "instalacion"
+   * dispara la creación automática de "Compra de materiales" una semana
+   * antes (ver CalendarEventService.create); en uno de categoría "compras"
+   * es lo que arma el checklist de la hoja de materiales de ese pedido.
+   */
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  orderId?: number;
+
+  /**
    * Categoría del evento (instalación/visita/entrega/junta/otro): define su
    * color en el calendario y si el frontend le muestra seguimiento de
    * estado (una junta no tiene "pendiente"/"terminado"). Default 'otro' si

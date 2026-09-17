@@ -1,9 +1,14 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { AreaTaskStatus, Prisma } from '@prisma/client';
+import { AreaTaskStatus, CalendarEventCategory, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCalendarEventDto } from './dto/create-calendar-event.dto';
 import { UpdateCalendarEventDto } from './dto/update-calendar-event.dto';
 import { CalendarEventQueryDto } from './dto/calendar-event-query.dto';
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Título fijo del evento auto-generado — se usa también para reconocerlo (no duplicarlo). */
+const MATERIALS_PURCHASE_TITLE = 'Compra de materiales';
 
 /**
  * Transiciones válidas del mismo ciclo corto que `OrderAreaTaskService`: no
@@ -36,6 +41,7 @@ export class CalendarEventService {
       title: true,
       clientName: true,
       clientId: true,
+      orderId: true,
       category: true,
       area: true,
       eventDate: true,
@@ -54,11 +60,12 @@ export class CalendarEventService {
   }
 
   async create(dto: CreateCalendarEventDto, createdById: number) {
-    return this.prisma.calendarEvent.create({
+    const created = await this.prisma.calendarEvent.create({
       data: {
         title: dto.title,
         clientName: dto.clientName,
         clientId: dto.clientId,
+        orderId: dto.orderId,
         category: dto.category,
         area: dto.area,
         eventDate: new Date(dto.eventDate),
@@ -67,6 +74,49 @@ export class CalendarEventService {
         createdById,
       },
       select: this.select(),
+    });
+
+    // Instalación de un pedido -> avisar con una semana de anticipación que
+    // hay que comprar los materiales de ese pedido (checklist con lo cargado
+    // en su hoja de materiales). Si ya existe uno para este pedido, no se
+    // duplica (puede haberse creado ya al cargar el primer material).
+    if (created.category === CalendarEventCategory.instalacion && dto.orderId) {
+      await this.ensureMaterialsPurchaseEvent(
+        dto.orderId,
+        created.eventDate,
+        createdById,
+      );
+    }
+
+    return created;
+  }
+
+  /**
+   * Crea (si no existe todavía) el evento "Compra de materiales" de un
+   * pedido, una semana antes de `anchorDate` (fecha de entrega o de la
+   * instalación, según quién dispare la creación). La fecha queda como
+   * cualquier otra: editable a mano después.
+   */
+  async ensureMaterialsPurchaseEvent(
+    orderId: number,
+    anchorDate: Date,
+    createdById: number,
+  ) {
+    const existing = await this.prisma.calendarEvent.findFirst({
+      where: { orderId, category: CalendarEventCategory.compras },
+      select: { id: true },
+    });
+    if (existing) return;
+
+    await this.prisma.calendarEvent.create({
+      data: {
+        title: MATERIALS_PURCHASE_TITLE,
+        orderId,
+        category: CalendarEventCategory.compras,
+        eventDate: new Date(anchorDate.getTime() - WEEK_MS),
+        hasTime: false,
+        createdById,
+      },
     });
   }
 
@@ -107,6 +157,7 @@ export class CalendarEventService {
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.clientName !== undefined && { clientName: dto.clientName }),
         ...(dto.clientId !== undefined && { clientId: dto.clientId }),
+        ...(dto.orderId !== undefined && { orderId: dto.orderId }),
         ...(dto.category !== undefined && { category: dto.category }),
         ...(dto.area !== undefined && { area: dto.area }),
         ...(dto.eventDate !== undefined && {

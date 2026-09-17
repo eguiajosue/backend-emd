@@ -4,9 +4,11 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsPositive,
   IsString,
+  Min,
   MaxLength,
 } from 'class-validator';
 import {
@@ -71,4 +73,10 @@ export class CreateMaterialDto {
   @ArrayMaxSize(ORDER_AREAS.length)
   @IsIn(ORDER_AREAS, { each: true })
   areas?: (typeof ORDER_AREAS)[number][];
+
+  /** Precio de referencia, en pesos mexicanos. Opcional: no todos los materiales lo tienen cargado todavía. */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  suggestedPrice?: number;
 }

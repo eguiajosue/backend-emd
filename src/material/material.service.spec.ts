@@ -14,6 +14,8 @@ describe('MaterialService', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+    status: { findUnique: jest.Mock };
+    orderMaterialItem: { updateMany: jest.Mock };
   };
   let categoryService: { ensureExists: jest.Mock };
   let unitService: { ensureExists: jest.Mock };
@@ -26,12 +28,16 @@ describe('MaterialService', () => {
           ...(args.data as object),
         })),
         findMany: jest.fn().mockResolvedValue([]),
-        findUnique: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ id: 1, suggestedPrice: 100 }),
         update: jest.fn((args: { data: unknown }) => ({
           id: 1,
           ...(args.data as object),
         })),
         delete: jest.fn(),
+      },
+      status: { findUnique: jest.fn().mockResolvedValue({ id: 5 }) },
+      orderMaterialItem: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
     };
     categoryService = { ensureExists: jest.fn().mockResolvedValue(10) };
@@ -95,5 +101,40 @@ describe('MaterialService', () => {
     prisma.material.findUnique.mockResolvedValue({ id: 1 });
     prisma.material.delete.mockRejectedValue({ code: 'P2003' });
     await expect(service.remove(1)).rejects.toThrow(HttpException);
+  });
+
+  describe('propagación de precio sugerido', () => {
+    it('al cambiar el precio, actualiza las líneas de pedidos NO entregados que usan este material', async () => {
+      await service.update(1, { suggestedPrice: 175 });
+
+      expect(prisma.status.findUnique).toHaveBeenCalledWith({
+        where: { name: 'entregado' },
+      });
+      expect(prisma.orderMaterialItem.updateMany).toHaveBeenCalledWith({
+        where: { materialId: 1, order: { statusId: { not: 5 } } },
+        data: { price: 175 },
+      });
+    });
+
+    it('no toca nada si el precio no cambió', async () => {
+      await service.update(1, { suggestedPrice: 100, name: 'PVC rígido' });
+      expect(prisma.orderMaterialItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('no toca nada si el update no incluye suggestedPrice', async () => {
+      await service.update(1, { name: 'PVC rígido' });
+      expect(prisma.orderMaterialItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('propaga igual cuando el material no tenía precio antes (null -> valor)', async () => {
+      prisma.material.findUnique.mockResolvedValue({
+        id: 1,
+        suggestedPrice: null,
+      });
+      await service.update(1, { suggestedPrice: 50 });
+      expect(prisma.orderMaterialItem.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { price: 50 } }),
+      );
+    });
   });
 });

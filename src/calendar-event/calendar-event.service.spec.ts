@@ -8,6 +8,7 @@ describe('CalendarEventService', () => {
   let prisma: {
     calendarEvent: {
       create: jest.Mock;
+      findFirst: jest.Mock;
       findMany: jest.Mock;
       findUnique: jest.Mock;
       update: jest.Mock;
@@ -23,6 +24,7 @@ describe('CalendarEventService', () => {
           status: AreaTaskStatus.pendiente,
           ...(args.data as object),
         })),
+        findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(),
         update: jest.fn((args: { data: unknown }) => ({
@@ -158,5 +160,85 @@ describe('CalendarEventService', () => {
   it('lanza 404 al borrar un evento inexistente', async () => {
     prisma.calendarEvent.findUnique.mockResolvedValue(null);
     await expect(service.remove(999)).rejects.toThrow(HttpException);
+  });
+
+  describe('vínculo a un pedido y aviso de compra de materiales', () => {
+    it('pasa el orderId elegido al crear', async () => {
+      await service.create(
+        {
+          title: 'Instalar anuncio',
+          eventDate: '2026-09-15T15:00:00.000Z',
+          orderId: 42,
+        },
+        7,
+      );
+      expect(prisma.calendarEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ orderId: 42 }),
+        }),
+      );
+    });
+
+    it('al crear un evento de instalación con pedido, crea el aviso de compra una semana antes', async () => {
+      await service.create(
+        {
+          title: 'Instalar anuncio',
+          eventDate: '2026-09-15T15:00:00.000Z',
+          category: CalendarEventCategory.instalacion,
+          orderId: 42,
+        },
+        7,
+      );
+
+      expect(prisma.calendarEvent.findFirst).toHaveBeenCalledWith({
+        where: { orderId: 42, category: CalendarEventCategory.compras },
+        select: { id: true },
+      });
+      expect(prisma.calendarEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          title: 'Compra de materiales',
+          orderId: 42,
+          category: CalendarEventCategory.compras,
+          eventDate: new Date('2026-09-08T15:00:00.000Z'),
+          hasTime: false,
+          createdById: 7,
+        }),
+      });
+    });
+
+    it('no crea el aviso de compra si la instalación no está vinculada a un pedido', async () => {
+      await service.create(
+        {
+          title: 'Instalar anuncio',
+          eventDate: '2026-09-15T15:00:00.000Z',
+          category: CalendarEventCategory.instalacion,
+        },
+        7,
+      );
+      expect(prisma.calendarEvent.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('no crea el aviso de compra para otras categorías de evento', async () => {
+      await service.create(
+        {
+          title: 'Visita a planta',
+          eventDate: '2026-09-15T15:00:00.000Z',
+          category: CalendarEventCategory.visita,
+          orderId: 42,
+        },
+        7,
+      );
+      expect(prisma.calendarEvent.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('ensureMaterialsPurchaseEvent no duplica si ya existe un aviso de compra para ese pedido', async () => {
+      prisma.calendarEvent.findFirst.mockResolvedValue({ id: 99 });
+      await service.ensureMaterialsPurchaseEvent(
+        42,
+        new Date('2026-10-01T00:00:00.000Z'),
+        7,
+      );
+      expect(prisma.calendarEvent.create).not.toHaveBeenCalled();
+    });
   });
 });

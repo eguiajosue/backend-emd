@@ -1,5 +1,5 @@
 import {
-  IsEnum,
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -8,13 +8,14 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { OrderMaterialAvailability } from '@prisma/client';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
 
 /**
  * Línea de la hoja de materiales de un pedido. `description` la arma el
  * frontend a partir del material elegido (nombre + medida + color) pero es
  * editable, así que llega ya resuelta acá — el backend no la recalcula.
+ * `price` NO se manda desde acá: se copia del `Material.suggestedPrice` al
+ * crear la línea (ver OrderMaterialItemService.create).
  */
 export class CreateOrderMaterialItemDto {
   @IsInt()
@@ -35,10 +36,6 @@ export class CreateOrderMaterialItemDto {
   @IsInt()
   @IsPositive()
   supplierId?: number;
-
-  @IsOptional()
-  @IsEnum(OrderMaterialAvailability)
-  availability?: OrderMaterialAvailability;
 }
 
 export class UpdateOrderMaterialItemDto {
@@ -59,7 +56,8 @@ export class UpdateOrderMaterialItemDto {
   @IsPositive()
   supplierId?: number;
 
+  /** Checklist del evento "Compra de materiales": si ya se compró esta línea. */
   @IsOptional()
-  @IsEnum(OrderMaterialAvailability)
-  availability?: OrderMaterialAvailability;
+  @IsBoolean()
+  purchased?: boolean;
 }
