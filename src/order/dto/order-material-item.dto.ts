@@ -1,4 +1,5 @@
 import {
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -7,6 +8,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { OrderMaterialAvailability } from '@prisma/client';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
 
 /**
@@ -33,6 +35,10 @@ export class CreateOrderMaterialItemDto {
   @IsInt()
   @IsPositive()
   supplierId?: number;
+
+  @IsOptional()
+  @IsEnum(OrderMaterialAvailability)
+  availability?: OrderMaterialAvailability;
 }
 
 export class UpdateOrderMaterialItemDto {
@@ -52,4 +58,8 @@ export class UpdateOrderMaterialItemDto {
   @IsInt()
   @IsPositive()
   supplierId?: number;
+
+  @IsOptional()
+  @IsEnum(OrderMaterialAvailability)
+  availability?: OrderMaterialAvailability;
 }

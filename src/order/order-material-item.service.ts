@@ -25,9 +25,12 @@ export class OrderMaterialItemService {
       quantity: true,
       description: true,
       supplierId: true,
+      availability: true,
       createdById: true,
       createdAt: true,
-      material: { select: { id: true, name: true } },
+      material: {
+        select: { id: true, name: true, unit: { select: { name: true } } },
+      },
       supplier: true,
       createdBy: {
         select: { id: true, firstName: true, lastName: true, username: true },
@@ -67,6 +70,7 @@ export class OrderMaterialItemService {
           quantity: dto.quantity,
           description: dto.description,
           supplierId: dto.supplierId,
+          availability: dto.availability,
           createdById,
         },
         select: this.select(),
@@ -108,6 +112,9 @@ export class OrderMaterialItemService {
         ...(dto.quantity !== undefined && { quantity: dto.quantity }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.supplierId !== undefined && { supplierId: dto.supplierId }),
+        ...(dto.availability !== undefined && {
+          availability: dto.availability,
+        }),
       },
       select: this.select(),
     });

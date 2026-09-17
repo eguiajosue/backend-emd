@@ -628,14 +628,15 @@ model Material {
 /// editable, así que queda copiada acá (no se recalcula si el material
 /// cambia después).
 model OrderMaterialItem {
-  id          Int      @id @default(autoincrement())
-  orderId     Int
-  materialId  Int
-  quantity    Int
-  description String
-  supplierId  Int? // Puede diferir del proveedor preferido del material.
-  createdById Int
-  createdAt   DateTime @default(now())
+  id           Int                        @id @default(autoincrement())
+  orderId      Int
+  materialId   Int
+  quantity     Int
+  description  String
+  supplierId   Int? // Puede diferir del proveedor preferido del material.
+  availability OrderMaterialAvailability @default(disponible) // Estado de abastecimiento de ESTA línea del pedido (no del catálogo).
+  createdById  Int
+  createdAt    DateTime                   @default(now())
 
   order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   material  Material  @relation(fields: [materialId], references: [id])
@@ -644,4 +645,15 @@ model OrderMaterialItem {
 
   @@index([orderId])
   @@index([materialId])
+}
+
+/// Disponibilidad de un material CARGADO EN UN PEDIDO puntual — no es una
+/// propiedad del catálogo de Materiales, que no lleva stock (eso queda para
+/// una futura sección de Inventario).
+enum OrderMaterialAvailability {
+  disponible
+  parcial
+  por_comprar
+  agotado
+  no_requerido
 }
