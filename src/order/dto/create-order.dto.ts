@@ -138,10 +138,14 @@ export class CreateOrderDto {
   @IsPositive()
   assignedUserId?: number;
 
-  @IsNotEmpty()
+  // Sin valor por defecto ACÁ a propósito: `UpdateOrderDto` (PartialType)
+  // hereda los inicializadores, y con `= 1` cada PATCH parcial (editar la
+  // fecha, la descripción…) devolvía el pedido a "pendiente". El default de
+  // alta lo pone `OrderService.create`.
+  @IsOptional()
   @IsInt()
   @IsPositive()
-  statusId: number = 1;
+  statusId?: number;
 
   @TrimString()
   @IsNotEmpty()
@@ -176,9 +180,12 @@ export class CreateOrderDto {
   // Si el pedido pasa por la fase de Diseño antes de producción. Default
   // true (comportamiento nuevo); Recepción puede desmarcarlo para ir
   // directo a producción (comportamiento anterior, intacto).
+  // Sin `= true` acá por lo mismo que `statusId`: heredado al PATCH, marcaba
+  // como "requiere diseño" cualquier pedido que se editara. `create` ya
+  // trata `undefined` como true (`requiresDesign !== false`).
   @IsOptional()
   @IsBoolean()
-  requiresDesign?: boolean = true;
+  requiresDesign?: boolean;
 
   // Área de producción destino una vez autorizado el diseño. Puede venir
   // vacía al crear (se define después, por Recepción o por Diseño).

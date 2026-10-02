@@ -515,7 +515,9 @@ export class OrderService {
         clientNameOverride,
         userId,
         assignedUserId,
-        statusId,
+        // Default de alta: "pendiente". Vive acá y no en el DTO (ver
+        // CreateOrderDto.statusId).
+        statusId = 1,
         area,
         productionArea,
         productionAreas,
