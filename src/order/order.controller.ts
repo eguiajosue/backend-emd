@@ -26,6 +26,7 @@ import {
 } from './dto/design-revision.dto';
 import { OrderExportQueryDto } from './dto/order-export-query.dto';
 import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
+import { ReorderMaterialsPriorityDto } from './dto/reorder-materials-priority.dto';
 import {
   SetOrderAreasDto,
   UpdateAreaTaskStatusDto,
@@ -213,6 +214,17 @@ export class OrderController {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="pedidos.csv"');
     res.send(csv);
+  }
+
+  /**
+   * Orden de prioridad de compra elegido en "Hoja de Materiales" (drag &
+   * drop). Definido antes de ':id' para que 'materials-priority' no se
+   * interprete como un id de pedido.
+   */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Patch('materials-priority')
+  reorderMaterialsPriority(@Body() dto: ReorderMaterialsPriorityDto) {
+    return this.orderService.reorderMaterialsPriority(dto.orderIds);
   }
 
   @Auth(
