@@ -47,6 +47,7 @@ describe('OrderService - flujo de diseño', () => {
           assignedUserId: null,
           userId: CREATOR_USER_ID,
           productionArea: 'bordado',
+          status: { name: 'esperando autorización' },
         }),
         update: jest.fn(),
       },
@@ -503,6 +504,67 @@ describe('OrderService - flujo de diseño', () => {
       await expect(
         orderService.approveDesignRevision(1, 100, {}, receptionist),
       ).resolves.toBeDefined();
+    });
+    it('avisa al diseñador que armó la ronda que el cliente autorizó', async () => {
+      prisma.orderMaterialItem.count.mockResolvedValue(1);
+
+      await orderService.approveDesignRevision(1, 100, {}, receptionist);
+
+      expect(notificationService.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 5, type: 'design_approved' }),
+      );
+    });
+  });
+
+  describe('respuesta del cliente sobre una ronda ya respondida o vieja', () => {
+    beforeEach(() => {
+      prisma.orderMaterialItem.count.mockResolvedValue(1);
+    });
+
+    it('no autoriza una ronda que ya tiene cambios pedidos (409)', async () => {
+      prisma.designRevision.findUnique.mockResolvedValue({
+        id: 100,
+        orderId: 1,
+        round: 1,
+        sentByUserId: 5,
+        approved: false,
+        feedbackText: 'agrandar logo',
+        files: [],
+      });
+
+      await expect(
+        orderService.approveDesignRevision(1, 100, {}, receptionist),
+      ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('no autoriza una ronda si ya hay una más nueva (409)', async () => {
+      prisma.designRevision.findFirst.mockResolvedValue({ id: 101 });
+
+      await expect(
+        orderService.approveDesignRevision(1, 100, {}, receptionist),
+      ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+    });
+
+    it('no manda cambios sobre un pedido ya autorizado (409)', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        id: 1,
+        area: 'taller',
+        assignedUserId: null,
+        userId: CREATOR_USER_ID,
+        productionArea: 'taller',
+        status: { name: 'autorizado' },
+      });
+
+      await expect(
+        orderService.addDesignFeedback(
+          1,
+          100,
+          { feedbackText: 'otro cambio' },
+          receptionist,
+        ),
+      ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 

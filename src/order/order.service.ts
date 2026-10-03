@@ -1978,6 +1978,44 @@ export class OrderService {
   }
 
   /**
+   * La respuesta del cliente (cambios o autorización) sólo vale sobre la
+   * ronda VIGENTE de un pedido que está esperando esa respuesta. Sin esto, una
+   * pestaña vieja o dos personas de Recepción a la vez podían autorizar una
+   * ronda ya rechazada, o mandar "cambios" sobre un pedido ya autorizado y
+   * devolverlo a Diseño con sus tareas de producción en curso.
+   */
+  private async assertRevisionAwaitingResponse(
+    orderId: number,
+    revision: {
+      id: number;
+      round: number;
+      approved: boolean;
+      feedbackText: string | null;
+    },
+  ) {
+    const stale = () =>
+      new HttpException(
+        'Esta ronda ya fue respondida. Recargá el pedido para ver su estado actual.',
+        HttpStatus.CONFLICT,
+      );
+    if (revision.approved || revision.feedbackText) throw stale();
+    const newer = await this.prisma.designRevision.findFirst({
+      where: { orderId, round: { gt: revision.round } },
+      select: { id: true },
+    });
+    if (newer) throw stale();
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: { select: { name: true } } },
+    });
+    if (
+      order?.status?.name?.toLowerCase() !== STATUS_NAME_ESPERANDO_AUTORIZACION
+    ) {
+      throw stale();
+    }
+  }
+
+  /**
    * POST /orders/:id/design-revisions — Diseño arma una nueva ronda (montaje)
    * y el pedido pasa a "esperando autorización". Notifica a Recepción.
    */
@@ -2097,6 +2135,7 @@ export class OrderService {
       orderId,
       revisionId,
     );
+    await this.assertRevisionAwaitingResponse(orderId, existingRevision);
     const feedbackFiles = this.resolveRevisionFiles(
       dto.feedbackFiles,
       dto.feedbackFile,
@@ -2223,7 +2262,11 @@ export class OrderService {
     requestingUser: RequestingUser,
   ) {
     await this.assertOrderAccess(orderId, requestingUser);
-    await this.getDesignRevisionOrThrow(orderId, revisionId);
+    const revisionToApprove = await this.getDesignRevisionOrThrow(
+      orderId,
+      revisionId,
+    );
+    await this.assertRevisionAwaitingResponse(orderId, revisionToApprove);
     const order = await this.getOrderOrThrow(orderId);
 
     // La hoja de materiales se tiene que cargar ANTES de autorizar: producción
@@ -2324,14 +2367,27 @@ export class OrderService {
       await this.notificationService.createNotificationForUsers(areaUserIds, {
         type: 'design_approved',
         title: 'Diseño autorizado, listo para producción',
-        body: `Pedido #${orderId}: diseño autorizado, pasa a ${area}`,
+        body: `Pedido #${orderId}: diseño autorizado, pasa a ${chatAreaLabel(area)}`,
         orderId,
       });
       this.notificationsGateway.notifyNewOrderToArea(area, {
         orderId,
-        description: `Diseño autorizado, pedido listo para producción en ${area}`,
+        description: `Diseño autorizado, pedido listo para producción en ${chatAreaLabel(area)}`,
         area,
         deliveryDate: null,
+      });
+    }
+
+    // Cierre del circuito para Diseño: quien armó el montaje se entera de
+    // que el cliente lo autorizó (antes sólo se avisaba a producción).
+    const designerId = revisionToApprove.sentByUserId;
+    if (designerId && designerId !== requestingUser.userId) {
+      await this.notificationService.createNotification({
+        userId: designerId,
+        type: 'design_approved',
+        title: 'El cliente autorizó el diseño',
+        body: `Pedido #${orderId}: pasa a ${resolvedAreas.map(chatAreaLabel).join(', ')}`,
+        orderId,
       });
     }
 
