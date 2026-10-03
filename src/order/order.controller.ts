@@ -17,6 +17,7 @@ import { Throttle } from '@nestjs/throttler';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { StartDesignDto } from './dto/start-design.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { CreateOrderNoteDto } from './dto/create-order-note.dto';
 import {
@@ -308,6 +309,25 @@ export class OrderController {
    * Sin ADMIN a propósito: admin genera pedidos pero no los trabaja. El
    * único rol que puede hacer de todo es SUPERUSER.
    */
+  /**
+   * Diseño marca que empezó el montaje (sin cambiar responsable ni estado).
+   * Desde la cuenta compartida pide el nombre de quien lo empieza.
+   */
+  @HttpCode(HttpStatus.OK)
+  @Auth(Role.DISENO, Role.SUPERUSER)
+  @Post(':id/start-design')
+  startDesign(
+    @Param('id') id: string,
+    @Body() dto: StartDesignDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderService.startDesign(+id, dto, {
+      userId: user.sub,
+      roles: user.roles,
+      username: user.username,
+    });
+  }
+
   @HttpCode(HttpStatus.OK)
   @Auth(Role.DISENO, Role.SUPERUSER)
   @Post(':id/take-design')

@@ -395,7 +395,12 @@ describe('Diseño: tomar un pedido de la cuenta compartida (WORKFLOW.md §1.a)',
     expect(prisma.order.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 1 },
-        data: { assignedUser: { connect: { id: designer.userId } } },
+        data: expect.objectContaining({
+          assignedUser: { connect: { id: designer.userId } },
+          // Tomarlo también lo marca como empezado.
+          designStartedAt: expect.any(Date),
+          designStartedByUserId: designer.userId,
+        }),
       }),
     );
     expect(prisma.orderAuditLog.create).toHaveBeenCalledWith(
@@ -581,5 +586,71 @@ describe('Alta del pedido: archivo de recursos del cliente (rename)', () => {
       }),
     ).rejects.toBeInstanceOf(HttpException);
     expect(prisma.order.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('Diseño: "Empezar diseño" (POST /orders/:id/start-design)', () => {
+  const designOrder = (extra: Record<string, unknown> = {}) =>
+    ({
+      id: 1,
+      area: 'diseno',
+      requiresDesign: true,
+      designStartedAt: null,
+      assignedUserId: DESIGN_SHARED_ACCOUNT_ID,
+      userId: CREATOR_USER_ID,
+      attendedByUserId: null,
+      ...extra,
+    }) as unknown as OrderRow;
+
+  it('desde la cuenta compartida pide el nombre de quien lo empieza', async () => {
+    const prisma = makePrisma(designOrder());
+    prisma.user.findUnique.mockResolvedValue({
+      id: designer.userId,
+      roles: [{ name: 'diseno' }],
+      isSharedAccount: true,
+    });
+    const service = buildOrderService(prisma);
+
+    await expect(service.startDesign(1, {}, designer)).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(prisma.order.update).not.toHaveBeenCalled();
+  });
+
+  it('guarda cuándo y quién lo empezó, sin tocar responsable ni estado', async () => {
+    const prisma = makePrisma(designOrder());
+    const service = buildOrderService(prisma);
+
+    await service.startDesign(1, { name: 'Dani' }, designer);
+
+    const data = prisma.order.update.mock.calls.at(-1)?.[0].data;
+    expect(data).toEqual({
+      designStartedAt: expect.any(Date),
+      designStartedByName: 'Dani',
+      designStartedByUserId: designer.userId,
+    });
+    expect(prisma.orderAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'design_started' }),
+      }),
+    );
+  });
+
+  it('si ya estaba empezado no lo pisa', async () => {
+    const prisma = makePrisma(designOrder({ designStartedAt: new Date() }));
+    const service = buildOrderService(prisma);
+
+    await service.startDesign(1, { name: 'Otro' }, designer);
+
+    expect(prisma.order.update).not.toHaveBeenCalled();
+  });
+
+  it('un pedido que ya no está en Diseño no se puede empezar', async () => {
+    const prisma = makePrisma(designOrder({ area: 'taller' }));
+    const service = buildOrderService(prisma);
+
+    await expect(
+      service.startDesign(1, { name: 'Dani' }, designer),
+    ).rejects.toBeInstanceOf(HttpException);
   });
 });
