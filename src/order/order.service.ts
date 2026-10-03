@@ -33,6 +33,7 @@ import { OrderAreaTaskService } from './order-area-task.service';
 import { StatusIdResolver } from './status-id-resolver';
 import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
 import { chatAreaLabel } from 'src/chat/chat.constants';
+import { StartDesignDto } from './dto/start-design.dto';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -768,6 +769,10 @@ export class OrderService {
       // autorizar el montaje). El frontend filtra por esto; el pedido sigue
       // existiendo en el historial. Ver WORKFLOW.md §2.
       archivedAt: true,
+      // "Empezar diseño": sin esto el tablero no distingue un pedido que
+      // nadie abrió de uno que ya se está trabajando.
+      designStartedAt: true,
+      designStartedByName: true,
       materialsPriority: true,
       description: true,
       creationDate: true,
@@ -1450,6 +1455,7 @@ export class OrderService {
       select: {
         id: true,
         assignedUserId: true,
+        designStartedAt: true,
         assignedUser: {
           select: {
             id: true,
@@ -1484,7 +1490,17 @@ export class OrderService {
     await this.prisma.$transaction([
       this.prisma.order.update({
         where: { id: orderId },
-        data: { assignedUser: { connect: { id: requestingUser.userId } } },
+        data: {
+          assignedUser: { connect: { id: requestingUser.userId } },
+          // Tomarlo es empezarlo: si nadie lo había marcado, queda a su nombre.
+          ...(order.designStartedAt == null && {
+            designStartedAt: new Date(),
+            designStartedByName: await this.userDisplayName(
+              requestingUser.userId,
+            ),
+            designStartedByUserId: requestingUser.userId,
+          }),
+        },
       }),
       this.prisma.orderAuditLog.create({
         data: {
@@ -1495,6 +1511,89 @@ export class OrderService {
               after: requestingUser.userId,
             },
           } as Prisma.InputJsonValue,
+          order: { connect: { id: orderId } },
+          user: { connect: { id: requestingUser.userId } },
+        },
+      }),
+    ]);
+
+    return this.findOrderForWriteResponse(orderId);
+  }
+
+  /** Nombre visible de un usuario ("Ana Ruiz", o el username si no tiene). */
+  private async userDisplayName(userId: number): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true, username: true },
+    });
+    const full = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
+    return full || user?.username || 'Diseño';
+  }
+
+  /**
+   * POST /orders/:id/start-design — Diseño marca que EMPEZÓ el montaje. Con
+   * la cuenta compartida ("Cualquier diseñador") nadie podía "tomar" el
+   * pedido, así que Recepción no distinguía "nadie lo abrió" de "se está
+   * haciendo". No cambia el responsable ni el estado; es idempotente (si ya
+   * estaba empezado, devuelve el pedido tal cual).
+   */
+  async startDesign(
+    orderId: number,
+    dto: StartDesignDto,
+    requestingUser: RequestingUser,
+  ) {
+    await this.assertOrderAccess(orderId, requestingUser);
+    await this.assertUserBelongsToArea(requestingUser.userId, Role.DISENO);
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        area: true,
+        requiresDesign: true,
+        designStartedAt: true,
+      },
+    });
+    if (!order) {
+      throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
+    }
+    if (!order.requiresDesign || order.area !== Role.DISENO) {
+      throw new HttpException(
+        'El pedido no está en Diseño',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (order.designStartedAt) {
+      return this.findOrderForWriteResponse(orderId);
+    }
+
+    const account = await this.prisma.user.findUnique({
+      where: { id: requestingUser.userId },
+      select: { isSharedAccount: true },
+    });
+    const name = dto.name?.trim();
+    if (account?.isSharedAccount && !name) {
+      throw new HttpException(
+        'Escribí tu nombre: esta cuenta la usan varias personas',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const startedByName =
+      name || (await this.userDisplayName(requestingUser.userId));
+
+    await this.prisma.$transaction([
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          designStartedAt: new Date(),
+          designStartedByName: startedByName,
+          designStartedByUserId: requestingUser.userId,
+        },
+      }),
+      this.prisma.orderAuditLog.create({
+        data: {
+          action: 'design_started',
+          changes: { startedBy: startedByName } as Prisma.InputJsonValue,
           order: { connect: { id: orderId } },
           user: { connect: { id: requestingUser.userId } },
         },
