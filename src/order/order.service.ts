@@ -1,3 +1,5 @@
+import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
+import { formatOrderCode, parseOrderCode } from './order-code';
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import { PrismaService } from '../prisma/prisma.service';
@@ -692,7 +694,7 @@ export class OrderService {
             userId: order.assignedUserId!,
             type: 'order_assigned',
             title: 'Nuevo pedido asignado',
-            body: `Pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} asignado`,
+            body: `Pedido ${formatOrderCode(order.id)}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} asignado`,
             orderId: order.id,
           });
         } else if (order.area) {
@@ -715,7 +717,7 @@ export class OrderService {
             {
               type: 'order_assigned',
               title: 'Nuevo pedido en el área',
-              body: `Nuevo pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} para ${chatAreaLabel(order.area)}: lo toma quien esté libre`,
+              body: `Nuevo pedido ${formatOrderCode(order.id)}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} para ${chatAreaLabel(order.area)}: lo toma quien esté libre`,
               orderId: order.id,
             },
           );
@@ -891,8 +893,51 @@ export class OrderService {
    * con `deliveredAt` + `GET /settings`). Siempre ordenado por
    * `creationDate desc` y paginado igual que `findAll`.
    */
+  /**
+   * Filtros del Historial y del export CSV. `q` busca por código de pedido
+   * ("EMD-P0042", "42"), cliente, empresa o descripción; un número también
+   * puede ser parte del texto, así que el código se suma con OR.
+   */
+  private historyFiltersWhere(filters: {
+    q?: string;
+    statusId?: number;
+    area?: string;
+    clientId?: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Prisma.OrderWhereInput {
+    const where: Prisma.OrderWhereInput[] = [];
+    if (filters.statusId) where.push({ statusId: filters.statusId });
+    if (filters.area) where.push({ area: filters.area });
+    if (filters.clientId) where.push({ clientId: filters.clientId });
+    if (filters.dateFrom || filters.dateTo) {
+      where.push({
+        creationDate: {
+          ...(filters.dateFrom && { gte: new Date(filters.dateFrom) }),
+          ...(filters.dateTo && { lte: new Date(filters.dateTo) }),
+        },
+      });
+    }
+    const q = filters.q?.trim();
+    if (q) {
+      const contains = { contains: q, mode: 'insensitive' as const };
+      const orderId = parseOrderCode(q);
+      where.push({
+        OR: [
+          ...(orderId ? [{ id: orderId }] : []),
+          { description: contains },
+          { clientNameOverride: contains },
+          { client: { first_name: contains } },
+          { client: { last_name: contains } },
+          { client: { company: { name: contains } } },
+        ],
+      });
+    }
+    return where.length > 0 ? { AND: where } : {};
+  }
+
   async findHistory(
-    query?: PaginationQueryDto,
+    query?: OrderHistoryQueryDto,
     requestingUser?: RequestingUser,
   ) {
     try {
@@ -900,11 +945,15 @@ export class OrderService {
       // Paginación siempre activa para /orders/history (a diferencia de
       // `findAll`, que es opt-in): evita traer todo el histórico sin límite.
       const { page, limit, skip } = resolvePagination(query ?? {});
-      const where = this.orderVisibilityWhere(requestingUser);
+      const visibilityWhere = this.orderVisibilityWhere(requestingUser);
 
-      if (where === null) {
+      if (visibilityWhere === null) {
         return buildPaginatedResult([], 0, page, limit);
       }
+      // `AND`: el filtro pedido (ej. `area`) nunca pisa la visibilidad por rol.
+      const where: Prisma.OrderWhereInput = {
+        AND: [visibilityWhere, this.historyFiltersWhere(query ?? {})],
+      };
 
       // Filtro por área/rol y paginación resueltos en la base, no trayendo
       // TODO el histórico a memoria para filtrar y recién ahí paginar (ver
@@ -1016,8 +1065,8 @@ export class OrderService {
     );
     const summary = changedLabels.join(', ');
     const updatedByUsername = requestingUser.username ?? 'Un usuario';
-    const title = `${updatedByUsername} actualizó el pedido #${orderId}`;
-    const body = `${updatedByUsername} modificó ${summary} del pedido #${orderId}`;
+    const title = `${updatedByUsername} actualizó el pedido ${formatOrderCode(orderId)}`;
+    const body = `${updatedByUsername} modificó ${summary} del pedido ${formatOrderCode(orderId)}`;
 
     const recepcionUserIds =
       await this.notificationService.userIdsForArea('recepcion');
@@ -1059,8 +1108,8 @@ export class OrderService {
   ) {
     const changedByUsername = requestingUser?.username ?? 'Un usuario';
     const changedAt = new Date();
-    const title = `Cambio de estado del pedido #${orderId}`;
-    const body = `${changedByUsername} cambió el estado del pedido #${orderId} de "${previousStatusName}" a "${newStatusName}"`;
+    const title = `Cambio de estado del pedido ${formatOrderCode(orderId)}`;
+    const body = `${changedByUsername} cambió el estado del pedido ${formatOrderCode(orderId)} de "${previousStatusName}" a "${newStatusName}"`;
 
     const recipientIds =
       await this.notificationService.userIdsForArea('recepcion');
@@ -1313,7 +1362,7 @@ export class OrderService {
           userId: updatedOrder.assignedUserId,
           type: 'order_assigned',
           title: 'Te asignaron un pedido',
-          body: `Pedido #${updatedOrder.id}${clientName ? ` de ${clientName}` : ''} ahora está a tu nombre`,
+          body: `Pedido ${formatOrderCode(updatedOrder.id)}${clientName ? ` de ${clientName}` : ''} ahora está a tu nombre`,
           orderId: updatedOrder.id,
         });
       }
@@ -2199,7 +2248,7 @@ export class OrderService {
         userId: receptionOwnerId,
         type: 'design_montage_sent',
         title: 'Montaje listo para enviar al cliente',
-        body: `Pedido #${orderId}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
+        body: `Pedido ${formatOrderCode(orderId)}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
         orderId,
       });
       this.notificationsGateway.notifyNewAssignedOrder(receptionOwnerId, {
@@ -2316,7 +2365,7 @@ export class OrderService {
         userId: previousDesignerId,
         type: 'design_feedback_added',
         title: 'El cliente pidió cambios',
-        body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
+        body: `Pedido ${formatOrderCode(orderId)}: el cliente pidió cambios sobre el montaje`,
         orderId,
       });
       this.notificationsGateway.notifyNewAssignedOrder(previousDesignerId, {
@@ -2331,7 +2380,7 @@ export class OrderService {
       await this.notificationService.createNotificationForUsers(disenoUserIds, {
         type: 'design_feedback_added',
         title: 'El cliente pidió cambios',
-        body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
+        body: `Pedido ${formatOrderCode(orderId)}: el cliente pidió cambios sobre el montaje`,
         orderId,
       });
       this.notificationsGateway.notifyNewOrderToArea('diseno', {
@@ -2466,7 +2515,7 @@ export class OrderService {
       await this.notificationService.createNotificationForUsers(areaUserIds, {
         type: 'design_approved',
         title: 'Diseño autorizado, listo para producción',
-        body: `Pedido #${orderId}: diseño autorizado, pasa a ${chatAreaLabel(area)}`,
+        body: `Pedido ${formatOrderCode(orderId)}: diseño autorizado, pasa a ${chatAreaLabel(area)}`,
         orderId,
       });
       this.notificationsGateway.notifyNewOrderToArea(area, {
@@ -2485,7 +2534,7 @@ export class OrderService {
         userId: designerId,
         type: 'design_approved',
         title: 'El cliente autorizó el diseño',
-        body: `Pedido #${orderId}: pasa a ${resolvedAreas.map(chatAreaLabel).join(', ')}`,
+        body: `Pedido ${formatOrderCode(orderId)}: pasa a ${resolvedAreas.map(chatAreaLabel).join(', ')}`,
         orderId,
       });
     }
@@ -2636,6 +2685,7 @@ export class OrderService {
    */
   async exportOrders(
     filters: {
+      q?: string;
       dateFrom?: string;
       dateTo?: string;
       statusId?: number;
@@ -2649,17 +2699,7 @@ export class OrderService {
       return [];
     }
 
-    const requestedFilters: Prisma.OrderWhereInput = {
-      ...(filters.statusId && { statusId: filters.statusId }),
-      ...(filters.area && { area: filters.area }),
-      ...(filters.clientId && { clientId: filters.clientId }),
-      ...((filters.dateFrom || filters.dateTo) && {
-        creationDate: {
-          ...(filters.dateFrom && { gte: new Date(filters.dateFrom) }),
-          ...(filters.dateTo && { lte: new Date(filters.dateTo) }),
-        },
-      }),
-    };
+    const requestedFilters = this.historyFiltersWhere(filters);
     // `AND` en vez de spread: tanto `requestedFilters.area` (filtro pedido
     // por el cliente) como `visibilityWhere.area` (rol operativo) pueden
     // setear la misma clave `area`; con spread una pisaría a la otra y un
@@ -2704,6 +2744,7 @@ export class OrderService {
 
     return orders.map((order) => ({
       id: order.id,
+      codigo: formatOrderCode(order.id),
       cliente: order.client?.first_name ?? order.clientNameOverride ?? '',
       area: order.area ?? '',
       estado: order.status?.name ?? '',
