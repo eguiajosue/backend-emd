@@ -30,6 +30,7 @@ import { SupplierModule } from './supplier/supplier.module';
 import { MaterialCategoryModule } from './material-category/material-category.module';
 import { MaterialUnitModule } from './material-unit/material-unit.module';
 import { MaterialModule } from './material/material.module';
+import { InventoryModule } from './inventory/inventory.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -78,6 +79,7 @@ import { AppController } from './app.controller';
     MaterialCategoryModule,
     MaterialUnitModule,
     MaterialModule,
+    InventoryModule,
   ],
   providers: [
     {
