@@ -233,7 +233,10 @@ describe('OrderService - exportOrders no permite saltar el filtro de área con ?
         // Simula un `where` de Prisma con `AND: [visibilityWhere, requestedFilters]`
         // (o un `where` plano, para el caso sin restricción de visibilidad).
         findMany: jest.fn(({ where }: any = {}) => {
-          const clauses: any[] = where?.AND ?? [where ?? {}];
+          // Los filtros pedidos vienen anidados en su propio `AND`.
+          const flatten = (w: any): any[] =>
+            w?.AND ? w.AND.flatMap(flatten) : [w ?? {}];
+          const clauses: any[] = flatten(where);
           const result = orders.filter((o) =>
             clauses.every((clause) => {
               if (clause?.area?.in) return clause.area.in.includes(o.area);

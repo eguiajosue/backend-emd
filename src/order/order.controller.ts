@@ -26,6 +26,7 @@ import {
   ApproveDesignRevisionDto,
 } from './dto/design-revision.dto';
 import { OrderExportQueryDto } from './dto/order-export-query.dto';
+import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 import { ReorderMaterialsPriorityDto } from './dto/reorder-materials-priority.dto';
 import {
@@ -138,7 +139,7 @@ export class OrderController {
   )
   @Get('history')
   findHistory(
-    @Query() query: PaginationQueryDto,
+    @Query() query: OrderHistoryQueryDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
     return this.orderService.findHistory(query, {
@@ -200,6 +201,7 @@ export class OrderController {
   ) {
     const rows = await this.orderService.exportOrders(
       {
+        q: query.q,
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
         statusId: query.statusId,
@@ -211,7 +213,7 @@ export class OrderController {
 
     const csv = toCsv(
       [
-        'ID',
+        'Código',
         'Cliente',
         'Área',
         'Estado',
@@ -221,7 +223,7 @@ export class OrderController {
         'Descripción',
       ],
       rows.map((r) => [
-        r.id,
+        r.codigo,
         r.cliente,
         r.area,
         r.estado,
