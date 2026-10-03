@@ -542,6 +542,15 @@ export class OrderService {
         );
       }
 
+      // Sin montaje el pedido va directo a producción: Diseño no es un
+      // destino válido (para eso está requiresDesign=true). WORKFLOW.md §1.b.
+      if (!needsDesign && area === Role.DISENO) {
+        throw new HttpException(
+          'Un pedido sin diseño debe ir a un área de producción, no a Diseño',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
       const trimmedClientNameOverride = clientNameOverride?.trim();
       if (!clientId && !trimmedClientNameOverride) {
         throw new HttpException(
