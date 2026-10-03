@@ -563,6 +563,15 @@ describe('Alta del pedido: archivo de recursos del cliente (rename)', () => {
     );
   });
 
+  it('sin diseño, Diseño no es un destino válido', async () => {
+    const { service, prisma } = buildForCreate();
+
+    await expect(
+      service.create({ ...baseDto, requiresDesign: false, area: 'diseno' }),
+    ).rejects.toThrow('Un pedido sin diseño debe ir a un área de producción');
+    expect(prisma.order.create).not.toHaveBeenCalled();
+  });
+
   it('el archivo del cliente sigue siendo opcional', async () => {
     const { service, prisma } = buildForCreate();
 
