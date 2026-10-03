@@ -32,6 +32,7 @@ import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 import { OrderAreaTaskService } from './order-area-task.service';
 import { StatusIdResolver } from './status-id-resolver';
 import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
+import { chatAreaLabel } from 'src/chat/chat.constants';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -664,11 +665,18 @@ export class OrderService {
 
         this.notificationsGateway.notifyNewOrderToAdmin(adminNotificationData);
 
-        if (order.assignedUserId) {
+        // "Cualquier diseñador" (o cualquiera del área) se guarda como la
+        // cuenta COMPARTIDA del área: avisarle sólo a esa cuenta dejaba sin
+        // aviso a quienes entran con su usuario propio. En ese caso se avisa a
+        // todo el área, igual que un pedido sin asignar.
+        const assignedToPerson =
+          order.assignedUserId != null &&
+          order.assignedUser?.isSharedAccount !== true;
+        if (assignedToPerson) {
           // Pedido asignado directamente a un usuario: notificación dirigida
           // solo a él, además de la del admin.
           this.notificationsGateway.notifyNewAssignedOrder(
-            order.assignedUserId,
+            order.assignedUserId!,
             {
               orderId: order.id,
               description: order.description,
@@ -680,7 +688,7 @@ export class OrderService {
           // Persistencia: misma notificación, para que no se pierda si el
           // usuario asignado no tenía sesión abierta en ese momento.
           await this.notificationService.createNotification({
-            userId: order.assignedUserId,
+            userId: order.assignedUserId!,
             type: 'order_assigned',
             title: 'Nuevo pedido asignado',
             body: `Pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} asignado`,
@@ -706,7 +714,7 @@ export class OrderService {
             {
               type: 'order_assigned',
               title: 'Nuevo pedido en el área',
-              body: `Nuevo pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} sin asignar en ${order.area}`,
+              body: `Nuevo pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} para ${chatAreaLabel(order.area)}: lo toma quien esté libre`,
               orderId: order.id,
             },
           );
@@ -1124,6 +1132,17 @@ export class OrderService {
         throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
       }
 
+      // Reasignar un pedido que está en Diseño: el nuevo responsable tiene
+      // que ser de Diseño (o su cuenta compartida). Antes el "Editar" dejaba
+      // asignarle un pedido en diseño a alguien de Taller o a un admin.
+      if (
+        hasAssignedUserId &&
+        assignedUserId != null &&
+        (area ?? existingOrder.area) === Role.DISENO
+      ) {
+        await this.assertUserBelongsToArea(assignedUserId, Role.DISENO);
+      }
+
       // Auditoría: diff de los campos "editables" relevantes (no incluye
       // cambio de estado, que ya queda registrado en OrderHistory).
       const auditChanges: Record<string, { before: unknown; after: unknown }> =
@@ -1261,6 +1280,37 @@ export class OrderService {
           updatedOrder.assignedUserId,
           requestingUser,
         );
+      }
+
+      // Se lo reasignaron a una persona: avisarle (WS + persistida), igual
+      // que al crear el pedido. No se avisa a quien se lo asigna a sí mismo
+      // ni a una cuenta compartida (eso es "cualquiera del área").
+      if (
+        hasAssignedUserId &&
+        updatedOrder.assignedUserId != null &&
+        updatedOrder.assignedUserId !== existingOrder.assignedUserId &&
+        updatedOrder.assignedUserId !== requestingUserId &&
+        updatedOrder.assignedUser?.isSharedAccount !== true
+      ) {
+        const clientName =
+          updatedOrder.client?.first_name || updatedOrder.clientNameOverride;
+        this.notificationsGateway.notifyNewAssignedOrder(
+          updatedOrder.assignedUserId,
+          {
+            orderId: updatedOrder.id,
+            description: updatedOrder.description,
+            area: updatedOrder.area,
+            deliveryDate: updatedOrder.deliveryDate,
+            clientName: clientName ?? undefined,
+          },
+        );
+        await this.notificationService.createNotification({
+          userId: updatedOrder.assignedUserId,
+          type: 'order_assigned',
+          title: 'Te asignaron un pedido',
+          body: `Pedido #${updatedOrder.id}${clientName ? ` de ${clientName}` : ''} ahora está a tu nombre`,
+          orderId: updatedOrder.id,
+        });
       }
 
       if (Object.keys(auditChanges).length > 0 && requestingUserId) {
@@ -1928,6 +1978,44 @@ export class OrderService {
   }
 
   /**
+   * La respuesta del cliente (cambios o autorización) sólo vale sobre la
+   * ronda VIGENTE de un pedido que está esperando esa respuesta. Sin esto, una
+   * pestaña vieja o dos personas de Recepción a la vez podían autorizar una
+   * ronda ya rechazada, o mandar "cambios" sobre un pedido ya autorizado y
+   * devolverlo a Diseño con sus tareas de producción en curso.
+   */
+  private async assertRevisionAwaitingResponse(
+    orderId: number,
+    revision: {
+      id: number;
+      round: number;
+      approved: boolean;
+      feedbackText: string | null;
+    },
+  ) {
+    const stale = () =>
+      new HttpException(
+        'Esta ronda ya fue respondida. Recargá el pedido para ver su estado actual.',
+        HttpStatus.CONFLICT,
+      );
+    if (revision.approved || revision.feedbackText) throw stale();
+    const newer = await this.prisma.designRevision.findFirst({
+      where: { orderId, round: { gt: revision.round } },
+      select: { id: true },
+    });
+    if (newer) throw stale();
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: { select: { name: true } } },
+    });
+    if (
+      order?.status?.name?.toLowerCase() !== STATUS_NAME_ESPERANDO_AUTORIZACION
+    ) {
+      throw stale();
+    }
+  }
+
+  /**
    * POST /orders/:id/design-revisions — Diseño arma una nueva ronda (montaje)
    * y el pedido pasa a "esperando autorización". Notifica a Recepción.
    */
@@ -2047,6 +2135,7 @@ export class OrderService {
       orderId,
       revisionId,
     );
+    await this.assertRevisionAwaitingResponse(orderId, existingRevision);
     const feedbackFiles = this.resolveRevisionFiles(
       dto.feedbackFiles,
       dto.feedbackFile,
@@ -2173,7 +2262,11 @@ export class OrderService {
     requestingUser: RequestingUser,
   ) {
     await this.assertOrderAccess(orderId, requestingUser);
-    await this.getDesignRevisionOrThrow(orderId, revisionId);
+    const revisionToApprove = await this.getDesignRevisionOrThrow(
+      orderId,
+      revisionId,
+    );
+    await this.assertRevisionAwaitingResponse(orderId, revisionToApprove);
     const order = await this.getOrderOrThrow(orderId);
 
     // La hoja de materiales se tiene que cargar ANTES de autorizar: producción
@@ -2274,14 +2367,27 @@ export class OrderService {
       await this.notificationService.createNotificationForUsers(areaUserIds, {
         type: 'design_approved',
         title: 'Diseño autorizado, listo para producción',
-        body: `Pedido #${orderId}: diseño autorizado, pasa a ${area}`,
+        body: `Pedido #${orderId}: diseño autorizado, pasa a ${chatAreaLabel(area)}`,
         orderId,
       });
       this.notificationsGateway.notifyNewOrderToArea(area, {
         orderId,
-        description: `Diseño autorizado, pedido listo para producción en ${area}`,
+        description: `Diseño autorizado, pedido listo para producción en ${chatAreaLabel(area)}`,
         area,
         deliveryDate: null,
+      });
+    }
+
+    // Cierre del circuito para Diseño: quien armó el montaje se entera de
+    // que el cliente lo autorizó (antes sólo se avisaba a producción).
+    const designerId = revisionToApprove.sentByUserId;
+    if (designerId && designerId !== requestingUser.userId) {
+      await this.notificationService.createNotification({
+        userId: designerId,
+        type: 'design_approved',
+        title: 'El cliente autorizó el diseño',
+        body: `Pedido #${orderId}: pasa a ${resolvedAreas.map(chatAreaLabel).join(', ')}`,
+        orderId,
       });
     }
 

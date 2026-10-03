@@ -623,9 +623,9 @@ export class OrderController {
   }
 
   /**
-   * Hoja de materiales del pedido: opcional, no bloquea autorizar el
-   * montaje. La carga Recepción (o admin/superuser) cuando el pedido pasa
-   * a producción, para que el área sepa qué se va a usar.
+   * Hoja de materiales del pedido: hace falta al menos una línea para
+   * autorizar el montaje (ver approveDesignRevision). La carga Recepción (o
+   * admin/superuser) para que producción sepa qué se va a usar.
    */
   @Auth(
     Role.RECEPCION,
