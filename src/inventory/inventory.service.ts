@@ -99,9 +99,9 @@ export function stockStatusOf(
  * vincularse a un material del catálogo, pero muchos consumibles (hilos de
  * bordado, tintas) sólo existen acá.
  *
- * Acceso: admin/superuser/recepción gestionan todos los departamentos; cada
- * rol de área ve y mueve sólo el inventario de su(s) área(s). Borrar un
- * artículo (y con él su kardex) queda para admin/superuser/recepción.
+ * Acceso: admin/superuser/recepción ven y gestionan (crean, editan, borran y
+ * registran movimientos) todos los departamentos; cada rol de área sólo
+ * CONSULTA el inventario de su(s) área(s).
  */
 @Injectable()
 export class InventoryService {
@@ -122,6 +122,18 @@ export class InventoryService {
     if (!this.areasFor(actor.roles).includes(area as InventoryArea)) {
       throw new ForbiddenException(
         'No tenés acceso al inventario de ese departamento',
+      );
+    }
+  }
+
+  /**
+   * Crear, editar, borrar y mover stock es sólo para admin/superuser/
+   * recepción: las áreas consultan su inventario en modo lectura.
+   */
+  private assertCanManage(actor: Actor) {
+    if (!isFullVisibilityRole(actor.roles)) {
+      throw new ForbiddenException(
+        'Sólo administración o Recepción pueden modificar el inventario',
       );
     }
   }
@@ -204,6 +216,7 @@ export class InventoryService {
   }
 
   async create(dto: CreateInventoryItemDto, actor: Actor) {
+    this.assertCanManage(actor);
     this.assertArea(actor, dto.area);
     const initial = dto.initialQuantity ?? 0;
     try {
@@ -252,6 +265,7 @@ export class InventoryService {
   }
 
   async update(id: number, dto: UpdateInventoryItemDto, actor: Actor) {
+    this.assertCanManage(actor);
     const before = await this.findRowOrThrow(id);
     this.assertArea(actor, before.area);
     if (dto.area !== undefined && dto.area !== before.area) {
@@ -284,11 +298,7 @@ export class InventoryService {
   }
 
   async remove(id: number, actor: Actor) {
-    if (!isFullVisibilityRole(actor.roles)) {
-      throw new ForbiddenException(
-        'Sólo administración o Recepción pueden borrar artículos del inventario',
-      );
-    }
+    this.assertCanManage(actor);
     await this.findRowOrThrow(id);
     await this.prisma.inventoryItem.delete({ where: { id } });
     return { success: true };
@@ -304,6 +314,7 @@ export class InventoryService {
     dto: CreateInventoryMovementDto,
     actor: Actor,
   ) {
+    this.assertCanManage(actor);
     const item = await this.findRowOrThrow(id);
     this.assertArea(actor, item.area);
 

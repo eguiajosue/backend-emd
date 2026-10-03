@@ -26,9 +26,10 @@ import {
 } from './dto/inventory-query.dto';
 
 /**
- * Inventario por departamento. Cualquier rol del taller entra, pero el
- * servicio recorta por área: cada departamento ve y mueve sólo lo suyo
- * (admin/superuser/recepción ven todo). Ver InventoryService.
+ * Inventario por departamento. Cualquier rol del taller entra a consultar,
+ * pero el servicio recorta por área (cada departamento ve sólo lo suyo) y
+ * deja crear/editar/borrar/mover stock sólo a admin/superuser/recepción.
+ * Ver InventoryService.
  */
 @ApiTags('inventory')
 @Auth(...ORDER_VIEWING_ROLES)

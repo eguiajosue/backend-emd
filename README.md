@@ -126,9 +126,9 @@ existen en inventario (conos de hilo de bordado, tintas de impresión...).
 - El stock (`quantity`) sólo cambia con `POST /inventory/:id/movements`:
   `ENTRADA` suma, `SALIDA` resta (nunca deja negativo, puede imputarse a un
   pedido con `orderId`) y `AJUSTE` fija el valor contado físicamente.
-- Admin/superuser/recepción ven todos los departamentos; cada rol de área sólo
-  el suyo (`GET /inventory/areas`). Borrar un artículo es sólo para
-  admin/superuser/recepción.
+- Admin/superuser/recepción ven todos los departamentos y son los únicos que
+  crean, editan, borran artículos y registran movimientos. Cada rol de área
+  sólo CONSULTA el inventario de su departamento (`GET /inventory/areas`).
 - Al cruzar el mínimo (`minStock`) o agotarse, se notifica (`inventory_low_stock`)
   al área, a Recepción y a admin.
 - `GET /inventory/export?area=` descarga el inventario en CSV.

@@ -10,6 +10,7 @@ import { NotificationService } from '../notification/notification.service';
 
 const admin = { sub: 1, roles: ['admin'] };
 const bordado = { sub: 2, roles: ['bordado'] };
+const recepcion = { sub: 2, roles: ['recepcion'] };
 
 const itemRow = (overrides: Record<string, unknown> = {}) => ({
   id: 7,
@@ -117,16 +118,43 @@ describe('InventoryService', () => {
       );
     });
 
-    it('rechaza dar de alta en otro departamento', async () => {
+    it('un rol de área sólo consulta: no crea, edita, borra ni mueve stock (ni en su área)', async () => {
       await expect(
-        service.create({ area: 'dtf', name: 'Film', unit: 'rollo' }, bordado),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('sólo administración/recepción pueden borrar', async () => {
+        service.create(
+          { area: 'bordado', name: 'Hilo', unit: 'cono' },
+          bordado,
+        ),
+      ).rejects.toThrow('Sólo administración o Recepción');
+      await expect(service.update(7, { name: 'X' }, bordado)).rejects.toThrow(
+        ForbiddenException,
+      );
       await expect(service.remove(7, bordado)).rejects.toThrow(
         ForbiddenException,
       );
+      await expect(
+        service.registerMovement(7, { type: 'SALIDA', quantity: 1 }, bordado),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.inventoryItem.create).not.toHaveBeenCalled();
+      expect(prisma.inventoryItem.update).not.toHaveBeenCalled();
+      expect(prisma.inventoryItem.delete).not.toHaveBeenCalled();
+      expect(prisma.inventoryMovement.create).not.toHaveBeenCalled();
+    });
+
+    it('un rol de área sí consulta el kardex de su departamento', async () => {
+      await expect(
+        service.findMovements(bordado, { itemId: 7 }),
+      ).resolves.toEqual([]);
+    });
+
+    it('admin y recepción crean, editan y borran en cualquier departamento', async () => {
+      await service.create(
+        { area: 'impresiones', name: 'Tinta', unit: 'litro' },
+        recepcion,
+      );
+      await service.update(7, { name: 'Y' }, recepcion);
+      await expect(service.remove(7, recepcion)).resolves.toEqual({
+        success: true,
+      });
       await expect(service.remove(7, admin)).resolves.toEqual({
         success: true,
       });
@@ -147,7 +175,7 @@ describe('InventoryService', () => {
   it('el alta con stock inicial deja una ENTRADA en el kardex', async () => {
     await service.create(
       { area: 'bordado', name: 'Hilo', unit: 'cono', initialQuantity: 12 },
-      bordado,
+      recepcion,
     );
     expect(prisma.inventoryItem.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -196,18 +224,12 @@ describe('InventoryService', () => {
     expect(data.brand).toBeUndefined();
   });
 
-  it('no deja mover un artículo a un departamento ajeno', async () => {
-    await expect(service.update(7, { area: 'dtf' }, bordado)).rejects.toThrow(
-      ForbiddenException,
-    );
-  });
-
   describe('movimientos', () => {
     it('ENTRADA suma y actualiza el costo de referencia', async () => {
       await service.registerMovement(
         7,
         { type: 'ENTRADA', quantity: 5, unitCost: 50 },
-        bordado,
+        recepcion,
       );
       const { data } = prisma.inventoryItem.update.mock.calls[0][0];
       expect(Number(data.quantity)).toBe(15);
@@ -221,7 +243,7 @@ describe('InventoryService', () => {
       await service.registerMovement(
         7,
         { type: 'SALIDA', quantity: 2.5, orderId: 99 },
-        bordado,
+        recepcion,
       );
       const movement = prisma.inventoryMovement.create.mock.calls[0][0].data;
       expect(Number(movement.delta)).toBe(-2.5);
@@ -231,19 +253,27 @@ describe('InventoryService', () => {
 
     it('SALIDA mayor al stock se rechaza', async () => {
       await expect(
-        service.registerMovement(7, { type: 'SALIDA', quantity: 11 }, bordado),
+        service.registerMovement(
+          7,
+          { type: 'SALIDA', quantity: 11 },
+          recepcion,
+        ),
       ).rejects.toThrow('Stock insuficiente');
       expect(prisma.inventoryItem.update).not.toHaveBeenCalled();
     });
 
     it('cantidad 0 sólo vale para un AJUSTE', async () => {
       await expect(
-        service.registerMovement(7, { type: 'ENTRADA', quantity: 0 }, bordado),
+        service.registerMovement(
+          7,
+          { type: 'ENTRADA', quantity: 0 },
+          recepcion,
+        ),
       ).rejects.toThrow(BadRequestException);
       await service.registerMovement(
         7,
         { type: 'AJUSTE', quantity: 0 },
-        bordado,
+        recepcion,
       );
       const movement = prisma.inventoryMovement.create.mock.calls[0][0].data;
       expect(Number(movement.delta)).toBe(-10);
@@ -254,7 +284,7 @@ describe('InventoryService', () => {
       await service.registerMovement(
         7,
         { type: 'AJUSTE', quantity: 8 },
-        bordado,
+        recepcion,
       );
       const movement = prisma.inventoryMovement.create.mock.calls[0][0].data;
       expect(Number(movement.delta)).toBe(-2);
@@ -267,7 +297,7 @@ describe('InventoryService', () => {
         service.registerMovement(
           7,
           { type: 'SALIDA', quantity: 1, orderId: 5 },
-          bordado,
+          recepcion,
         ),
       ).rejects.toThrow('El pedido no existe');
     });
@@ -276,7 +306,7 @@ describe('InventoryService', () => {
       await service.registerMovement(
         7,
         { type: 'SALIDA', quantity: 8 },
-        bordado,
+        recepcion,
       );
       await new Promise((resolve) => setImmediate(resolve));
       expect(notifications.userIdsForArea).toHaveBeenCalledWith('bordado');
@@ -296,7 +326,7 @@ describe('InventoryService', () => {
       await service.registerMovement(
         7,
         { type: 'SALIDA', quantity: 1 },
-        bordado,
+        recepcion,
       );
       await new Promise((resolve) => setImmediate(resolve));
       expect(notifications.createNotificationForUsers).not.toHaveBeenCalled();
