@@ -113,6 +113,26 @@ Todos los fallos se loguean con el error real del proveedor
 (`BugReportService`) y se devuelven al cliente como error: el endpoint nunca
 responde éxito sin haber enviado el email.
 
+## Inventario por departamento
+
+`/inventory` lleva las **existencias físicas** de cada departamento (taller,
+dtf, bordado, diseño, láser, impresiones y recepción) y su **kardex**.
+
+No es el catálogo de Materiales: `/materials` es la lista con la que se arma
+la hoja de materiales de un pedido. Un artículo de inventario puede vincularse
+a un material del catálogo (`materialId`), pero muchos consumibles sólo
+existen en inventario (conos de hilo de bordado, tintas de impresión...).
+
+- El stock (`quantity`) sólo cambia con `POST /inventory/:id/movements`:
+  `ENTRADA` suma, `SALIDA` resta (nunca deja negativo, puede imputarse a un
+  pedido con `orderId`) y `AJUSTE` fija el valor contado físicamente.
+- Admin/superuser/recepción ven todos los departamentos; cada rol de área sólo
+  el suyo (`GET /inventory/areas`). Borrar un artículo es sólo para
+  admin/superuser/recepción.
+- Al cruzar el mínimo (`minStock`) o agotarse, se notifica (`inventory_low_stock`)
+  al área, a Recepción y a admin.
+- `GET /inventory/export?area=` descarga el inventario en CSV.
+
 ## Scripts
 
 ```bash
