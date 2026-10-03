@@ -14,7 +14,9 @@ import type { RequestingUser } from './order.service';
 import {
   StatusIdResolver,
   STATUS_NAME_AUTORIZADO,
+  STATUS_NAME_CAMBIOS_SOLICITADOS,
   STATUS_NAME_CANCELADO,
+  STATUS_NAME_EN_DISENO,
   STATUS_NAME_ENTREGADO,
   STATUS_NAME_TERMINADO,
 } from './status-id-resolver';
@@ -43,6 +45,39 @@ const ALLOWED_TASK_TRANSITIONS: Record<AreaTaskStatus, AreaTaskStatus[]> = {
   ],
   [AreaTaskStatus.terminado]: [AreaTaskStatus.en_proceso],
 };
+
+/** Una entrada de la bandeja "Tareas asignadas" (ver `findMyTasks`). */
+export interface MyTaskItem {
+  key: string;
+  kind: 'design' | 'production';
+  area: string;
+  /** Id de la tarea de área; null para Diseño (el trabajo es el pedido). */
+  taskId: number | null;
+  /** Estado de la tarea de área, o nombre del estado de diseño del pedido. */
+  status: string;
+  /** A nombre de quien la pide (nunca desde la cuenta compartida). */
+  mine: boolean;
+  /** Responsable si es una persona; null si está libre. */
+  assignee: {
+    id: number;
+    firstName: string | null;
+    lastName: string | null;
+    username: string;
+  } | null;
+  startedAt: Date | null;
+  order: {
+    id: number;
+    description: string;
+    deliveryDate: Date | null;
+    creationDate: Date;
+    statusId: number;
+    clientNameOverride: string | null;
+    designStartedAt: Date | null;
+    designStartedByName: string | null;
+    client: { first_name: string; last_name: string | null } | null;
+    status: { id: number; name: string };
+  };
+}
 
 /** Roles que pueden reasignar cualquier tarea (ver WORKFLOW.md §5). */
 const TASK_MANAGER_ROLES: string[] = [
@@ -220,6 +255,138 @@ export class OrderAreaTaskService {
       },
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
     });
+  }
+
+  /**
+   * GET /orders/my-tasks — la bandeja de "Tareas asignadas" de Diseño y
+   * Producción: una entrada por TAREA (no por pedido), de todas las áreas del
+   * usuario. Sólo lo suyo y lo libre de sus áreas (sin responsable o en la
+   * cuenta compartida del área); lo que ya tomó un compañero no aparece.
+   *
+   * - Diseño: pedidos en "en diseño" o "cambios solicitados" (lo que espera
+   *   respuesta del cliente no es trabajo de Diseño).
+   * - Producción: tareas de área sin terminar, de pedidos que ya salieron de
+   *   Diseño (las planificadas antes de la autorización todavía no son
+   *   trabajo) y no están cerrados.
+   *
+   * Desde la cuenta compartida de un área nada cuenta como "tuyo": todo lo
+   * del área aparece como libre.
+   */
+  async findMyTasks(requestingUser: RequestingUser) {
+    const me = await this.prisma.user.findUnique({
+      where: { id: requestingUser.userId },
+      select: { isSharedAccount: true },
+    });
+    const isSharedLogin = me?.isSharedAccount === true;
+    const productionAreas = requestingUser.roles.filter((role) =>
+      (PRODUCTION_AREAS as readonly string[]).includes(role),
+    );
+    const designs = requestingUser.roles.includes(Role.DISENO);
+
+    const sharedAccounts = await this.prisma.user.findMany({
+      where: { isSharedAccount: true },
+      select: { id: true },
+    });
+    const sharedIds = new Set(sharedAccounts.map((u) => u.id));
+    const isFree = (assignedUserId: number | null) =>
+      assignedUserId === null || sharedIds.has(assignedUserId);
+    const isMine = (assignedUserId: number | null) =>
+      !isSharedLogin && assignedUserId === requestingUser.userId;
+    const visibleTo = (assignedUserId: number | null) =>
+      isFree(assignedUserId) || isMine(assignedUserId);
+
+    const orderSelect = {
+      id: true,
+      description: true,
+      deliveryDate: true,
+      creationDate: true,
+      statusId: true,
+      clientNameOverride: true,
+      designStartedAt: true,
+      designStartedByName: true,
+      client: { select: { first_name: true, last_name: true } },
+      status: { select: { id: true, name: true } },
+    } satisfies Prisma.OrderSelect;
+
+    const assigneeSelect = {
+      select: { id: true, firstName: true, lastName: true, username: true },
+    } satisfies Prisma.UserDefaultArgs;
+
+    const items: MyTaskItem[] = [];
+
+    if (designs) {
+      const designStatusIds = await Promise.all([
+        this.statusIds.idFor(STATUS_NAME_EN_DISENO),
+        this.statusIds.idFor(STATUS_NAME_CAMBIOS_SOLICITADOS),
+      ]);
+      const designOrders = await this.prisma.order.findMany({
+        where: {
+          requiresDesign: true,
+          area: Role.DISENO,
+          statusId: { in: designStatusIds },
+        },
+        select: {
+          ...orderSelect,
+          assignedUserId: true,
+          assignedUser: assigneeSelect,
+        },
+      });
+      for (const order of designOrders) {
+        if (!visibleTo(order.assignedUserId)) continue;
+        const { assignedUserId, assignedUser, ...rest } = order;
+        items.push({
+          key: `design-${order.id}`,
+          kind: 'design',
+          area: Role.DISENO,
+          taskId: null,
+          status: order.status.name,
+          mine: isMine(assignedUserId),
+          assignee: isFree(assignedUserId) ? null : assignedUser,
+          startedAt: order.designStartedAt,
+          order: rest,
+        });
+      }
+    }
+
+    if (productionAreas.length > 0) {
+      const closedStatusIds = await this.finalStatusIds();
+      const tasks = await this.prisma.orderAreaTask.findMany({
+        where: {
+          area: { in: productionAreas },
+          status: { not: AreaTaskStatus.terminado },
+          order: {
+            statusId: { notIn: closedStatusIds },
+            // Planificadas mientras el pedido sigue en Diseño: todavía no.
+            NOT: { area: Role.DISENO },
+          },
+        },
+        select: {
+          id: true,
+          area: true,
+          status: true,
+          assignedUserId: true,
+          startedAt: true,
+          assignedUser: assigneeSelect,
+          order: { select: orderSelect },
+        },
+      });
+      for (const task of tasks) {
+        if (!visibleTo(task.assignedUserId)) continue;
+        items.push({
+          key: `task-${task.id}`,
+          kind: 'production',
+          area: task.area,
+          taskId: task.id,
+          status: task.status,
+          mine: isMine(task.assignedUserId),
+          assignee: isFree(task.assignedUserId) ? null : task.assignedUser,
+          startedAt: task.startedAt,
+          order: task.order,
+        });
+      }
+    }
+
+    return items;
   }
 
   /** Tareas de un pedido, en orden de creación. */
