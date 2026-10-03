@@ -30,6 +30,7 @@ model Client {
   company        Company?        @relation(fields: [companyId], references: [id]) // Relación con Company.
   orders         Order[] // Relación uno a muchos con el modelo Order.
   calendarEvents CalendarEvent[] // Eventos del calendario de Recepción vinculados a este cliente.
+  orderTemplates OrderTemplate[] // Plantillas de pedido de este cliente (lo que suele pedir).
 
   @@index([companyId])
   @@index([last_name, first_name])
@@ -69,6 +70,7 @@ model User {
   chatDirectAsUserA       ChatConversation[]       @relation("ChatDirectUserA") // DMs donde es el participante de id menor.
   chatDirectAsUserB       ChatConversation[]       @relation("ChatDirectUserB") // DMs donde es el participante de id mayor.
   calendarEvents          CalendarEvent[]          @relation("CalendarEventCreatedBy") // Eventos del calendario de Recepción creados por este usuario.
+  orderTemplatesCreated   OrderTemplate[]          @relation("OrderTemplateCreatedBy") // Plantillas de pedido que guardó este usuario.
   calendarTasks           CalendarTask[]           @relation("CalendarTaskCreatedBy") // Tareas pendientes (sin fecha) del calendario de equipo creadas por este usuario.
   orderMaterialItems      OrderMaterialItem[]      @relation("OrderMaterialItemCreatedBy") // Líneas de hoja de materiales cargadas por este usuario.
   inventoryMovements      InventoryMovement[]      @relation("InventoryMovementCreatedBy") // Entradas/salidas/ajustes de inventario registrados por este usuario.
@@ -603,9 +605,10 @@ model Supplier {
   location  String // "nacional" | "local" | "internacional"
   createdAt DateTime @default(now())
 
-  materials          Material[]
-  orderMaterialItems OrderMaterialItem[]
-  inventoryItems     InventoryItem[]
+  materials              Material[]
+  orderMaterialItems     OrderMaterialItem[]
+  inventoryItems         InventoryItem[]
+  orderTemplateMaterials OrderTemplateMaterial[]
 
   @@index([location])
 }
@@ -637,8 +640,9 @@ model Material {
   unit     MaterialUnit?     @relation(fields: [unitId], references: [id])
   supplier Supplier?         @relation(fields: [supplierId], references: [id])
 
-  orderMaterialItems OrderMaterialItem[]
-  inventoryItems     InventoryItem[] // Existencias físicas de este material en los departamentos (un material puede no estar inventariado).
+  orderMaterialItems     OrderMaterialItem[]
+  orderTemplateMaterials OrderTemplateMaterial[] // Líneas de plantillas de pedido que usan este material.
+  inventoryItems         InventoryItem[] // Existencias físicas de este material en los departamentos (un material puede no estar inventariado).
 
   @@index([categoryId])
   @@index([unitId])
@@ -744,4 +748,65 @@ model InventoryMovement {
   @@index([itemId, createdAt])
   @@index([orderId])
   @@index([createdAt])
+}
+
+// ─── Plantillas de pedido por cliente ──────────────────────────────────────
+//
+// Lo que un cliente suele pedir, guardado con nombre ("Figuras de
+// coroplast"): productos y cantidades, descripción base, ruta de
+// diseño/producción y hoja de materiales. Recepción la elige al dar de alta
+// un pedido y el formulario se precarga (siempre editable). NO guarda fecha
+// de entrega ni archivo del cliente: cambian en cada pedido. Tampoco a quién
+// se asigna: la gente rota, se elige en el alta.
+
+model OrderTemplate {
+  id              Int       @id @default(autoincrement())
+  clientId        Int
+  name            String // Nombre visible, único por cliente.
+  requiresDesign  Boolean   @default(true)
+  productionAreas String[] // Áreas de producción (PRODUCTION_AREAS), la principal primero.
+  description     String    @default("") // Descripción base; puede quedar vacía.
+  useCount        Int       @default(0) // Pedidos creados con esta plantilla (ordena las más usadas primero).
+  lastUsedAt      DateTime?
+  createdById     Int? // Quién la guardó; queda en null si se borra el usuario.
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  client    Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy User?                   @relation("OrderTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  products  OrderTemplateProduct[]
+  materials OrderTemplateMaterial[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
+}
+
+model OrderTemplateProduct {
+  id         Int    @id @default(autoincrement())
+  templateId Int
+  position   Int // Orden en el que se muestran/copian las líneas.
+  customName String
+  quantity   Int
+
+  template OrderTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+
+model OrderTemplateMaterial {
+  id          Int    @id @default(autoincrement())
+  templateId  Int
+  position    Int
+  materialId  Int
+  quantity    Int
+  description String
+  supplierId  Int?
+
+  template OrderTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  // Borrar un material del catálogo no debe quedar bloqueado por una plantilla.
+  material Material      @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  supplier Supplier?     @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@index([templateId])
+  @@index([materialId])
 }
