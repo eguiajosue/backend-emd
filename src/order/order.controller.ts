@@ -169,6 +169,26 @@ export class OrderController {
       roles: user.roles,
     });
   }
+  /**
+   * Bandeja "Tareas asignadas" de Diseño y Producción: una entrada por tarea,
+   * sólo lo propio y lo libre de las áreas del usuario.
+   */
+  @Auth(
+    Role.DISENO,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.LASER,
+    Role.IMPRESIONES,
+    Role.SUPERUSER,
+  )
+  @Get('my-tasks')
+  getMyTasks(@ActiveUser() user: AccessTokenPayload) {
+    return this.orderAreaTaskService.findMyTasks({
+      userId: user.sub,
+      roles: user.roles,
+    });
+  }
 
   // Definido antes de ':id' para que 'export' no sea interpretado como un id.
   @Auth(Role.ADMIN, Role.SUPERUSER, Role.RECEPCION)

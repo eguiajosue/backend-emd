@@ -11,6 +11,8 @@ const AUTORIZADO_STATUS_ID = 9;
 
 /** Ids sembrados por prisma/seed.ts: el servicio los resuelve por nombre. */
 const STATUS_ID_BY_NAME: Record<string, number> = {
+  'en diseño': 21,
+  'cambios solicitados': 23,
   terminado: READY_FOR_DELIVERY_STATUS_ID,
   autorizado: AUTORIZADO_STATUS_ID,
   entregado: 5,
@@ -29,12 +31,13 @@ describe('OrderAreaTaskService', () => {
     };
     order: {
       findUnique: jest.Mock;
+      findMany: jest.Mock;
       update: jest.Mock;
       updateMany: jest.Mock;
     };
     orderHistory: { create: jest.Mock };
     status: { findUnique: jest.Mock };
-    user: { findFirst: jest.Mock; findUnique: jest.Mock };
+    user: { findFirst: jest.Mock; findUnique: jest.Mock; findMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let notificationService: {
@@ -61,6 +64,7 @@ describe('OrderAreaTaskService', () => {
       },
       order: {
         findUnique: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
@@ -73,6 +77,7 @@ describe('OrderAreaTaskService', () => {
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       // Transacción interactiva: el servicio le pasa un callback que corre
       // contra el mismo cliente mockeado.
@@ -664,6 +669,112 @@ describe('OrderAreaTaskService', () => {
       await expect(
         service.assign(10, 99, { userId: 1, roles: ['recepcion'] }),
       ).rejects.toThrow(HttpException);
+    });
+  });
+
+  describe('findMyTasks (bandeja "Tareas asignadas")', () => {
+    const ME = 30;
+    const COLLEAGUE = 31;
+    const SHARED_TALLER = 3;
+    const SHARED_DISENO = 2;
+    const order = (id: number) => ({
+      id,
+      description: `Pedido ${id}`,
+      deliveryDate: null,
+      creationDate: new Date(),
+      statusId: 9,
+      clientNameOverride: null,
+      designStartedAt: null,
+      designStartedByName: null,
+      client: null,
+      status: { id: 9, name: 'autorizado' },
+    });
+    const task = (id: number, area: string, assignedUserId: number | null) => ({
+      id,
+      area,
+      status: AreaTaskStatus.pendiente,
+      assignedUserId,
+      startedAt: null,
+      assignedUser: assignedUserId
+        ? { id: assignedUserId, firstName: 'X', lastName: null, username: 'x' }
+        : null,
+      order: order(100 + id),
+    });
+
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue({ isSharedAccount: false });
+      prisma.user.findMany.mockResolvedValue([
+        { id: SHARED_TALLER },
+        { id: SHARED_DISENO },
+      ]);
+    });
+
+    it('muestra lo propio y lo libre del área, nunca lo de un compañero', async () => {
+      prisma.orderAreaTask.findMany.mockResolvedValue([
+        task(1, 'taller', ME),
+        task(2, 'taller', SHARED_TALLER),
+        task(3, 'taller', null),
+        task(4, 'taller', COLLEAGUE),
+      ]);
+
+      const items = await service.findMyTasks({
+        userId: ME,
+        roles: ['taller'],
+      });
+
+      expect(items.map((i) => [i.taskId, i.mine])).toEqual([
+        [1, true],
+        [2, false],
+        [3, false],
+      ]);
+      // Sólo tareas de sus áreas y sin las planificadas de pedidos en Diseño.
+      const where = prisma.orderAreaTask.findMany.mock.calls[0][0].where;
+      expect(where.area).toEqual({ in: ['taller'] });
+      expect(where.order.NOT).toEqual({ area: 'diseno' });
+    });
+
+    it('con Diseño y Producción a la vez junta ambas bandejas', async () => {
+      prisma.order.findMany.mockResolvedValue([
+        { ...order(50), assignedUserId: SHARED_DISENO, assignedUser: null },
+        { ...order(51), assignedUserId: COLLEAGUE, assignedUser: null },
+      ]);
+      prisma.orderAreaTask.findMany.mockResolvedValue([task(5, 'dtf', ME)]);
+
+      const items = await service.findMyTasks({
+        userId: ME,
+        roles: ['diseno', 'dtf'],
+      });
+
+      expect(items.map((i) => i.key)).toEqual(['design-50', 'task-5']);
+      expect(items[0]).toMatchObject({
+        kind: 'design',
+        mine: false,
+        assignee: null,
+      });
+    });
+
+    it('desde la cuenta compartida nada es "tuyo": todo es libre', async () => {
+      prisma.user.findUnique.mockResolvedValue({ isSharedAccount: true });
+      prisma.orderAreaTask.findMany.mockResolvedValue([
+        task(6, 'taller', SHARED_TALLER),
+      ]);
+
+      const items = await service.findMyTasks({
+        userId: SHARED_TALLER,
+        roles: ['taller'],
+      });
+
+      expect(items).toHaveLength(1);
+      expect(items[0].mine).toBe(false);
+    });
+
+    it('sin áreas de trabajo no devuelve nada', async () => {
+      const items = await service.findMyTasks({
+        userId: ME,
+        roles: ['recepcion'],
+      });
+      expect(items).toEqual([]);
+      expect(prisma.orderAreaTask.findMany).not.toHaveBeenCalled();
     });
   });
 });
