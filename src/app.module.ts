@@ -31,6 +31,7 @@ import { MaterialCategoryModule } from './material-category/material-category.mo
 import { MaterialUnitModule } from './material-unit/material-unit.module';
 import { MaterialModule } from './material/material.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { OrderTemplateModule } from './order-template/order-template.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -80,6 +81,7 @@ import { AppController } from './app.controller';
     MaterialUnitModule,
     MaterialModule,
     InventoryModule,
+    OrderTemplateModule,
   ],
   providers: [
     {
