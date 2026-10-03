@@ -263,6 +263,17 @@ export class NotificationsGateway
   }
 
   /**
+   * Aviso liviano de que cambiaron datos (nombres de modelos de Prisma) para
+   * que los Inicio y las listas se refresquen en tiempo real (ver
+   * RealtimeService). No lleva datos de pedidos: cada cliente vuelve a pedir
+   * sólo lo que le corresponde ver, así que puede ir a todos. Server-only,
+   * sin `@SubscribeMessage`, como el resto de los avisos.
+   */
+  notifyDataChanged(models: string[]) {
+    this.server?.emit('dataChanged', { models });
+  }
+
+  /**
    * Igual que `notifyNewOrderToAdmin`: emisor server-side
    * (`OrderService.update`). Suscrito era peor todavía, porque el reenvío es
    * un broadcast a TODOS los clientes.

@@ -31,6 +31,7 @@ model Client {
   orders         Order[] // Relación uno a muchos con el modelo Order.
   calendarEvents CalendarEvent[] // Eventos del calendario de Recepción vinculados a este cliente.
   orderTemplates OrderTemplate[] // Plantillas de pedido de este cliente (lo que suele pedir).
+  insight        ClientInsight? // Hábitos aprendidos de su historial de pedidos (autocompletado del alta).
 
   @@index([companyId])
   @@index([last_name, first_name])
@@ -809,4 +810,29 @@ model OrderTemplateMaterial {
 
   @@index([templateId])
   @@index([materialId])
+}
+
+// ─── Aprendizaje por cliente ───────────────────────────────────────────────
+//
+// Perfil de hábitos que el sistema aprende del historial de pedidos de cada
+// cliente (ver ClientInsightService y client-insight.engine.ts): qué suele
+// pedir y cuánto, por dónde va (diseño/áreas), qué materiales lleva, con
+// cuánta anticipación y cada cuánto pide. Se recalcula cada vez que se crea
+// o borra un pedido del cliente o cambia su hoja de materiales. `profile`
+// guarda el resultado completo; `nextExpectedAt` queda en columna para
+// listar rápido "clientes que suelen pedir por estas fechas".
+
+model ClientInsight {
+  clientId       Int       @id
+  version        Int // ENGINE_VERSION con el que se calculó (otra versión -> se recalcula).
+  ordersAnalyzed Int
+  lastOrderAt    DateTime?
+  nextExpectedAt DateTime? // Fecha estimada del próximo pedido según su cadencia (null si no es predecible).
+  cadenceRegular Boolean   @default(false) // Los intervalos entre pedidos son parecidos entre sí.
+  profile        Json
+  updatedAt      DateTime  @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([nextExpectedAt])
 }
