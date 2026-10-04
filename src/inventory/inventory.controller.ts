@@ -14,7 +14,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
-import { ORDER_VIEWING_ROLES } from 'src/common/constants/order-viewing-roles';
+import { Role } from 'src/common/enums/roles.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { InventoryService } from './inventory.service';
 import { CreateInventoryItemDto } from './dto/create-inventory-item.dto';
@@ -26,13 +26,11 @@ import {
 } from './dto/inventory-query.dto';
 
 /**
- * Inventario por departamento. Cualquier rol del taller entra a consultar,
- * pero el servicio recorta por área (cada departamento ve sólo lo suyo) y
- * deja crear/editar/borrar/mover stock sólo a admin/superuser/recepción.
- * Ver InventoryService.
+ * Inventario por departamento. Sólo lo ven y lo manejan Recepción,
+ * admin y superuser; las áreas de producción y Diseño no tienen acceso.
  */
 @ApiTags('inventory')
-@Auth(...ORDER_VIEWING_ROLES)
+@Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
 @Controller('inventory')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}

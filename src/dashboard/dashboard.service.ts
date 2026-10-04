@@ -151,7 +151,6 @@ export interface ProductionDashboard {
   items: ProductionItem[];
   upcoming: Array<OrderRef & { area: string; designStatus: string }>;
   team: Array<{ name: string; inProgress: number }>;
-  lowStock: LowStockItem[];
   events: Array<{
     id: number;
     title: string;
@@ -689,62 +688,60 @@ export class DashboardService {
     if (areas.length === 0 && isFullVisibilityRole(user.roles))
       areas = [...PRODUCTION_AREAS];
 
-    const [me, sharedAccounts, tasks, doneToday, stock, events] =
-      await Promise.all([
-        this.prisma.user.findUnique({
-          where: { id: user.userId },
-          select: { isSharedAccount: true },
-        }),
-        this.prisma.user.findMany({
-          where: { isSharedAccount: true },
-          select: { id: true },
-        }),
-        this.prisma.orderAreaTask.findMany({
-          where: {
-            area: { in: areas },
-            status: { not: AreaTaskStatus.terminado },
-            order: { statusId: { notIn: s.closed } },
+    const [me, sharedAccounts, tasks, doneToday, events] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: user.userId },
+        select: { isSharedAccount: true },
+      }),
+      this.prisma.user.findMany({
+        where: { isSharedAccount: true },
+        select: { id: true },
+      }),
+      this.prisma.orderAreaTask.findMany({
+        where: {
+          area: { in: areas },
+          status: { not: AreaTaskStatus.terminado },
+          order: { statusId: { notIn: s.closed } },
+        },
+        select: {
+          id: true,
+          area: true,
+          status: true,
+          assignedUserId: true,
+          startedAt: true,
+          createdAt: true,
+          assignedUser: PERSON_SELECT,
+          order: {
+            select: { ...ORDER_REF_SELECT, area: true, archivedAt: true },
           },
-          select: {
-            id: true,
-            area: true,
-            status: true,
-            assignedUserId: true,
-            startedAt: true,
-            createdAt: true,
-            assignedUser: PERSON_SELECT,
-            order: {
-              select: { ...ORDER_REF_SELECT, area: true, archivedAt: true },
-            },
+        },
+      }),
+      this.prisma.orderAreaTask.count({
+        where: { area: { in: areas }, completedAt: { gte: dayStart } },
+      }),
+      this.prisma.calendarEvent.findMany({
+        where: {
+          area: { in: areas },
+          status: { not: AreaTaskStatus.terminado },
+          eventDate: {
+            gte: dayStart,
+            lt: new Date(dayStart.getTime() + 2 * DAY_MS),
           },
-        }),
-        this.prisma.orderAreaTask.count({
-          where: { area: { in: areas }, completedAt: { gte: dayStart } },
-        }),
-        this.lowStock(areas),
-        this.prisma.calendarEvent.findMany({
-          where: {
-            area: { in: areas },
-            status: { not: AreaTaskStatus.terminado },
-            eventDate: {
-              gte: dayStart,
-              lt: new Date(dayStart.getTime() + 2 * DAY_MS),
-            },
-          },
-          orderBy: { eventDate: 'asc' },
-          select: {
-            id: true,
-            title: true,
-            eventDate: true,
-            hasTime: true,
-            category: true,
-            area: true,
-            clientName: true,
-            orderId: true,
-            client: { select: { first_name: true, last_name: true } },
-          },
-        }),
-      ]);
+        },
+        orderBy: { eventDate: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          eventDate: true,
+          hasTime: true,
+          category: true,
+          area: true,
+          clientName: true,
+          orderId: true,
+          client: { select: { first_name: true, last_name: true } },
+        },
+      }),
+    ]);
 
     // Mismo criterio que "Tareas asignadas" (OrderAreaTaskService.findMyTasks):
     // se ve lo libre (sin asignar o de la cuenta compartida) y lo propio; lo
@@ -825,7 +822,6 @@ export class DashboardService {
           (a, b) =>
             b.inProgress - a.inProgress || a.name.localeCompare(b.name, 'es'),
         ),
-      lowStock: stock.slice(0, LIST_LIMIT),
       events: events.map((e) => ({
         id: e.id,
         title: e.title,
