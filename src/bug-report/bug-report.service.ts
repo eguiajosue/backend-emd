@@ -47,7 +47,7 @@ export class BugReportService {
     if (!apiKey) {
       this.logger.error(
         'RESEND_API_KEY no está definida: el reporte de bug NO se envió. ' +
-          'Definí RESEND_API_KEY en las variables de entorno del servicio.',
+          'Define RESEND_API_KEY en las variables de entorno del servicio.',
       );
       throw new ServiceUnavailableException(
         'El envío de reportes no está configurado todavía (falta RESEND_API_KEY)',

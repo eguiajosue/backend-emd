@@ -30,7 +30,7 @@ function basicAuth(user: string, password: string) {
 }
 
 async function bootstrap() {
-  // bodyParser deshabilitado acá para poder fijar un límite explícito (los
+  // bodyParser deshabilitado aquí para poder fijar un límite explícito (los
   // archivos de un pedido viajan en base64 dentro del JSON, ver
   // MAX_ORDER_FILE_BYTES en order.service.ts): 10mb cubre eso con
   // margen sin dejar el límite sin techo (Express default es 100kb).
@@ -83,14 +83,14 @@ async function bootstrap() {
   // que responde `404: Cannot OPTIONS /orders`. Eso oculta la causa real (un
   // origin no permitido) detrás de un 404 que parece un endpoint faltante y,
   // del lado del navegador, se ve como "no se puede conectar al servidor".
-  // Acá se corta antes: 403 explícito y un log que nombra el origin rechazado.
+  // Aquí se corta antes: 403 explícito y un log que nombra el origin rechazado.
   app.use((req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers.origin;
     if (!origin || isOriginAllowed(origin, allowedOrigins)) return next();
 
     logger.warn(
       `CORS: origin no permitido "${origin}" (${req.method} ${req.originalUrl}). ` +
-        `Agregalo a FRONTEND_URL (lista separada por comas). Permitidos: ${
+        `Agrégalo a FRONTEND_URL (lista separada por comas). Permitidos: ${
           allowedOrigins.join(', ') || '(ninguno)'
         } + *.vercel.app del proyecto.`,
     );

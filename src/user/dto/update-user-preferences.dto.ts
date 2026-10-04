@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -65,6 +67,17 @@ export class UpdateUserPreferencesDto {
   @IsOptional()
   @IsIn(['24h', '12h'])
   timeFormatPreference?: string;
+
+  // Productos frecuentes del alta de pedido, en el orden que eligió este
+  // usuario (ids de OrderProductPreset). Cada cuenta tiene su propia lista;
+  // null vuelve al orden por defecto.
+  @ApiPropertyOptional({ type: [Number], nullable: true })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  frequentProductIds?: number[] | null;
 
   // Preferencias de notificaciones (Fase 4). Ver NotificationService para
   // cómo se aplican al decidir si se persiste/pushea cada notificación.

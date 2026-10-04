@@ -92,7 +92,7 @@ interface AreaUserUpdatedOrderPayload {
 }
 
 // El decorador se evalúa al cargar el módulo, antes de que exista el
-// ConfigService inyectable, por eso leemos process.env directamente acá
+// ConfigService inyectable, por eso leemos process.env directamente aquí
 // (mismo valor que consume ConfigService, con el mismo default).
 @WebSocketGateway({
   cors: {
@@ -150,7 +150,7 @@ export class NotificationsGateway
       };
 
       // Mismo criterio que AuthGuard: un refresh token es sólo para canjear
-      // por un access token, no habilita sesión (acá equivaldría a un canal
+      // por un access token, no habilita sesión (aquí equivaldría a un canal
       // de notificaciones que sobrevive 7 días a cualquier revocación).
       if (decoded.type === 'refresh') {
         this.logger.warn('Client disconnected: refresh token no habilitado');
@@ -205,7 +205,7 @@ export class NotificationsGateway
         data: { lastSeenAt },
       });
     } catch (error) {
-      // Igual que el resto del gateway: un fallo acá no debe tirar la
+      // Igual que el resto del gateway: un fallo aquí no debe tirar la
       // desconexión. Se loguea y se sigue.
       this.logger.error(
         `No se pudo guardar lastSeenAt para el usuario ${userId}`,

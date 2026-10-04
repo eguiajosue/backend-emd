@@ -19,7 +19,7 @@ const importExpoModule = new Function(
  * Envío de push nativo (iOS/Android) para la futura app Mobile (Expo), en
  * paralelo al Web Push existente (`PushService`). Usa el SDK de Expo: la app
  * Mobile obtiene un "Expo push token" (que Expo resuelve internamente a
- * FCM/APNs) y lo registra acá; nunca hablamos con FCM/APNs directamente.
+ * FCM/APNs) y lo registra aquí; nunca hablamos con FCM/APNs directamente.
  */
 @Injectable()
 export class ExpoPushService {

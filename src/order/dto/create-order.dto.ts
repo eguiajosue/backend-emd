@@ -103,7 +103,7 @@ export class CreateOrderDto {
   clientNameOverride?: string;
 
   // El creador real del pedido lo determina el servidor a partir del token
-  // (ver OrderController.create) -- opcional acá para no romper la
+  // (ver OrderController.create) -- opcional aquí para no romper la
   // validación si el cliente lo omite o lo manda mal.
   @IsOptional()
   @IsInt()
@@ -180,7 +180,7 @@ export class CreateOrderDto {
   // Si el pedido pasa por la fase de Diseño antes de producción. Default
   // true (comportamiento nuevo); Recepción puede desmarcarlo para ir
   // directo a producción (comportamiento anterior, intacto).
-  // Sin `= true` acá por lo mismo que `statusId`: heredado al PATCH, marcaba
+  // Sin `= true` aquí por lo mismo que `statusId`: heredado al PATCH, marcaba
   // como "requiere diseño" cualquier pedido que se editara. `create` ya
   // trata `undefined` como true (`requiresDesign !== false`).
   @IsOptional()

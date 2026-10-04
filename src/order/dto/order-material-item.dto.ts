@@ -13,8 +13,8 @@ import { TrimString } from 'src/common/transformers/empty-to-undefined';
 /**
  * Línea de la hoja de materiales de un pedido. `description` la arma el
  * frontend a partir del material elegido (nombre + medida + color) pero es
- * editable, así que llega ya resuelta acá — el backend no la recalcula.
- * `price` NO se manda desde acá: se copia del `Material.suggestedPrice` al
+ * editable, así que llega ya resuelta aquí — el backend no la recalcula.
+ * `price` NO se manda desde aquí: se copia del `Material.suggestedPrice` al
  * crear la línea (ver OrderMaterialItemService.create).
  */
 export class CreateOrderMaterialItemDto {

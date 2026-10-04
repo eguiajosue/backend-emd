@@ -34,6 +34,7 @@ export const USER_PREFERENCES_SELECT = {
   hasSeenOnboarding: true,
   areaViewMode: true,
   timeFormatPreference: true,
+  frequentProductIds: true,
   notificationsMuted: true,
   notifyMentionsOnly: true,
   notifyProductionUpdates: true,
@@ -212,7 +213,14 @@ export class UserService {
     try {
       return await this.prisma.user.update({
         where: { id },
-        data: { ...updateUserPreferencesDto },
+        data: {
+          ...updateUserPreferencesDto,
+          // Prisma no acepta `null` literal en una columna Json: se traduce a
+          // NULL de base (vuelve al orden por defecto).
+          ...(updateUserPreferencesDto.frequentProductIds === null
+            ? { frequentProductIds: Prisma.DbNull }
+            : {}),
+        },
         select: USER_PREFERENCES_SELECT,
       });
     } catch (error) {
