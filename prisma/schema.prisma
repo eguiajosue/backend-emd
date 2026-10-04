@@ -30,6 +30,8 @@ model Client {
   company        Company?        @relation(fields: [companyId], references: [id]) // Relación con Company.
   orders         Order[] // Relación uno a muchos con el modelo Order.
   calendarEvents CalendarEvent[] // Eventos del calendario de Recepción vinculados a este cliente.
+  orderTemplates OrderTemplate[] // Plantillas de pedido de este cliente (lo que suele pedir).
+  insight        ClientInsight? // Hábitos aprendidos de su historial de pedidos (autocompletado del alta).
 
   @@index([companyId])
   @@index([last_name, first_name])
@@ -69,8 +71,10 @@ model User {
   chatDirectAsUserA       ChatConversation[]       @relation("ChatDirectUserA") // DMs donde es el participante de id menor.
   chatDirectAsUserB       ChatConversation[]       @relation("ChatDirectUserB") // DMs donde es el participante de id mayor.
   calendarEvents          CalendarEvent[]          @relation("CalendarEventCreatedBy") // Eventos del calendario de Recepción creados por este usuario.
+  orderTemplatesCreated   OrderTemplate[]          @relation("OrderTemplateCreatedBy") // Plantillas de pedido que guardó este usuario.
   calendarTasks           CalendarTask[]           @relation("CalendarTaskCreatedBy") // Tareas pendientes (sin fecha) del calendario de equipo creadas por este usuario.
   orderMaterialItems      OrderMaterialItem[]      @relation("OrderMaterialItemCreatedBy") // Líneas de hoja de materiales cargadas por este usuario.
+  inventoryMovements      InventoryMovement[]      @relation("InventoryMovementCreatedBy") // Entradas/salidas/ajustes de inventario registrados por este usuario.
 
   themePreference      String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor          String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -80,6 +84,7 @@ model User {
   hasSeenOnboarding    Boolean? // Si ya completó/cerró el tour de onboarding.
   areaViewMode         String? // Cómo ver las tareas de producción: 'unified' (todo junto, etiquetado por área) | 'split' (una vista por área). Preferencia personal, ver WORKFLOW.md §4.
   timeFormatPreference String? // Formato de hora: '24h' | '12h' (AM/PM).
+  frequentProductIds   Json? // Productos frecuentes del alta de pedido elegidos y ordenados por este usuario (array de ids de OrderProductPreset). Null = usar el orden por defecto.
 
   notificationsMuted      Boolean @default(false) // Modo silencio general: si está activo, no se persisten ni pushean notificaciones (salvo menciones directas, cuando ese tipo exista).
   notifyMentionsOnly      Boolean @default(false) // Sólo notificar menciones directas. Sin efecto práctico hoy: el sistema no tiene un tipo de notificación de "mención" implementado aún (ver NotificationService).
@@ -127,22 +132,23 @@ model Order {
   clientResourceFileName String? // Nombre de archivo original del archivo del cliente.
   clientResourceFileMime String? // Mime type del archivo del cliente (image/png, image/jpeg, application/pdf).
 
-  client          Client?             @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
-  user            User                @relation(fields: [userId], references: [id]) // Relación con User (creador).
-  assignedUser    User?               @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
-  attendedBy      User?               @relation("AttendedOrders", fields: [attendedByUserId], references: [id]) // Relación con la recepcionista que atiende el pedido.
-  status          Status              @relation(fields: [statusId], references: [id]) // Relación con Status.
-  histories       OrderHistory[] // Relación uno a muchos con OrderHistory.
-  orderProducts   OrderProduct[] // Líneas de producto del pedido.
-  notes           OrderNote[] // Notas/comentarios internos sobre el pedido.
-  auditLogs       OrderAuditLog[] // Auditoría de ediciones del pedido.
-  notifications   Notification[] // Notificaciones persistentes que referencian este pedido.
-  designRevisions DesignRevision[] // Rondas de montaje/feedback/autorización de la fase de Diseño.
-  chatMessages    ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
-  areaTasks       OrderAreaTask[] // Trabajo de producción por área; varias áreas avanzan en paralelo (ver WORKFLOW.md §3).
-  calendarTasks   CalendarTask[] // Tareas pendientes del calendario de equipo vinculadas a este pedido (opcional, ej. "confirmar medidas").
-  calendarEvents  CalendarEvent[] // Eventos del calendario de equipo vinculados a este pedido (instalación, compra de materiales, etc.).
-  materialItems   OrderMaterialItem[] // Hoja de materiales del pedido: qué se va a usar en producción (opcional, la carga Recepción).
+  client             Client?             @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
+  user               User                @relation(fields: [userId], references: [id]) // Relación con User (creador).
+  assignedUser       User?               @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
+  attendedBy         User?               @relation("AttendedOrders", fields: [attendedByUserId], references: [id]) // Relación con la recepcionista que atiende el pedido.
+  status             Status              @relation(fields: [statusId], references: [id]) // Relación con Status.
+  histories          OrderHistory[] // Relación uno a muchos con OrderHistory.
+  orderProducts      OrderProduct[] // Líneas de producto del pedido.
+  notes              OrderNote[] // Notas/comentarios internos sobre el pedido.
+  auditLogs          OrderAuditLog[] // Auditoría de ediciones del pedido.
+  notifications      Notification[] // Notificaciones persistentes que referencian este pedido.
+  designRevisions    DesignRevision[] // Rondas de montaje/feedback/autorización de la fase de Diseño.
+  chatMessages       ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
+  areaTasks          OrderAreaTask[] // Trabajo de producción por área; varias áreas avanzan en paralelo (ver WORKFLOW.md §3).
+  calendarTasks      CalendarTask[] // Tareas pendientes del calendario de equipo vinculadas a este pedido (opcional, ej. "confirmar medidas").
+  calendarEvents     CalendarEvent[] // Eventos del calendario de equipo vinculados a este pedido (instalación, compra de materiales, etc.).
+  materialItems      OrderMaterialItem[] // Hoja de materiales del pedido: qué se va a usar en producción (opcional, la carga Recepción).
+  inventoryMovements InventoryMovement[] // Consumos de inventario imputados a este pedido (opcional).
 
   @@index([statusId])
   @@index([clientId])
@@ -601,8 +607,10 @@ model Supplier {
   location  String // "nacional" | "local" | "internacional"
   createdAt DateTime @default(now())
 
-  materials          Material[]
-  orderMaterialItems OrderMaterialItem[]
+  materials              Material[]
+  orderMaterialItems     OrderMaterialItem[]
+  inventoryItems         InventoryItem[]
+  orderTemplateMaterials OrderTemplateMaterial[]
 
   @@index([location])
 }
@@ -634,7 +642,9 @@ model Material {
   unit     MaterialUnit?     @relation(fields: [unitId], references: [id])
   supplier Supplier?         @relation(fields: [supplierId], references: [id])
 
-  orderMaterialItems OrderMaterialItem[]
+  orderMaterialItems     OrderMaterialItem[]
+  orderTemplateMaterials OrderTemplateMaterial[] // Líneas de plantillas de pedido que usan este material.
+  inventoryItems         InventoryItem[] // Existencias físicas de este material en los departamentos (un material puede no estar inventariado).
 
   @@index([categoryId])
   @@index([unitId])
@@ -674,4 +684,156 @@ model OrderMaterialItem {
 
   @@index([orderId])
   @@index([materialId])
+}
+
+// ─── Inventario por departamento ────────────────────────────────────────────
+//
+// NO es lo mismo que el catálogo de Materiales. `Material` es la lista de
+// insumos con la que se arma la hoja de materiales de un pedido (qué hay que
+// comprar para ese trabajo). `InventoryItem` son las EXISTENCIAS físicas que
+// cada departamento tiene en su estante: incluye materiales del catálogo
+// (vinculados por `materialId`) y también consumibles que nunca van a una
+// hoja de materiales — conos de hilo de bordado, tintas de impresión,
+// estabilizador, refacciones, etc.
+
+enum InventoryMovementType {
+  ENTRADA // Compra/reposición: suma stock.
+  SALIDA // Consumo/merma: resta stock (no puede dejarlo negativo).
+  AJUSTE // Conteo físico: fija el stock al valor contado; se guarda la diferencia.
+}
+
+model InventoryItem {
+  id         Int      @id @default(autoincrement())
+  area       String // Departamento dueño de la existencia: uno de INVENTORY_AREAS (taller/dtf/bordado/diseno/laser/impresiones/recepcion).
+  name       String // "Hilo poliéster 40 rojo", "Tinta Eco-Solvente Cyan".
+  sku        String? // Código interno o del fabricante (ej. "MAD-1147"). Único por departamento.
+  category   String? // Texto libre: "Hilos", "Tintas", "Estabilizador", "Refacciones"...
+  unit       String // Unidad en que se cuenta: "cono", "rollo", "litro", "pieza"...
+  color      String?
+  brand      String?
+  location   String? // Ubicación física: "Estante A-3", "Cajón 2".
+  quantity   Decimal  @default(0) @db.Decimal(12, 3) // Stock actual. Sólo cambia vía InventoryMovement (kardex).
+  minStock   Decimal? @db.Decimal(12, 3) // Punto de reorden: con quantity <= minStock el artículo está "bajo stock".
+  unitCost   Decimal? @db.Decimal(10, 2) // Costo unitario de referencia en MXN, para valuar el inventario.
+  notes      String?
+  materialId Int? // Vínculo opcional con el catálogo de Materiales.
+  supplierId Int? // Proveedor habitual de reposición.
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  material  Material?           @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  supplier  Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  movements InventoryMovement[]
+
+  @@unique([area, sku])
+  @@index([area])
+  @@index([materialId])
+  @@index([supplierId])
+}
+
+model InventoryMovement {
+  id           Int                   @id @default(autoincrement())
+  itemId       Int
+  type         InventoryMovementType
+  delta        Decimal               @db.Decimal(12, 3) // Cambio con signo aplicado al stock (+ entrada, - salida, ± ajuste).
+  balanceAfter Decimal               @db.Decimal(12, 3) // Stock resultante, para leer el kardex sin recalcular.
+  unitCost     Decimal?              @db.Decimal(10, 2) // Costo unitario de esta entrada (si se informó).
+  note         String?
+  orderId      Int? // Pedido al que se imputa el consumo (opcional).
+  createdById  Int
+  createdAt    DateTime              @default(now())
+
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  order     Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdBy User          @relation("InventoryMovementCreatedBy", fields: [createdById], references: [id])
+
+  @@index([itemId, createdAt])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+// ─── Plantillas de pedido por cliente ──────────────────────────────────────
+//
+// Lo que un cliente suele pedir, guardado con nombre ("Figuras de
+// coroplast"): productos y cantidades, descripción base, ruta de
+// diseño/producción y hoja de materiales. Recepción la elige al dar de alta
+// un pedido y el formulario se precarga (siempre editable). NO guarda fecha
+// de entrega ni archivo del cliente: cambian en cada pedido. Tampoco a quién
+// se asigna: la gente rota, se elige en el alta.
+
+model OrderTemplate {
+  id              Int       @id @default(autoincrement())
+  clientId        Int
+  name            String // Nombre visible, único por cliente.
+  requiresDesign  Boolean   @default(true)
+  productionAreas String[] // Áreas de producción (PRODUCTION_AREAS), la principal primero.
+  description     String    @default("") // Descripción base; puede quedar vacía.
+  useCount        Int       @default(0) // Pedidos creados con esta plantilla (ordena las más usadas primero).
+  lastUsedAt      DateTime?
+  createdById     Int? // Quién la guardó; queda en null si se borra el usuario.
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  client    Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy User?                   @relation("OrderTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  products  OrderTemplateProduct[]
+  materials OrderTemplateMaterial[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
+}
+
+model OrderTemplateProduct {
+  id         Int    @id @default(autoincrement())
+  templateId Int
+  position   Int // Orden en el que se muestran/copian las líneas.
+  customName String
+  quantity   Int
+
+  template OrderTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+
+model OrderTemplateMaterial {
+  id          Int    @id @default(autoincrement())
+  templateId  Int
+  position    Int
+  materialId  Int
+  quantity    Int
+  description String
+  supplierId  Int?
+
+  template OrderTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  // Borrar un material del catálogo no debe quedar bloqueado por una plantilla.
+  material Material      @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  supplier Supplier?     @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@index([templateId])
+  @@index([materialId])
+}
+
+// ─── Aprendizaje por cliente ───────────────────────────────────────────────
+//
+// Perfil de hábitos que el sistema aprende del historial de pedidos de cada
+// cliente (ver ClientInsightService y client-insight.engine.ts): qué suele
+// pedir y cuánto, por dónde va (diseño/áreas), qué materiales lleva, con
+// cuánta anticipación y cada cuánto pide. Se recalcula cada vez que se crea
+// o borra un pedido del cliente o cambia su hoja de materiales. `profile`
+// guarda el resultado completo; `nextExpectedAt` queda en columna para
+// listar rápido "clientes que suelen pedir por estas fechas".
+
+model ClientInsight {
+  clientId       Int       @id
+  version        Int // ENGINE_VERSION con el que se calculó (otra versión -> se recalcula).
+  ordersAnalyzed Int
+  lastOrderAt    DateTime?
+  nextExpectedAt DateTime? // Fecha estimada del próximo pedido según su cadencia (null si no es predecible).
+  cadenceRegular Boolean   @default(false) // Los intervalos entre pedidos son parecidos entre sí.
+  profile        Json
+  updatedAt      DateTime  @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([nextExpectedAt])
 }

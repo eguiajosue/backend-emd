@@ -29,6 +29,18 @@ export class OrderExportQueryDto {
   @IsDateString()
   dateTo?: string;
 
+  @ApiPropertyOptional({ description: 'Fecha de entrega desde (ISO)' })
+  @EmptyToUndefined()
+  @IsOptional()
+  @IsDateString()
+  deliveryFrom?: string;
+
+  @ApiPropertyOptional({ description: 'Fecha de entrega hasta (ISO)' })
+  @EmptyToUndefined()
+  @IsOptional()
+  @IsDateString()
+  deliveryTo?: string;
+
   @ApiPropertyOptional()
   @EmptyToUndefined()
   @IsOptional()

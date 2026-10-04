@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { UserService, USER_PREFERENCES_SELECT } from './user.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -84,6 +85,18 @@ describe('UserService preferences', () => {
       await expect(
         service.updatePreferences(999, { themePreference: 'dark' }),
       ).rejects.toBeInstanceOf(HttpException);
+    });
+
+    it('guarda los frecuentes propios y null vuelve al orden por defecto', async () => {
+      prisma.user.update.mockResolvedValue({});
+      await service.updatePreferences(1, { frequentProductIds: [3, 1] });
+      expect(prisma.user.update.mock.calls[0][0].data).toEqual({
+        frequentProductIds: [3, 1],
+      });
+      await service.updatePreferences(1, { frequentProductIds: null });
+      expect(prisma.user.update.mock.calls[1][0].data).toEqual({
+        frequentProductIds: Prisma.DbNull,
+      });
     });
   });
 });

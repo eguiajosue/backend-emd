@@ -15,6 +15,7 @@ import { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
+import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { StartDesignDto } from './dto/start-design.dto';
@@ -26,7 +27,6 @@ import {
   ApproveDesignRevisionDto,
 } from './dto/design-revision.dto';
 import { OrderExportQueryDto } from './dto/order-export-query.dto';
-import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 import { ReorderMaterialsPriorityDto } from './dto/reorder-materials-priority.dto';
 import {
@@ -204,6 +204,8 @@ export class OrderController {
         q: query.q,
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        deliveryFrom: query.deliveryFrom,
+        deliveryTo: query.deliveryTo,
         statusId: query.statusId,
         area: query.area,
         clientId: query.clientId,

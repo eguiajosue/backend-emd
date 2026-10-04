@@ -77,7 +77,7 @@ describe('OrderService.findHistory - búsqueda y filtros', () => {
     const [, filters] = whereOf().AND;
     expect(filters.AND).toEqual([
       { statusId: 5 },
-      { area: 'dtf' },
+      { OR: [{ area: 'dtf' }, { areaTasks: { some: { area: 'dtf' } } }] },
       { clientId: 3 },
       {
         creationDate: {
@@ -95,6 +95,10 @@ describe('OrderService.findHistory - búsqueda y filtros', () => {
     );
     const [visibility, filters] = whereOf().AND;
     expect(visibility).toEqual({ area: { in: ['dtf'] } });
-    expect(filters.AND).toEqual([{ area: 'bordado' }]);
+    expect(filters.AND).toEqual([
+      {
+        OR: [{ area: 'bordado' }, { areaTasks: { some: { area: 'bordado' } } }],
+      },
+    ]);
   });
 });

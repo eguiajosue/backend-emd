@@ -84,7 +84,7 @@ const makePrisma = (order: OrderRow) => ({
     }),
   },
   orderAuditLog: { create: jest.fn() },
-  // $transaction con array de operaciones: acá ya vienen resueltas.
+  // $transaction con array de operaciones: aquí ya vienen resueltas.
   $transaction: jest.fn(async (ops: unknown[]) => Promise.all(ops)),
 });
 
@@ -561,6 +561,15 @@ describe('Alta del pedido: archivo de recursos del cliente (rename)', () => {
         }),
       }),
     );
+  });
+
+  it('sin diseño, Diseño no es un destino válido', async () => {
+    const { service, prisma } = buildForCreate();
+
+    await expect(
+      service.create({ ...baseDto, requiresDesign: false, area: 'diseno' }),
+    ).rejects.toThrow('Un pedido sin diseño debe ir a un área de producción');
+    expect(prisma.order.create).not.toHaveBeenCalled();
   });
 
   it('el archivo del cliente sigue siendo opcional', async () => {

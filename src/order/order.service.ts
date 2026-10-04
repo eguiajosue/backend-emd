@@ -423,7 +423,7 @@ export class OrderService {
     let totalBytes = 0;
     for (const file of files) {
       // El base64 se decodifica UNA sola vez por archivo: el Buffer que
-      // devuelve la validación es el mismo que se mide acá.
+      // devuelve la validación es el mismo que se mide aquí.
       const buffer = await this.assertOrderFileValid(file);
       totalBytes += buffer.length;
     }
@@ -452,7 +452,7 @@ export class OrderService {
   ): OrderFileDto[] {
     if (many && many.length > 0 && single) {
       throw new HttpException(
-        `No se pueden mandar "${fieldNames.single}" y "${fieldNames.many}" a la vez: usá sólo "${fieldNames.many}"`,
+        `No se pueden mandar "${fieldNames.single}" y "${fieldNames.many}" a la vez: usa sólo "${fieldNames.many}"`,
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -519,7 +519,7 @@ export class OrderService {
         clientNameOverride,
         userId,
         assignedUserId,
-        // Default de alta: "pendiente". Vive acá y no en el DTO (ver
+        // Default de alta: "pendiente". Vive aquí y no en el DTO (ver
         // CreateOrderDto.statusId).
         statusId = 1,
         area,
@@ -540,6 +540,15 @@ export class OrderService {
       if (!userId || !statusId) {
         throw new HttpException(
           'Datos faltantes: userId o statusId',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Sin montaje el pedido va directo a producción: Diseño no es un
+      // destino válido (para eso está requiresDesign=true). WORKFLOW.md §1.b.
+      if (!needsDesign && area === Role.DISENO) {
+        throw new HttpException(
+          'Un pedido sin diseño debe ir a un área de producción, no a Diseño',
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -626,7 +635,7 @@ export class OrderService {
       });
 
       // Tareas de área (WORKFLOW.md §3). Las áreas que trabajan el pedido las
-      // define Recepción acá y/o Diseño al autorizar el montaje.
+      // define Recepción aquí y/o Diseño al autorizar el montaje.
       //  - Sin montaje: el pedido entra directo a producción, así que las
       //    tareas se crean y se notifican ya.
       //  - Con montaje: las áreas elegidas quedan planificadas (tarea creada,
@@ -847,7 +856,7 @@ export class OrderService {
       const where = this.orderVisibilityWhere(requestingUser);
 
       if (where === null) {
-        // Sin ningún rol que le dé acceso: no ve nada. Se corta acá sin
+        // Sin ningún rol que le dé acceso: no ve nada. Se corta aquí sin
         // consultar la base (antes esto se resolvía filtrando en memoria
         // DESPUÉS de traer toda la tabla).
         return enabled ? buildPaginatedResult([], 0, page, limit) : [];
@@ -896,7 +905,8 @@ export class OrderService {
   /**
    * Filtros del Historial y del export CSV. `q` busca por código de pedido
    * ("EMD-P0042", "42"), cliente, empresa o descripción; un número también
-   * puede ser parte del texto, así que el código se suma con OR.
+   * puede ser parte del texto, así que el código se suma con OR. Fechas: de
+   * creación (`dateFrom`/`dateTo`) y de entrega (`deliveryFrom`/`deliveryTo`).
    */
   private historyFiltersWhere(filters: {
     q?: string;
@@ -905,16 +915,35 @@ export class OrderService {
     clientId?: number;
     dateFrom?: string;
     dateTo?: string;
+    deliveryFrom?: string;
+    deliveryTo?: string;
   }): Prisma.OrderWhereInput {
     const where: Prisma.OrderWhereInput[] = [];
     if (filters.statusId) where.push({ statusId: filters.statusId });
-    if (filters.area) where.push({ area: filters.area });
+    // Un pedido "es" de un área si está ahí ahora o si esa área tiene
+    // (o tuvo) una tarea en él: el historial guarda los ya entregados.
+    if (filters.area) {
+      where.push({
+        OR: [
+          { area: filters.area },
+          { areaTasks: { some: { area: filters.area } } },
+        ],
+      });
+    }
     if (filters.clientId) where.push({ clientId: filters.clientId });
     if (filters.dateFrom || filters.dateTo) {
       where.push({
         creationDate: {
           ...(filters.dateFrom && { gte: new Date(filters.dateFrom) }),
           ...(filters.dateTo && { lte: new Date(filters.dateTo) }),
+        },
+      });
+    }
+    if (filters.deliveryFrom || filters.deliveryTo) {
+      where.push({
+        deliveryDate: {
+          ...(filters.deliveryFrom && { gte: new Date(filters.deliveryFrom) }),
+          ...(filters.deliveryTo && { lte: new Date(filters.deliveryTo) }),
         },
       });
     }
@@ -1095,7 +1124,7 @@ export class OrderService {
    *
    * Destinatarios: únicamente los usuarios de Recepción (mismo criterio que
    * `notifyAreaUserUpdatedOrder`). El usuario de área asignado al pedido NO
-   * se notifica acá: sólo recibe notificación cuando se le asigna un pedido
+   * se notifica aquí: sólo recibe notificación cuando se le asigna un pedido
    * nuevo (`notifyNewAssignedOrder`), no en cambios posteriores de un pedido
    * que ya tiene asignado.
    */
@@ -1623,7 +1652,7 @@ export class OrderService {
     const name = dto.name?.trim();
     if (account?.isSharedAccount && !name) {
       throw new HttpException(
-        'Escribí tu nombre: esta cuenta la usan varias personas',
+        'Escribe tu nombre: esta cuenta la usan varias personas',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -2143,7 +2172,7 @@ export class OrderService {
   ) {
     const stale = () =>
       new HttpException(
-        'Esta ronda ya fue respondida. Recargá el pedido para ver su estado actual.',
+        'Esta ronda ya fue respondida. Recarga el pedido para ver su estado actual.',
         HttpStatus.CONFLICT,
       );
     if (revision.approved || revision.feedbackText) throw stale();
@@ -2426,13 +2455,13 @@ export class OrderService {
     });
     if (materialCount === 0) {
       throw new HttpException(
-        'Cargá la hoja de materiales del pedido antes de autorizar el diseño',
+        'Carga la hoja de materiales del pedido antes de autorizar el diseño',
         HttpStatus.BAD_REQUEST,
       );
     }
 
     // Áreas que van a producir el pedido. Pueden ser varias y trabajan en
-    // paralelo (WORKFLOW.md §3): las define Diseño acá, o vienen planificadas
+    // paralelo (WORKFLOW.md §3): las define Diseño aquí, o vienen planificadas
     // por Recepción desde el alta como tareas ya creadas.
     const plannedTasks = await this.orderAreaTaskService.findByOrder(orderId);
     const resolvedAreas =
@@ -2471,7 +2500,7 @@ export class OrderService {
           area: productionArea,
           productionArea,
           status: { connect: { id: statusId } },
-          // El diseñador deja de ser el responsable del pedido: a partir de acá
+          // El diseñador deja de ser el responsable del pedido: a partir de aquí
           // manda cada tarea de área con su propio asignado (WORKFLOW.md §3).
           // Queda registrado abajo en la auditoría y en las rondas de montaje.
           assignedUser: { disconnect: true },
@@ -2680,7 +2709,7 @@ export class OrderService {
    * Filas planas para exportación CSV, respetando la misma visibilidad por
    * área/rol y los mismos filtros de fecha/estado/área/cliente que
    * `findAll` acepta vía query params (aplicados en el controller/frontend
-   * hoy no existen filtros dedicados en `findAll`, así que acá se filtra
+   * hoy no existen filtros dedicados en `findAll`, así que aquí se filtra
    * directo en el WHERE de Prisma sobre los campos soportados).
    */
   async exportOrders(
@@ -2688,6 +2717,8 @@ export class OrderService {
       q?: string;
       dateFrom?: string;
       dateTo?: string;
+      deliveryFrom?: string;
+      deliveryTo?: string;
       statusId?: number;
       area?: string;
       clientId?: number;

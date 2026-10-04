@@ -39,15 +39,17 @@ export class OrderHistoryQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional()
   @EmptyToUndefined()
   @IsOptional()
-  @IsString()
-  area?: string;
-
-  @ApiPropertyOptional()
-  @EmptyToUndefined()
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   clientId?: number;
+
+  @ApiPropertyOptional({
+    description: 'Área actual del pedido o de alguna de sus tareas',
+  })
+  @EmptyToUndefined()
+  @IsOptional()
+  @IsString()
+  area?: string;
 
   @ApiPropertyOptional({ description: 'Fecha de creación desde (ISO)' })
   @EmptyToUndefined()
@@ -60,4 +62,16 @@ export class OrderHistoryQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+
+  @ApiPropertyOptional({ description: 'Fecha de entrega desde (ISO)' })
+  @EmptyToUndefined()
+  @IsOptional()
+  @IsDateString()
+  deliveryFrom?: string;
+
+  @ApiPropertyOptional({ description: 'Fecha de entrega hasta (ISO)' })
+  @EmptyToUndefined()
+  @IsOptional()
+  @IsDateString()
+  deliveryTo?: string;
 }

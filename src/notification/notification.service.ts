@@ -25,7 +25,7 @@ export interface CreateNotificationInput {
  * Tipos de notificación (`Notification.type`) que hoy existen y se
  * consideran "novedades de producción" a efectos del filtro
  * `notifyProductionUpdates` (asignación/estado de pedidos, tareas de área,
- * montajes de diseño). Cualquier tipo que no esté acá se trata como alerta
+ * montajes de diseño). Cualquier tipo que no esté aquí se trata como alerta
  * general y cae bajo `notifyCriticalAlerts` — así un tipo nuevo que se
  * agregue sin actualizar esta lista no queda silenciado por error.
  */
@@ -68,7 +68,7 @@ export class NotificationService {
   /**
    * Decide si una notificación de `type` debe llegar (persistirse + push)
    * a un usuario dadas sus preferencias. Único punto de decisión: tanto
-   * `createNotification` como `createNotificationForUsers` pasan por acá
+   * `createNotification` como `createNotificationForUsers` pasan por aquí
    * antes de tocar la base o disparar el push.
    *
    * - `notificationsMuted`: corta todo, salvo una mención directa (si
@@ -213,7 +213,7 @@ export class NotificationService {
   /**
    * Ids de todos los usuarios con un rol/área determinado. Mismo criterio
    * que usa `NotificationsGateway.notifyNewOrderToArea` (room = nombre del
-   * rol/área), replicado acá para resolver destinatarios de la persistencia.
+   * rol/área), replicado aquí para resolver destinatarios de la persistencia.
    */
   async userIdsForArea(area: string): Promise<number[]> {
     const users = await this.prisma.user.findMany({

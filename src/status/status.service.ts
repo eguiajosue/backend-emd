@@ -34,7 +34,7 @@ export class StatusService {
    * mismo problema que tenía `OrderHistoryService` con `order: true` (ver
    * `ORDER_SELECT_FOR_HISTORY`). El frontend sólo consume `id`/`name` del
    * catálogo de estados (ver `packages/types/src/index.ts`, `Status =
-   * NamedEntity`), así que los pedidos anidados nunca se usaron acá.
+   * NamedEntity`), así que los pedidos anidados nunca se usaron aquí.
    */
   async findAll() {
     try {

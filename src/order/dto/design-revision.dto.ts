@@ -79,7 +79,7 @@ export class ApproveDesignRevisionDto {
   productionArea?: (typeof PRODUCTION_AREAS)[number];
 
   // Áreas que van a trabajar el pedido una vez autorizado. Diseño puede definir
-  // varias acá si el montaje quedó con más de una técnica (WORKFLOW.md §3).
+  // varias aquí si el montaje quedó con más de una técnica (WORKFLOW.md §3).
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(PRODUCTION_AREAS.length)

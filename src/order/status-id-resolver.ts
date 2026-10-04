@@ -32,7 +32,7 @@ export class StatusIdResolver {
     const status = await this.prisma.status.findUnique({ where: { name } });
     if (!status) {
       throw new HttpException(
-        `El estado "${name}" no existe. Corré el seed (prisma/seed.ts) para crearlo.`,
+        `El estado "${name}" no existe. Corre el seed (prisma/seed.ts) para crearlo.`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

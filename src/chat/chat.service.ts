@@ -147,7 +147,7 @@ export class ChatService {
   /**
    * Carga la conversación y verifica que el usuario sea miembro. Lanza 404 si
    * no existe y 403 si no tiene acceso. Toda lectura/escritura del chat pasa
-   * por acá.
+   * por aquí.
    */
   async assertConversationAccess(
     conversationId: number,

@@ -237,13 +237,16 @@ describe('OrderService - exportOrders no permite saltar el filtro de área con ?
           const flatten = (w: any): any[] =>
             w?.AND ? w.AND.flatMap(flatten) : [w ?? {}];
           const clauses: any[] = flatten(where);
+          const matches = (o: any, clause: any): boolean => {
+            if (clause?.OR) return clause.OR.some((c: any) => matches(o, c));
+            if (clause?.area?.in) return clause.area.in.includes(o.area);
+            if (typeof clause?.area === 'string') return o.area === clause.area;
+            // Los mocks no traen tareas: `areaTasks.some` nunca coincide.
+            if (clause?.areaTasks) return false;
+            return true;
+          };
           const result = orders.filter((o) =>
-            clauses.every((clause) => {
-              if (clause?.area?.in) return clause.area.in.includes(o.area);
-              if (typeof clause?.area === 'string')
-                return o.area === clause.area;
-              return true;
-            }),
+            clauses.every((clause) => matches(o, clause)),
           );
           return Promise.resolve(result);
         }),
@@ -295,5 +298,58 @@ describe('OrderService - exportOrders no permite saltar el filtro de área con ?
       { userId: 99, roles: ['admin'] },
     );
     expect((result as any[]).map((o: any) => o.id)).toEqual([2]);
+  });
+});
+
+describe('OrderService - findHistory con filtros', () => {
+  it('combina visibilidad con cliente, área (actual o de tarea) y rango de entrega', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const count = jest.fn().mockResolvedValue(0);
+    const prisma = {
+      order: { findMany, count },
+      $transaction: (ops: Promise<unknown>[]) => Promise.all(ops),
+    };
+    const service = new OrderService(
+      prisma as unknown as PrismaService,
+      {} as NotificationsGateway,
+      {} as AreaVisibilityService,
+      {} as OrderProductPresetService,
+      {} as NotificationService,
+      {} as AuditLogService,
+      {} as OrderAreaTaskService,
+      {} as CalendarEventService,
+    );
+
+    await service.findHistory(
+      {
+        page: 1,
+        limit: 20,
+        clientId: 4,
+        area: 'bordado',
+        deliveryFrom: '2026-10-01T06:00:00.000Z',
+        deliveryTo: '2026-10-31T05:59:59.999Z',
+      },
+      { userId: 1, roles: ['admin'] },
+    );
+
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.AND[1]).toEqual({
+      AND: [
+        {
+          OR: [
+            { area: 'bordado' },
+            { areaTasks: { some: { area: 'bordado' } } },
+          ],
+        },
+        { clientId: 4 },
+        {
+          deliveryDate: {
+            gte: new Date('2026-10-01T06:00:00.000Z'),
+            lte: new Date('2026-10-31T05:59:59.999Z'),
+          },
+        },
+      ],
+    });
+    expect(count).toHaveBeenCalledWith({ where });
   });
 });
