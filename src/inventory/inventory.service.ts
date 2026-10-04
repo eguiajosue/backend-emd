@@ -410,7 +410,7 @@ export class InventoryService {
    */
   private async notifyLowStock(item: ItemRow, after: number, actorId: number) {
     const audiences = await Promise.all(
-      [item.area, 'recepcion', 'admin'].map((role) =>
+      ['recepcion', 'admin'].map((role) =>
         this.notificationService.userIdsForArea(role),
       ),
     );

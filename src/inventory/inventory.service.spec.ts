@@ -309,7 +309,9 @@ describe('InventoryService', () => {
         recepcion,
       );
       await new Promise((resolve) => setImmediate(resolve));
-      expect(notifications.userIdsForArea).toHaveBeenCalledWith('bordado');
+      // Sólo Recepción y admin manejan el inventario: el área no recibe el aviso.
+      expect(notifications.userIdsForArea).not.toHaveBeenCalledWith('bordado');
+      expect(notifications.userIdsForArea).toHaveBeenCalledWith('recepcion');
       expect(notifications.createNotificationForUsers).toHaveBeenCalledWith(
         [3],
         expect.objectContaining({
