@@ -294,3 +294,47 @@ describe('OrderService - exportOrders no permite saltar el filtro de área con ?
     expect((result as any[]).map((o: any) => o.id)).toEqual([2]);
   });
 });
+
+describe('OrderService - findHistory con filtros', () => {
+  it('combina visibilidad con cliente, área (actual o de tarea) y rango de entrega', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const count = jest.fn().mockResolvedValue(0);
+    const prisma = {
+      order: { findMany, count },
+      $transaction: (ops: Promise<unknown>[]) => Promise.all(ops),
+    };
+    const service = new OrderService(
+      prisma as unknown as PrismaService,
+      {} as NotificationsGateway,
+      {} as AreaVisibilityService,
+      {} as OrderProductPresetService,
+      {} as NotificationService,
+      {} as AuditLogService,
+      {} as OrderAreaTaskService,
+      {} as CalendarEventService,
+    );
+
+    await service.findHistory(
+      {
+        page: 1,
+        limit: 20,
+        clientId: 4,
+        area: 'bordado',
+        deliveryFrom: '2026-10-01T06:00:00.000Z',
+        deliveryTo: '2026-10-31T05:59:59.999Z',
+      },
+      { userId: 1, roles: ['admin'] },
+    );
+
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.AND[1]).toEqual({
+      clientId: 4,
+      OR: [{ area: 'bordado' }, { areaTasks: { some: { area: 'bordado' } } }],
+      deliveryDate: {
+        gte: new Date('2026-10-01T06:00:00.000Z'),
+        lte: new Date('2026-10-31T05:59:59.999Z'),
+      },
+    });
+    expect(count).toHaveBeenCalledWith({ where });
+  });
+});

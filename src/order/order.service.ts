@@ -14,6 +14,7 @@ import {
   PaginationQueryDto,
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
+import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
 import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
 import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
@@ -901,7 +902,7 @@ export class OrderService {
    * `creationDate desc` y paginado igual que `findAll`.
    */
   async findHistory(
-    query?: PaginationQueryDto,
+    query?: OrderHistoryQueryDto,
     requestingUser?: RequestingUser,
   ) {
     try {
@@ -909,11 +910,16 @@ export class OrderService {
       // Paginación siempre activa para /orders/history (a diferencia de
       // `findAll`, que es opt-in): evita traer todo el histórico sin límite.
       const { page, limit, skip } = resolvePagination(query ?? {});
-      const where = this.orderVisibilityWhere(requestingUser);
+      const visibilityWhere = this.orderVisibilityWhere(requestingUser);
 
-      if (where === null) {
+      if (visibilityWhere === null) {
         return buildPaginatedResult([], 0, page, limit);
       }
+      // `AND` (no spread): el filtro de área pedido no puede pisar el de
+      // visibilidad del rol (ver `exportOrders`).
+      const where: Prisma.OrderWhereInput = {
+        AND: [visibilityWhere, this.historyFiltersWhere(query)],
+      };
 
       // Filtro por área/rol y paginación resueltos en la base, no trayendo
       // TODO el histórico a memoria para filtrar y recién ahí paginar (ver
@@ -940,6 +946,28 @@ export class OrderService {
       // detalles internos (Prisma, stack) al cliente en producción.
       throw error;
     }
+  }
+
+  /** Filtros opcionales del historial: cliente, área y rango de entrega. */
+  private historyFiltersWhere(
+    query?: OrderHistoryQueryDto,
+  ): Prisma.OrderWhereInput {
+    if (!query) return {};
+    const { clientId, area, deliveryFrom, deliveryTo } = query;
+    return {
+      ...(clientId && { clientId }),
+      // Un pedido "es" de un área si está ahí ahora o si esa área tiene
+      // (o tuvo) una tarea en él: el historial guarda los ya entregados.
+      ...(area && {
+        OR: [{ area }, { areaTasks: { some: { area } } }],
+      }),
+      ...((deliveryFrom || deliveryTo) && {
+        deliveryDate: {
+          ...(deliveryFrom && { gte: new Date(deliveryFrom) }),
+          ...(deliveryTo && { lte: new Date(deliveryTo) }),
+        },
+      }),
+    };
   }
 
   async findOne(id: number, requestingUser?: RequestingUser) {

@@ -15,6 +15,7 @@ import { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
+import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { StartDesignDto } from './dto/start-design.dto';
@@ -138,7 +139,7 @@ export class OrderController {
   )
   @Get('history')
   findHistory(
-    @Query() query: PaginationQueryDto,
+    @Query() query: OrderHistoryQueryDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
     return this.orderService.findHistory(query, {
