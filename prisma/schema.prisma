@@ -84,6 +84,7 @@ model User {
   hasSeenOnboarding    Boolean? // Si ya completó/cerró el tour de onboarding.
   areaViewMode         String? // Cómo ver las tareas de producción: 'unified' (todo junto, etiquetado por área) | 'split' (una vista por área). Preferencia personal, ver WORKFLOW.md §4.
   timeFormatPreference String? // Formato de hora: '24h' | '12h' (AM/PM).
+  frequentProductIds   Json? // Productos frecuentes del alta de pedido elegidos y ordenados por este usuario (array de ids de OrderProductPreset). Null = usar el orden por defecto.
 
   notificationsMuted      Boolean @default(false) // Modo silencio general: si está activo, no se persisten ni pushean notificaciones (salvo menciones directas, cuando ese tipo exista).
   notifyMentionsOnly      Boolean @default(false) // Sólo notificar menciones directas. Sin efecto práctico hoy: el sistema no tiene un tipo de notificación de "mención" implementado aún (ver NotificationService).
