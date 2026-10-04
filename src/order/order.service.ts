@@ -1,3 +1,5 @@
+import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
+import { formatOrderCode, parseOrderCode } from './order-code';
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,7 +16,6 @@ import {
   PaginationQueryDto,
   resolvePagination,
 } from 'src/common/dto/pagination-query.dto';
-import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
 import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
 import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
@@ -702,7 +703,7 @@ export class OrderService {
             userId: order.assignedUserId!,
             type: 'order_assigned',
             title: 'Nuevo pedido asignado',
-            body: `Pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} asignado`,
+            body: `Pedido ${formatOrderCode(order.id)}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} asignado`,
             orderId: order.id,
           });
         } else if (order.area) {
@@ -725,7 +726,7 @@ export class OrderService {
             {
               type: 'order_assigned',
               title: 'Nuevo pedido en el área',
-              body: `Nuevo pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} para ${chatAreaLabel(order.area)}: lo toma quien esté libre`,
+              body: `Nuevo pedido ${formatOrderCode(order.id)}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} para ${chatAreaLabel(order.area)}: lo toma quien esté libre`,
               orderId: order.id,
             },
           );
@@ -901,6 +902,69 @@ export class OrderService {
    * con `deliveredAt` + `GET /settings`). Siempre ordenado por
    * `creationDate desc` y paginado igual que `findAll`.
    */
+  /**
+   * Filtros del Historial y del export CSV. `q` busca por código de pedido
+   * ("EMD-P0042", "42"), cliente, empresa o descripción; un número también
+   * puede ser parte del texto, así que el código se suma con OR. Fechas: de
+   * creación (`dateFrom`/`dateTo`) y de entrega (`deliveryFrom`/`deliveryTo`).
+   */
+  private historyFiltersWhere(filters: {
+    q?: string;
+    statusId?: number;
+    area?: string;
+    clientId?: number;
+    dateFrom?: string;
+    dateTo?: string;
+    deliveryFrom?: string;
+    deliveryTo?: string;
+  }): Prisma.OrderWhereInput {
+    const where: Prisma.OrderWhereInput[] = [];
+    if (filters.statusId) where.push({ statusId: filters.statusId });
+    // Un pedido "es" de un área si está ahí ahora o si esa área tiene
+    // (o tuvo) una tarea en él: el historial guarda los ya entregados.
+    if (filters.area) {
+      where.push({
+        OR: [
+          { area: filters.area },
+          { areaTasks: { some: { area: filters.area } } },
+        ],
+      });
+    }
+    if (filters.clientId) where.push({ clientId: filters.clientId });
+    if (filters.dateFrom || filters.dateTo) {
+      where.push({
+        creationDate: {
+          ...(filters.dateFrom && { gte: new Date(filters.dateFrom) }),
+          ...(filters.dateTo && { lte: new Date(filters.dateTo) }),
+        },
+      });
+    }
+    if (filters.deliveryFrom || filters.deliveryTo) {
+      where.push({
+        deliveryDate: {
+          ...(filters.deliveryFrom && { gte: new Date(filters.deliveryFrom) }),
+          ...(filters.deliveryTo && { lte: new Date(filters.deliveryTo) }),
+        },
+      });
+    }
+    const q = filters.q?.trim();
+    if (q) {
+      const contains = { contains: q, mode: 'insensitive' as const };
+      const orderId = parseOrderCode(q);
+      where.push({
+        OR: [
+          ...(orderId ? [{ id: orderId }] : []),
+          { description: contains },
+          { clientNameOverride: contains },
+          { client: { first_name: contains } },
+          { client: { last_name: contains } },
+          { client: { company: { name: contains } } },
+        ],
+      });
+    }
+    return where.length > 0 ? { AND: where } : {};
+  }
+
   async findHistory(
     query?: OrderHistoryQueryDto,
     requestingUser?: RequestingUser,
@@ -915,10 +979,9 @@ export class OrderService {
       if (visibilityWhere === null) {
         return buildPaginatedResult([], 0, page, limit);
       }
-      // `AND` (no spread): el filtro de área pedido no puede pisar el de
-      // visibilidad del rol (ver `exportOrders`).
+      // `AND`: el filtro pedido (ej. `area`) nunca pisa la visibilidad por rol.
       const where: Prisma.OrderWhereInput = {
-        AND: [visibilityWhere, this.historyFiltersWhere(query)],
+        AND: [visibilityWhere, this.historyFiltersWhere(query ?? {})],
       };
 
       // Filtro por área/rol y paginación resueltos en la base, no trayendo
@@ -946,28 +1009,6 @@ export class OrderService {
       // detalles internos (Prisma, stack) al cliente en producción.
       throw error;
     }
-  }
-
-  /** Filtros opcionales del historial: cliente, área y rango de entrega. */
-  private historyFiltersWhere(
-    query?: OrderHistoryQueryDto,
-  ): Prisma.OrderWhereInput {
-    if (!query) return {};
-    const { clientId, area, deliveryFrom, deliveryTo } = query;
-    return {
-      ...(clientId && { clientId }),
-      // Un pedido "es" de un área si está ahí ahora o si esa área tiene
-      // (o tuvo) una tarea en él: el historial guarda los ya entregados.
-      ...(area && {
-        OR: [{ area }, { areaTasks: { some: { area } } }],
-      }),
-      ...((deliveryFrom || deliveryTo) && {
-        deliveryDate: {
-          ...(deliveryFrom && { gte: new Date(deliveryFrom) }),
-          ...(deliveryTo && { lte: new Date(deliveryTo) }),
-        },
-      }),
-    };
   }
 
   async findOne(id: number, requestingUser?: RequestingUser) {
@@ -1053,8 +1094,8 @@ export class OrderService {
     );
     const summary = changedLabels.join(', ');
     const updatedByUsername = requestingUser.username ?? 'Un usuario';
-    const title = `${updatedByUsername} actualizó el pedido #${orderId}`;
-    const body = `${updatedByUsername} modificó ${summary} del pedido #${orderId}`;
+    const title = `${updatedByUsername} actualizó el pedido ${formatOrderCode(orderId)}`;
+    const body = `${updatedByUsername} modificó ${summary} del pedido ${formatOrderCode(orderId)}`;
 
     const recepcionUserIds =
       await this.notificationService.userIdsForArea('recepcion');
@@ -1096,8 +1137,8 @@ export class OrderService {
   ) {
     const changedByUsername = requestingUser?.username ?? 'Un usuario';
     const changedAt = new Date();
-    const title = `Cambio de estado del pedido #${orderId}`;
-    const body = `${changedByUsername} cambió el estado del pedido #${orderId} de "${previousStatusName}" a "${newStatusName}"`;
+    const title = `Cambio de estado del pedido ${formatOrderCode(orderId)}`;
+    const body = `${changedByUsername} cambió el estado del pedido ${formatOrderCode(orderId)} de "${previousStatusName}" a "${newStatusName}"`;
 
     const recipientIds =
       await this.notificationService.userIdsForArea('recepcion');
@@ -1350,7 +1391,7 @@ export class OrderService {
           userId: updatedOrder.assignedUserId,
           type: 'order_assigned',
           title: 'Te asignaron un pedido',
-          body: `Pedido #${updatedOrder.id}${clientName ? ` de ${clientName}` : ''} ahora está a tu nombre`,
+          body: `Pedido ${formatOrderCode(updatedOrder.id)}${clientName ? ` de ${clientName}` : ''} ahora está a tu nombre`,
           orderId: updatedOrder.id,
         });
       }
@@ -2236,7 +2277,7 @@ export class OrderService {
         userId: receptionOwnerId,
         type: 'design_montage_sent',
         title: 'Montaje listo para enviar al cliente',
-        body: `Pedido #${orderId}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
+        body: `Pedido ${formatOrderCode(orderId)}: nuevo montaje (ronda ${round}) listo para enviar al cliente`,
         orderId,
       });
       this.notificationsGateway.notifyNewAssignedOrder(receptionOwnerId, {
@@ -2353,7 +2394,7 @@ export class OrderService {
         userId: previousDesignerId,
         type: 'design_feedback_added',
         title: 'El cliente pidió cambios',
-        body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
+        body: `Pedido ${formatOrderCode(orderId)}: el cliente pidió cambios sobre el montaje`,
         orderId,
       });
       this.notificationsGateway.notifyNewAssignedOrder(previousDesignerId, {
@@ -2368,7 +2409,7 @@ export class OrderService {
       await this.notificationService.createNotificationForUsers(disenoUserIds, {
         type: 'design_feedback_added',
         title: 'El cliente pidió cambios',
-        body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
+        body: `Pedido ${formatOrderCode(orderId)}: el cliente pidió cambios sobre el montaje`,
         orderId,
       });
       this.notificationsGateway.notifyNewOrderToArea('diseno', {
@@ -2503,7 +2544,7 @@ export class OrderService {
       await this.notificationService.createNotificationForUsers(areaUserIds, {
         type: 'design_approved',
         title: 'Diseño autorizado, listo para producción',
-        body: `Pedido #${orderId}: diseño autorizado, pasa a ${chatAreaLabel(area)}`,
+        body: `Pedido ${formatOrderCode(orderId)}: diseño autorizado, pasa a ${chatAreaLabel(area)}`,
         orderId,
       });
       this.notificationsGateway.notifyNewOrderToArea(area, {
@@ -2522,7 +2563,7 @@ export class OrderService {
         userId: designerId,
         type: 'design_approved',
         title: 'El cliente autorizó el diseño',
-        body: `Pedido #${orderId}: pasa a ${resolvedAreas.map(chatAreaLabel).join(', ')}`,
+        body: `Pedido ${formatOrderCode(orderId)}: pasa a ${resolvedAreas.map(chatAreaLabel).join(', ')}`,
         orderId,
       });
     }
@@ -2673,8 +2714,11 @@ export class OrderService {
    */
   async exportOrders(
     filters: {
+      q?: string;
       dateFrom?: string;
       dateTo?: string;
+      deliveryFrom?: string;
+      deliveryTo?: string;
       statusId?: number;
       area?: string;
       clientId?: number;
@@ -2686,17 +2730,7 @@ export class OrderService {
       return [];
     }
 
-    const requestedFilters: Prisma.OrderWhereInput = {
-      ...(filters.statusId && { statusId: filters.statusId }),
-      ...(filters.area && { area: filters.area }),
-      ...(filters.clientId && { clientId: filters.clientId }),
-      ...((filters.dateFrom || filters.dateTo) && {
-        creationDate: {
-          ...(filters.dateFrom && { gte: new Date(filters.dateFrom) }),
-          ...(filters.dateTo && { lte: new Date(filters.dateTo) }),
-        },
-      }),
-    };
+    const requestedFilters = this.historyFiltersWhere(filters);
     // `AND` en vez de spread: tanto `requestedFilters.area` (filtro pedido
     // por el cliente) como `visibilityWhere.area` (rol operativo) pueden
     // setear la misma clave `area`; con spread una pisaría a la otra y un
@@ -2741,6 +2775,7 @@ export class OrderService {
 
     return orders.map((order) => ({
       id: order.id,
+      codigo: formatOrderCode(order.id),
       cliente: order.client?.first_name ?? order.clientNameOverride ?? '',
       area: order.area ?? '',
       estado: order.status?.name ?? '',

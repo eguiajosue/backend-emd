@@ -1,3 +1,4 @@
+import { formatOrderCode } from './order-code';
 import {
   BadRequestException,
   HttpException,
@@ -200,12 +201,12 @@ export class OrderAreaTaskService {
     await this.notificationService.createNotificationForUsers(areaUserIds, {
       type: 'area_task_created',
       title: `Nueva tarea de ${area}`,
-      body: `Pedido #${orderId}: hay trabajo pendiente para ${area}`,
+      body: `Pedido ${formatOrderCode(orderId)}: hay trabajo pendiente para ${area}`,
       orderId,
     });
     this.notificationsGateway.notifyNewOrderToArea(area, {
       orderId,
-      description: `Nueva tarea de ${area} en el pedido #${orderId}`,
+      description: `Nueva tarea de ${area} en el pedido ${formatOrderCode(orderId)}`,
       area,
       deliveryDate: null,
     });
@@ -697,7 +698,7 @@ export class OrderAreaTaskService {
       userId: receptionOwnerId,
       type: 'area_task_completed',
       title: `${area} terminó su parte`,
-      body: `Pedido #${orderId}: el área ${area} completó su tarea`,
+      body: `Pedido ${formatOrderCode(orderId)}: el área ${area} completó su tarea`,
       orderId,
     });
   }
@@ -710,7 +711,7 @@ export class OrderAreaTaskService {
       userId: receptionOwnerId,
       type: 'order_ready',
       title: 'Pedido listo para entregar',
-      body: `Pedido #${orderId}: todas las áreas terminaron, falta confirmar la entrega`,
+      body: `Pedido ${formatOrderCode(orderId)}: todas las áreas terminaron, falta confirmar la entrega`,
       orderId,
     });
   }

@@ -82,7 +82,7 @@ describe('OrderService.update - notificación de cambio de estado', () => {
       expect.objectContaining({
         type: 'order_status_changed',
         orderId: 123,
-        body: 'Ana cambió el estado del pedido #123 de "en diseño" a "terminado"',
+        body: 'Ana cambió el estado del pedido EMD-P0123 de "en diseño" a "terminado"',
       }),
     );
   });

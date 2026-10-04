@@ -201,8 +201,11 @@ export class OrderController {
   ) {
     const rows = await this.orderService.exportOrders(
       {
+        q: query.q,
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        deliveryFrom: query.deliveryFrom,
+        deliveryTo: query.deliveryTo,
         statusId: query.statusId,
         area: query.area,
         clientId: query.clientId,
@@ -212,7 +215,7 @@ export class OrderController {
 
     const csv = toCsv(
       [
-        'ID',
+        'Código',
         'Cliente',
         'Área',
         'Estado',
@@ -222,7 +225,7 @@ export class OrderController {
         'Descripción',
       ],
       rows.map((r) => [
-        r.id,
+        r.codigo,
         r.cliente,
         r.area,
         r.estado,

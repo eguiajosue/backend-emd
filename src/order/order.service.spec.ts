@@ -233,14 +233,20 @@ describe('OrderService - exportOrders no permite saltar el filtro de área con ?
         // Simula un `where` de Prisma con `AND: [visibilityWhere, requestedFilters]`
         // (o un `where` plano, para el caso sin restricción de visibilidad).
         findMany: jest.fn(({ where }: any = {}) => {
-          const clauses: any[] = where?.AND ?? [where ?? {}];
+          // Los filtros pedidos vienen anidados en su propio `AND`.
+          const flatten = (w: any): any[] =>
+            w?.AND ? w.AND.flatMap(flatten) : [w ?? {}];
+          const clauses: any[] = flatten(where);
+          const matches = (o: any, clause: any): boolean => {
+            if (clause?.OR) return clause.OR.some((c: any) => matches(o, c));
+            if (clause?.area?.in) return clause.area.in.includes(o.area);
+            if (typeof clause?.area === 'string') return o.area === clause.area;
+            // Los mocks no traen tareas: `areaTasks.some` nunca coincide.
+            if (clause?.areaTasks) return false;
+            return true;
+          };
           const result = orders.filter((o) =>
-            clauses.every((clause) => {
-              if (clause?.area?.in) return clause.area.in.includes(o.area);
-              if (typeof clause?.area === 'string')
-                return o.area === clause.area;
-              return true;
-            }),
+            clauses.every((clause) => matches(o, clause)),
           );
           return Promise.resolve(result);
         }),
@@ -328,12 +334,21 @@ describe('OrderService - findHistory con filtros', () => {
 
     const where = findMany.mock.calls[0][0].where;
     expect(where.AND[1]).toEqual({
-      clientId: 4,
-      OR: [{ area: 'bordado' }, { areaTasks: { some: { area: 'bordado' } } }],
-      deliveryDate: {
-        gte: new Date('2026-10-01T06:00:00.000Z'),
-        lte: new Date('2026-10-31T05:59:59.999Z'),
-      },
+      AND: [
+        {
+          OR: [
+            { area: 'bordado' },
+            { areaTasks: { some: { area: 'bordado' } } },
+          ],
+        },
+        { clientId: 4 },
+        {
+          deliveryDate: {
+            gte: new Date('2026-10-01T06:00:00.000Z'),
+            lte: new Date('2026-10-31T05:59:59.999Z'),
+          },
+        },
+      ],
     });
     expect(count).toHaveBeenCalledWith({ where });
   });
