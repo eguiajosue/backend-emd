@@ -97,7 +97,7 @@ export function stockStatusOf(
  *
  * Distinto del catálogo de Materiales (ver `Material`): un artículo puede
  * vincularse a un material del catálogo, pero muchos consumibles (hilos de
- * bordado, tintas) sólo existen acá.
+ * bordado, tintas) sólo existen aquí.
  *
  * Acceso: admin/superuser/recepción ven y gestionan (crean, editan, borran y
  * registran movimientos) todos los departamentos; cada rol de área sólo
@@ -121,7 +121,7 @@ export class InventoryService {
   private assertArea(actor: Actor, area: string) {
     if (!this.areasFor(actor.roles).includes(area as InventoryArea)) {
       throw new ForbiddenException(
-        'No tenés acceso al inventario de ese departamento',
+        'No tienes acceso al inventario de ese departamento',
       );
     }
   }

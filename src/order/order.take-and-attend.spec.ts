@@ -84,7 +84,7 @@ const makePrisma = (order: OrderRow) => ({
     }),
   },
   orderAuditLog: { create: jest.fn() },
-  // $transaction con array de operaciones: acá ya vienen resueltas.
+  // $transaction con array de operaciones: aquí ya vienen resueltas.
   $transaction: jest.fn(async (ops: unknown[]) => Promise.all(ops)),
 });
 

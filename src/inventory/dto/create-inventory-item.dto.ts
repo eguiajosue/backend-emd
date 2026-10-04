@@ -19,7 +19,7 @@ import { INVENTORY_AREAS } from '../inventory.constants';
  * (el servicio guarda "" como null); los numéricos opcionales aceptan null
  * con el mismo fin.
  *
- * El stock no se edita desde acá: `initialQuantity` sólo se usa en el alta y
+ * El stock no se edita desde aquí: `initialQuantity` sólo se usa en el alta y
  * queda registrado como una ENTRADA "Stock inicial" del kardex. Después, el
  * stock cambia únicamente con movimientos (ver CreateInventoryMovementDto).
  */

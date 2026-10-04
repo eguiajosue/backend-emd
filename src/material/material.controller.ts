@@ -19,7 +19,7 @@ import { ORDER_VIEWING_ROLES } from 'src/common/constants/order-viewing-roles';
 /**
  * Catálogo de materiales/insumos de la empresa. Alta/edición restringida a
  * quien gestiona el catálogo; lectura abierta a todo rol que ve pedidos,
- * porque la hoja de materiales de un pedido se arma eligiendo de acá.
+ * porque la hoja de materiales de un pedido se arma eligiendo de aquí.
  */
 @ApiTags('materials')
 @Controller('materials')
