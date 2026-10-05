@@ -37,6 +37,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { OrderMockupModule } from './order-mockup/order-mockup.module';
 import { MockupTemplateModule } from './mockup-template/mockup-template.module';
 import { MockupLogoModule } from './mockup-logo/mockup-logo.module';
+import { QuoteModule } from './quote/quote.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -92,6 +93,7 @@ import { AppController } from './app.controller';
     OrderMockupModule,
     MockupTemplateModule,
     MockupLogoModule,
+    QuoteModule,
   ],
   providers: [
     {

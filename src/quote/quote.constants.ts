@@ -11,8 +11,7 @@ export const QUOTE_STATUSES_BY_STAGE = {
   enviada: ['esperando_respuesta', 'aceptada', 'no_aceptada', 'comentarios'],
 } as const satisfies Record<QuoteStage, readonly string[]>;
 
-export type QuoteStatus =
-  (typeof QUOTE_STATUSES_BY_STAGE)[QuoteStage][number];
+export type QuoteStatus = (typeof QUOTE_STATUSES_BY_STAGE)[QuoteStage][number];
 
 export const QUOTE_STATUSES: readonly QuoteStatus[] = [
   ...QUOTE_STATUSES_BY_STAGE.por_enviar,
