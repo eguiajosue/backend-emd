@@ -15,8 +15,13 @@ import { ValidateBy, ValidationOptions } from 'class-validator';
 export type NavPreferences = {
   /** Urls de los ítems fijados arriba, en el orden elegido. */
   favorites: string[];
-  /** Por grupo (`groupLabel` del menú): urls de sus ítems en el orden elegido. */
-  order: Record<string, string[]>;
+  /**
+   * Orden propio, plano: urls en el orden elegido. Cada grupo ordena sus
+   * ítems por su posición en esta lista; los que no están quedan al final
+   * de su grupo en el orden por defecto. Plano y no por grupo (decisión R1):
+   * los nombres de grupo cambian según el menú del rol y al renombrarlos.
+   */
+  order: string[];
   /** Urls de los ítems ocultos. */
   hidden: string[];
   /** Barra expandida (títulos visibles). */
@@ -29,15 +34,15 @@ export type MockupColors = {
   custom: string[];
 };
 
+/** Tope de `favorites` y de `hidden`. */
 export const MAX_NAV_LIST_ITEMS = 50;
-export const MAX_NAV_GROUPS = 20;
-export const MAX_NAV_GROUP_KEY_LENGTH = 80;
+/** Tope de `order` (puede listar todos los ítems del menú). */
+export const MAX_NAV_ORDER_ITEMS = 100;
 export const MAX_NAV_URL_LENGTH = 200;
 export const MAX_MOCKUP_COLORS = 48;
 
 const NAV_URL = /^\/dashboard[^\u0000-\u001f\u007f]*$/;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -56,12 +61,8 @@ function isNavUrl(value: unknown): value is string {
   );
 }
 
-function isNavUrlList(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) &&
-    value.length <= MAX_NAV_LIST_ITEMS &&
-    value.every(isNavUrl)
-  );
+function isNavUrlList(value: unknown, max: number): value is string[] {
+  return Array.isArray(value) && value.length <= max && value.every(isNavUrl);
 }
 
 function isColorList(value: unknown): value is string[] {
@@ -79,21 +80,11 @@ export function isNavPreferences(value: unknown): value is NavPreferences {
   ) {
     return false;
   }
-  if (!isNavUrlList(value.favorites) || !isNavUrlList(value.hidden)) {
-    return false;
-  }
-  if (typeof value.expanded !== 'boolean') return false;
-  if (!isPlainObject(value.order)) return false;
-  const groups = Object.entries(value.order);
   return (
-    groups.length <= MAX_NAV_GROUPS &&
-    groups.every(
-      ([group, urls]) =>
-        group.trim().length > 0 &&
-        group.length <= MAX_NAV_GROUP_KEY_LENGTH &&
-        !CONTROL_CHARS.test(group) &&
-        isNavUrlList(urls),
-    )
+    isNavUrlList(value.favorites, MAX_NAV_LIST_ITEMS) &&
+    isNavUrlList(value.hidden, MAX_NAV_LIST_ITEMS) &&
+    isNavUrlList(value.order, MAX_NAV_ORDER_ITEMS) &&
+    typeof value.expanded === 'boolean'
   );
 }
 
@@ -114,7 +105,7 @@ export function IsNavPreferences(validationOptions?: ValidationOptions) {
       validator: {
         validate: (value) => isNavPreferences(value),
         defaultMessage: () =>
-          `navPreferences debe ser { favorites: string[]; order: Record<string, string[]>; hidden: string[]; expanded: boolean } con urls de /dashboard (máx. ${MAX_NAV_URL_LENGTH} caracteres, ${MAX_NAV_LIST_ITEMS} por lista, ${MAX_NAV_GROUPS} grupos)`,
+          `navPreferences debe ser { favorites: string[]; order: string[]; hidden: string[]; expanded: boolean } con urls de /dashboard (máx. ${MAX_NAV_URL_LENGTH} caracteres; ${MAX_NAV_LIST_ITEMS} favoritos u ocultos, ${MAX_NAV_ORDER_ITEMS} en order)`,
       },
     },
     validationOptions,

@@ -29,6 +29,8 @@ CREATE TABLE "MockupLogo" (
     "name" TEXT NOT NULL,
     "imageData" TEXT NOT NULL,
     "imageMime" TEXT NOT NULL,
+    "thumbnailData" TEXT NOT NULL,
+    "thumbnailMime" TEXT NOT NULL,
     "createdById" INTEGER,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "useCount" INTEGER NOT NULL DEFAULT 0,
@@ -36,6 +38,12 @@ CREATE TABLE "MockupLogo" (
 
     CONSTRAINT "MockupLogo_pkey" PRIMARY KEY ("id")
 );
+
+-- CreateIndex
+CREATE INDEX "MockupTemplate_createdAt_idx" ON "MockupTemplate"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "MockupLogo_useCount_lastUsedAt_idx" ON "MockupLogo"("useCount", "lastUsedAt");
 
 -- AddForeignKey
 ALTER TABLE "MockupTemplate" ADD CONSTRAINT "MockupTemplate_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

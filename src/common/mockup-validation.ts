@@ -129,3 +129,17 @@ export function assertMockupConfigShape(
     }
   }
 }
+
+/**
+ * Ancho y alto de un PNG leídos de su cabecera IHDR (firma de 8 bytes, largo
+ * y tipo del chunk, y luego ancho/alto en big-endian), sin decodificar la
+ * imagen. `null` si el buffer no tiene un IHDR al principio.
+ */
+export function pngDimensions(
+  png: Buffer,
+): { width: number; height: number } | null {
+  if (png.length < 24 || png.toString('latin1', 12, 16) !== 'IHDR') {
+    return null;
+  }
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+}

@@ -6,10 +6,13 @@ import { MOCKUP_AUTHOR_SELECT, mockupAuthor } from 'src/common/mockup-author';
 import {
   base64DecodedBytes,
   parseImageDataUrl,
+  pngDimensions,
 } from 'src/common/mockup-validation';
 import {
   CreateMockupLogoDto,
   MAX_MOCKUP_LOGO_BYTES,
+  MAX_MOCKUP_LOGO_THUMBNAIL_BYTES,
+  MAX_MOCKUP_LOGO_THUMBNAIL_SIDE,
   MAX_MOCKUP_LOGO_NAME_LENGTH,
   MOCKUP_LOGO_MIME_TYPES,
   RenameMockupLogoDto,
@@ -28,8 +31,10 @@ export interface MockupLogoSummary {
 }
 
 /**
- * Selección del listado: NUNCA `imageData` (hasta 2MB por logo). La imagen
- * se pide aparte con `GET /mockup-logos/:id/image`.
+ * Selección del listado: NUNCA `imageData` (hasta 2MB por logo) ni
+ * `thumbnailData`. La miniatura se pide aparte por tarjeta visible
+ * (`GET /mockup-logos/:id/thumbnail`) y la imagen completa al elegir el
+ * logo (`GET /mockup-logos/:id/image`).
  */
 export const MOCKUP_LOGO_SUMMARY_SELECT = {
   id: true,
@@ -53,6 +58,7 @@ type MockupLogoSummaryRow = Prisma.MockupLogoGetPayload<{
 }>;
 
 const MAX_LOGO_MB = MAX_MOCKUP_LOGO_BYTES / (1024 * 1024);
+const MAX_THUMBNAIL_KB = MAX_MOCKUP_LOGO_THUMBNAIL_BYTES / 1024;
 
 /**
  * Biblioteca de logos del creador de mockups, compartida por la empresa
@@ -71,7 +77,7 @@ export class MockupLogoService {
     return rows.map((row) => this.toSummary(row));
   }
 
-  /** La imagen de un logo como data URL (404 si no existe). */
+  /** La imagen completa de un logo como data URL (404 si no existe). */
   async findImage(id: number): Promise<{ dataUrl: string }> {
     const row = await this.prisma.mockupLogo.findUnique({
       where: { id },
@@ -79,6 +85,18 @@ export class MockupLogoService {
     });
     if (!row) throw notFound();
     return { dataUrl: `data:${row.imageMime};base64,${row.imageData}` };
+  }
+
+  /** La miniatura (≤ 160px) de un logo como data URL (404 si no existe). */
+  async findThumbnail(id: number): Promise<{ dataUrl: string }> {
+    const row = await this.prisma.mockupLogo.findUnique({
+      where: { id },
+      select: { thumbnailData: true, thumbnailMime: true },
+    });
+    if (!row) throw notFound();
+    return {
+      dataUrl: `data:${row.thumbnailMime};base64,${row.thumbnailData}`,
+    };
   }
 
   /** Sube un logo. Devuelve la fila tal como sale en el listado. */
@@ -89,11 +107,14 @@ export class MockupLogoService {
     // Repite la validación del DTO: el service también se usa sin el pipe.
     const name = assertName(dto.name);
     const image = await assertImageValid(dto.imageDataUrl);
+    const thumbnail = await assertThumbnailValid(dto.thumbnailDataUrl);
     const row = await this.prisma.mockupLogo.create({
       data: {
         name,
         imageData: image.base64,
         imageMime: image.mime,
+        thumbnailData: thumbnail.base64,
+        thumbnailMime: thumbnail.mime,
         createdById: userId,
       },
       select: MOCKUP_LOGO_SUMMARY_SELECT,
@@ -192,5 +213,46 @@ async function assertImageValid(
       typeErrorMessage: 'El contenido del logo no es un PNG válido',
     },
   );
+  return { base64, mime };
+}
+
+/**
+ * Miniatura del logo: data URL PNG con base64 estricto (400), ≤ 24KB
+ * decodificada (413), PNG REAL por magic bytes (400) y ≤ 160px de lado
+ * según su IHDR (400).
+ */
+async function assertThumbnailValid(
+  thumbnailDataUrl: unknown,
+): Promise<{ base64: string; mime: string }> {
+  const { base64, mime } = parseImageDataUrl(thumbnailDataUrl, {
+    allowedMimeTypes: MOCKUP_LOGO_MIME_TYPES,
+    subject: 'La miniatura del logo',
+    formats: 'PNG',
+  });
+  const sizeMessage = `La miniatura del logo no puede superar ${MAX_THUMBNAIL_KB}KB`;
+  if (base64DecodedBytes(base64) > MAX_MOCKUP_LOGO_THUMBNAIL_BYTES) {
+    throw new HttpException(sizeMessage, HttpStatus.PAYLOAD_TOO_LARGE);
+  }
+  const png = await assertBase64FileValid(
+    { data: base64, filename: 'miniatura', mimeType: mime },
+    {
+      maxBytes: MAX_MOCKUP_LOGO_THUMBNAIL_BYTES,
+      allowedMimeTypes: MOCKUP_LOGO_MIME_TYPES,
+      sizeErrorMessage: sizeMessage,
+      typeErrorMessage:
+        'El contenido de la miniatura del logo no es un PNG válido',
+    },
+  );
+  const size = pngDimensions(png);
+  if (
+    !size ||
+    size.width > MAX_MOCKUP_LOGO_THUMBNAIL_SIDE ||
+    size.height > MAX_MOCKUP_LOGO_THUMBNAIL_SIDE
+  ) {
+    throw new HttpException(
+      `La miniatura del logo no puede superar ${MAX_MOCKUP_LOGO_THUMBNAIL_SIDE}px de lado`,
+      HttpStatus.BAD_REQUEST,
+    );
+  }
   return { base64, mime };
 }

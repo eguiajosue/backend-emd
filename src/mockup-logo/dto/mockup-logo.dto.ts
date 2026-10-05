@@ -10,12 +10,22 @@ export const MAX_MOCKUP_LOGO_NAME_LENGTH = 80;
 /** Tope del logo decodificado (el frontend lo reduce a ≤ 1024px antes). */
 export const MAX_MOCKUP_LOGO_BYTES = 2 * 1024 * 1024;
 
+/**
+ * Miniatura del logo para la grilla (decisión R7 de
+ * frontend-emd/docs/plans/sidebar-y-mockups-v2.md): PNG de ≤ 160px de lado
+ * y ≤ 24KB que arma el frontend al subirlo. Se pide sólo para las tarjetas
+ * visibles (`GET /mockup-logos/:id/thumbnail`); el logo completo, sólo al
+ * elegirlo.
+ */
+export const MAX_MOCKUP_LOGO_THUMBNAIL_BYTES = 24 * 1024;
+export const MAX_MOCKUP_LOGO_THUMBNAIL_SIDE = 160;
+
 const NAME_MESSAGE = `El nombre del logo es obligatorio (máx. ${MAX_MOCKUP_LOGO_NAME_LENGTH} caracteres)`;
 
 /**
- * Body de `POST /mockup-logos`. `imageDataUrl` se valida a fondo en
- * `MockupLogoService.create` (base64 estricto, PNG por magic bytes, tamaño
- * con 413).
+ * Body de `POST /mockup-logos`. `imageDataUrl` y `thumbnailDataUrl` se
+ * validan a fondo en `MockupLogoService.create` (base64 estricto, PNG por
+ * magic bytes, tamaño con 413, lado de la miniatura).
  */
 export class CreateMockupLogoDto {
   @ApiProperty({ maxLength: MAX_MOCKUP_LOGO_NAME_LENGTH })
@@ -29,6 +39,13 @@ export class CreateMockupLogoDto {
   @IsString({ message: 'La imagen del logo es obligatoria' })
   @IsNotEmpty({ message: 'La imagen del logo es obligatoria' })
   imageDataUrl: string;
+
+  @ApiProperty({
+    description: 'data:image/png;base64,... (máx. 160px de lado y 24KB).',
+  })
+  @IsString({ message: 'La miniatura del logo es obligatoria' })
+  @IsNotEmpty({ message: 'La miniatura del logo es obligatoria' })
+  thumbnailDataUrl: string;
 }
 
 /** Body de `PATCH /mockup-logos/:id`: sólo renombrar. */

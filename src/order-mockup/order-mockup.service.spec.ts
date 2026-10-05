@@ -171,14 +171,28 @@ describe('OrderMockupService', () => {
       },
     );
 
-    it('rechaza una prenda que no es tshirt ni cap con 400', async () => {
+    it('rechaza una prenda fuera de la lista compartida con 400', async () => {
       expect(
         await statusOf(() =>
-          service.create(10, dto({ garment: 'hoodie' }), RECEPCION),
+          service.create(10, dto({ garment: 'pants' }), RECEPCION),
         ),
       ).toBe(HttpStatus.BAD_REQUEST);
       expect(prisma.orderMockup.create).not.toHaveBeenCalled();
     });
+
+    it.each(['hoodie', 'dress-shirt'])(
+      'acepta %s (misma lista de prendas que las plantillas, decisión R11)',
+      async (garment) => {
+        await service.create(
+          10,
+          dto({ garment, config: config({ garment }) }),
+          RECEPCION,
+        );
+        expect(prisma.orderMockup.create.mock.calls[0][0].data.garment).toBe(
+          garment,
+        );
+      },
+    );
 
     it.each([
       [

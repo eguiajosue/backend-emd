@@ -4,6 +4,11 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import { MOCKUP_AUTHOR_SELECT, mockupAuthor } from 'src/common/mockup-author';
 import {
+  MOCKUP_GARMENT_MESSAGE,
+  MockupGarment,
+  isMockupGarment,
+} from 'src/common/mockup-garments';
+import {
   assertJsonHasNoNul,
   assertMockupConfigShape,
   base64DecodedBytes,
@@ -14,9 +19,7 @@ import {
   MAX_MOCKUP_TEMPLATE_CONFIG_BYTES,
   MAX_MOCKUP_TEMPLATE_NAME_LENGTH,
   MAX_MOCKUP_TEMPLATE_THUMBNAIL_BYTES,
-  MOCKUP_TEMPLATE_GARMENTS,
   MOCKUP_TEMPLATE_THUMBNAIL_MIME_TYPES,
-  MockupTemplateGarment,
   RenameMockupTemplateDto,
 } from './dto/mockup-template.dto';
 
@@ -24,8 +27,8 @@ import {
 export interface MockupTemplateSummary {
   id: number;
   name: string;
-  garment: MockupTemplateGarment;
-  /** `data:image/png;base64,...` (o image/jpeg), máx. 300KB. */
+  garment: MockupGarment;
+  /** `data:image/png;base64,...` (o image/jpeg), máx. 96KB. */
   thumbnailUrl: string;
   /** ISO 8601. */
   createdAt: string;
@@ -41,7 +44,7 @@ export interface MockupTemplateDetail extends MockupTemplateSummary {
 
 /**
  * Selección del listado: todo menos `config` (puede pesar varios MB). La
- * miniatura sí viene: está topada a 300KB para que el panel no tenga que
+ * miniatura sí viene: está topada a 96KB para que el panel no tenga que
  * pedir cada plantilla aparte.
  */
 export const MOCKUP_TEMPLATE_SUMMARY_SELECT = {
@@ -152,7 +155,7 @@ export class MockupTemplateService {
     return {
       id: row.id,
       name: row.name,
-      garment: row.garment as MockupTemplateGarment,
+      garment: row.garment as MockupGarment,
       thumbnailUrl: `data:${row.thumbnailMime};base64,${row.thumbnailData}`,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -176,14 +179,11 @@ function assertName(name: unknown): string {
   return trimmed;
 }
 
-function assertGarment(garment: unknown): MockupTemplateGarment {
-  if (!MOCKUP_TEMPLATE_GARMENTS.includes(garment as MockupTemplateGarment)) {
-    throw new HttpException(
-      'La prenda de la plantilla no es válida',
-      HttpStatus.BAD_REQUEST,
-    );
+function assertGarment(garment: unknown): MockupGarment {
+  if (!isMockupGarment(garment)) {
+    throw new HttpException(MOCKUP_GARMENT_MESSAGE, HttpStatus.BAD_REQUEST);
   }
-  return garment as MockupTemplateGarment;
+  return garment;
 }
 
 /** Configuración ≤ 8MB serializada (413) y sin NUL (400, jsonb). */
@@ -202,7 +202,7 @@ function assertConfigSize(config: unknown) {
 }
 
 /**
- * Miniatura: data URL PNG/JPEG con base64 estricto (400), ≤ 300KB
+ * Miniatura: data URL PNG/JPEG con base64 estricto (400), ≤ 96KB
  * decodificada (413) y tipo REAL por magic bytes (400).
  */
 async function assertThumbnailValid(

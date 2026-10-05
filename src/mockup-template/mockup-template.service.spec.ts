@@ -239,7 +239,8 @@ describe('MockupTemplateService', () => {
       expect(prisma.mockupTemplate.create).not.toHaveBeenCalled();
     });
 
-    it('rechaza con 413 una miniatura de más de 300KB decodificada', async () => {
+    it('rechaza con 413 una miniatura de más de 96KB decodificada (R6)', async () => {
+      expect(MAX_MOCKUP_TEMPLATE_THUMBNAIL_BYTES).toBe(96 * 1024);
       const error = await service
         .create(
           dto({
@@ -254,7 +255,7 @@ describe('MockupTemplateService', () => {
         HttpStatus.PAYLOAD_TOO_LARGE,
       );
       expect((error as HttpException).message).toBe(
-        'La miniatura de la plantilla no puede superar 300KB',
+        'La miniatura de la plantilla no puede superar 96KB',
       );
       expect(prisma.mockupTemplate.create).not.toHaveBeenCalled();
     });

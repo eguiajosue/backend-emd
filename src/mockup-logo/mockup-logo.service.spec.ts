@@ -3,6 +3,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CreateMockupLogoDto,
   MAX_MOCKUP_LOGO_BYTES,
+  MAX_MOCKUP_LOGO_THUMBNAIL_BYTES,
 } from './dto/mockup-logo.dto';
 import { MockupLogoService } from './mockup-logo.service';
 
@@ -10,6 +11,13 @@ import { MockupLogoService } from './mockup-logo.service';
 const MINIMAL_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const PNG_DATA_URL = `data:image/png;base64,${MINIMAL_PNG_BASE64}`;
+/** El PNG mínimo (1×1) con otro ancho/alto en su IHDR. */
+const pngOfSize = (width: number, height: number) => {
+  const png = Buffer.from(MINIMAL_PNG_BASE64, 'base64');
+  png.writeUInt32BE(width, 16);
+  png.writeUInt32BE(height, 20);
+  return `data:image/png;base64,${png.toString('base64')}`;
+};
 const MINIMAL_JPEG_BASE64 = Buffer.from([
   0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
 ]).toString('base64');
@@ -23,6 +31,7 @@ const dto = (
   ({
     name: 'Logo Acme',
     imageDataUrl: PNG_DATA_URL,
+    thumbnailDataUrl: PNG_DATA_URL,
     ...overrides,
   }) as CreateMockupLogoDto;
 
@@ -101,6 +110,8 @@ describe('MockupLogoService', () => {
       const args = prisma.mockupLogo.findMany.mock.calls[0][0];
       expect(args.select.imageData).toBeUndefined();
       expect(args.select.imageMime).toBeUndefined();
+      expect(args.select.thumbnailData).toBeUndefined();
+      expect(args.select.thumbnailMime).toBeUndefined();
       expect(args.orderBy).toEqual([
         { useCount: 'desc' },
         { lastUsedAt: { sort: 'desc', nulls: 'last' } },
@@ -142,18 +153,48 @@ describe('MockupLogoService', () => {
     });
   });
 
+  describe('findThumbnail', () => {
+    it('devuelve la miniatura como data URL, sin leer la imagen completa', async () => {
+      prisma.mockupLogo.findUnique.mockResolvedValue({
+        thumbnailData: MINIMAL_PNG_BASE64,
+        thumbnailMime: 'image/png',
+      });
+
+      await expect(service.findThumbnail(5)).resolves.toEqual({
+        dataUrl: PNG_DATA_URL,
+      });
+      expect(prisma.mockupLogo.findUnique).toHaveBeenCalledWith({
+        where: { id: 5 },
+        select: { thumbnailData: true, thumbnailMime: true },
+      });
+    });
+
+    it('responde 404 si no existe', async () => {
+      expect(await statusOf(() => service.findThumbnail(99))).toBe(
+        HttpStatus.NOT_FOUND,
+      );
+    });
+  });
+
   describe('create', () => {
-    it('guarda nombre (sin espacios de más), imagen sin prefijo, mime y autor; responde sin la imagen', async () => {
-      const result = await service.create(dto({ name: ' Logo Acme ' }), 7);
+    it('guarda nombre (sin espacios de más), imagen y miniatura sin prefijo, mimes y autor; responde sin imágenes', async () => {
+      const thumbnailDataUrl = pngOfSize(160, 120);
+      const result = await service.create(
+        dto({ name: ' Logo Acme ', thumbnailDataUrl }),
+        7,
+      );
 
       const args = prisma.mockupLogo.create.mock.calls[0][0];
       expect(args.data).toEqual({
         name: 'Logo Acme',
         imageData: MINIMAL_PNG_BASE64,
         imageMime: 'image/png',
+        thumbnailData: thumbnailDataUrl.slice('data:image/png;base64,'.length),
+        thumbnailMime: 'image/png',
         createdById: 7,
       });
       expect(args.select.imageData).toBeUndefined();
+      expect(args.select.thumbnailData).toBeUndefined();
       expect(result).toEqual(SUMMARY);
     });
 
@@ -171,6 +212,27 @@ describe('MockupLogoService', () => {
       [
         'contenido que no es PNG aunque lo declare',
         { imageDataUrl: `data:image/png;base64,${MINIMAL_JPEG_BASE64}` },
+      ],
+      ['sin miniatura', { thumbnailDataUrl: undefined }],
+      [
+        'miniatura JPEG',
+        { thumbnailDataUrl: `data:image/jpeg;base64,${MINIMAL_JPEG_BASE64}` },
+      ],
+      [
+        'miniatura con base64 inválido',
+        { thumbnailDataUrl: `${PNG_DATA_URL}!` },
+      ],
+      [
+        'miniatura que no es PNG aunque lo declare',
+        { thumbnailDataUrl: `data:image/png;base64,${MINIMAL_JPEG_BASE64}` },
+      ],
+      [
+        'miniatura de más de 160px de ancho',
+        { thumbnailDataUrl: pngOfSize(161, 10) },
+      ],
+      [
+        'miniatura de más de 160px de alto',
+        { thumbnailDataUrl: pngOfSize(10, 161) },
       ],
     ])('rechaza con 400: %s', async (_name, overrides) => {
       expect(await statusOf(() => service.create(dto(overrides), 7))).toBe(
@@ -195,6 +257,27 @@ describe('MockupLogoService', () => {
       );
       expect((error as HttpException).message).toBe(
         'El logo no puede superar 2MB',
+      );
+      expect(prisma.mockupLogo.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con 413 una miniatura de más de 24KB decodificada', async () => {
+      expect(MAX_MOCKUP_LOGO_THUMBNAIL_BYTES).toBe(24 * 1024);
+      const error = await service
+        .create(
+          dto({
+            thumbnailDataUrl: `data:image/png;base64,${base64OfBytes(
+              MAX_MOCKUP_LOGO_THUMBNAIL_BYTES + 1,
+            )}`,
+          }),
+          7,
+        )
+        .catch((e: HttpException) => e);
+      expect((error as HttpException).getStatus()).toBe(
+        HttpStatus.PAYLOAD_TOO_LARGE,
+      );
+      expect((error as HttpException).message).toBe(
+        'La miniatura del logo no puede superar 24KB',
       );
       expect(prisma.mockupLogo.create).not.toHaveBeenCalled();
     });

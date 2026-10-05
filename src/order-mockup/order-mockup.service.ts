@@ -4,6 +4,11 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import { MOCKUP_AUTHOR_SELECT, mockupAuthor } from 'src/common/mockup-author';
 import {
+  MOCKUP_GARMENT_MESSAGE,
+  MockupGarment,
+  isMockupGarment,
+} from 'src/common/mockup-garments';
+import {
   assertJsonHasNoNul,
   assertMockupConfigShape,
   base64DecodedBytes,
@@ -13,9 +18,7 @@ import { OrderService, RequestingUser } from 'src/order/order.service';
 import {
   CreateOrderMockupDto,
   MAX_MOCKUP_BYTES,
-  MOCKUP_GARMENTS,
   MOCKUP_IMAGE_MIME_TYPES,
-  MockupGarment,
 } from './dto/create-order-mockup.dto';
 
 /** Fila del listado (frontend `OrderMockupSummary`). */
@@ -165,13 +168,10 @@ export class OrderMockupService {
 
   /** Repite la validación del DTO: el service también se usa sin el pipe. */
   private assertGarment(garment: unknown): MockupGarment {
-    if (!MOCKUP_GARMENTS.includes(garment as MockupGarment)) {
-      throw new HttpException(
-        'La prenda del mockup debe ser playera (tshirt) o gorra (cap)',
-        HttpStatus.BAD_REQUEST,
-      );
+    if (!isMockupGarment(garment)) {
+      throw new HttpException(MOCKUP_GARMENT_MESSAGE, HttpStatus.BAD_REQUEST);
     }
-    return garment as MockupGarment;
+    return garment;
   }
 
   /**

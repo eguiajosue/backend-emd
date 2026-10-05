@@ -27,6 +27,7 @@ describe('MockupLogoController: roles y contrato de rutas', () => {
   it.each([
     ['GET /mockup-logos', 'findAll'],
     ['GET /mockup-logos/:id/image', 'findImage'],
+    ['GET /mockup-logos/:id/thumbnail', 'findThumbnail'],
     ['POST /mockup-logos', 'create'],
     ['PATCH /mockup-logos/:id', 'rename'],
     ['POST /mockup-logos/:id/use', 'markUsed'],
@@ -43,6 +44,9 @@ describe('MockupLogoController: roles y contrato de rutas', () => {
     expect(Reflect.getMetadata(PATH_METADATA, proto.findAll)).toBe('/');
     expect(Reflect.getMetadata(PATH_METADATA, proto.findImage)).toBe(
       ':id/image',
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, proto.findThumbnail)).toBe(
+      ':id/thumbnail',
     );
     expect(Reflect.getMetadata(PATH_METADATA, proto.create)).toBe('/');
     expect(Reflect.getMetadata(PATH_METADATA, proto.rename)).toBe(':id');

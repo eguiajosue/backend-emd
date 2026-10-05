@@ -43,6 +43,11 @@ export class MockupLogoController {
     return this.mockupLogoService.findImage(id);
   }
 
+  @Get(':id/thumbnail')
+  findThumbnail(@Param('id', ParseIntPipe) id: number) {
+    return this.mockupLogoService.findThumbnail(id);
+  }
+
   // Sube una imagen de hasta 2MB: throttle más estricto que el default
   // global, igual que las demás subidas de archivos.
   @Throttle({ default: { limit: 20, ttl: 60000 } })

@@ -21,6 +21,7 @@ describe('CreateMockupLogoDto', () => {
       await errorsFor(CreateMockupLogoDto, {
         name: 'Logo',
         imageDataUrl: 'data:image/png;base64,AAAA',
+        thumbnailDataUrl: 'data:image/png;base64,AAAA',
       }),
     ).toEqual([]);
   });
@@ -28,11 +29,12 @@ describe('CreateMockupLogoDto', () => {
   it('rechaza nombre vacío o largo, imagen vacía y campos de más', async () => {
     expect(
       await errorsFor(CreateMockupLogoDto, { name: ' ', imageDataUrl: '' }),
-    ).toEqual(['imageDataUrl', 'name']);
+    ).toEqual(['imageDataUrl', 'name', 'thumbnailDataUrl']);
     expect(
       await errorsFor(CreateMockupLogoDto, {
         name: 'x'.repeat(81),
         imageDataUrl: 'data:image/png;base64,AAAA',
+        thumbnailDataUrl: 'data:image/png;base64,AAAA',
         useCount: 99,
       }),
     ).toEqual(['name', 'useCount']);

@@ -3,8 +3,8 @@ import { validate } from 'class-validator';
 import { UpdateUserPreferencesDto } from './update-user-preferences.dto';
 import {
   MAX_MOCKUP_COLORS,
-  MAX_NAV_GROUPS,
   MAX_NAV_LIST_ITEMS,
+  MAX_NAV_ORDER_ITEMS,
 } from './user-preferences-shapes';
 
 /** Mismo pipe que main.ts: whitelist + forbidNonWhitelisted. */
@@ -19,10 +19,7 @@ const errorsFor = async (body: Record<string, unknown>) => {
 
 const nav = (overrides: Record<string, unknown> = {}) => ({
   favorites: ['/dashboard/orders', '/dashboard/mockups'],
-  order: {
-    Operación: ['/dashboard/inicio', '/dashboard/admin'],
-    Inventario: [],
-  },
+  order: ['/dashboard/inicio', '/dashboard/admin', '/dashboard/chat'],
   hidden: ['/dashboard/historial'],
   expanded: true,
   ...overrides,
@@ -45,7 +42,7 @@ describe('UpdateUserPreferencesDto', () => {
         await errorsFor({
           navPreferences: nav({
             favorites: [],
-            order: {},
+            order: [],
             hidden: [],
             expanded: false,
           }),
@@ -54,20 +51,14 @@ describe('UpdateUserPreferencesDto', () => {
       expect(await errorsFor({ navPreferences: null })).toEqual([]);
     });
 
-    it('acepta los topes justos (50 por lista, 20 grupos, url de 200)', async () => {
-      const order = Object.fromEntries(
-        Array.from({ length: MAX_NAV_GROUPS }, (_, i) => [
-          `Grupo ${i}`,
-          urls(MAX_NAV_LIST_ITEMS),
-        ]),
-      );
+    it('acepta los topes justos (50 favoritos/ocultos, 100 en order, url de 200)', async () => {
       const longUrl = '/dashboard/' + 'a'.repeat(200 - '/dashboard/'.length);
       expect(
         await errorsFor({
           navPreferences: nav({
             favorites: urls(MAX_NAV_LIST_ITEMS),
             hidden: [longUrl],
-            order,
+            order: urls(MAX_NAV_ORDER_ITEMS),
           }),
         }),
       ).toEqual([]);
@@ -76,7 +67,7 @@ describe('UpdateUserPreferencesDto', () => {
     it.each<[string, unknown]>([
       ['un array', []],
       ['un string', '/dashboard'],
-      ['sin expanded', { favorites: [], order: {}, hidden: [] }],
+      ['sin expanded', { favorites: [], order: [], hidden: [] }],
       ['con una clave de más', nav({ extra: true })],
       ['expanded no booleano', nav({ expanded: 'true' })],
       ['favorites no array', nav({ favorites: '/dashboard/orders' })],
@@ -90,25 +81,15 @@ describe('UpdateUserPreferencesDto', () => {
         nav({ favorites: ['/dashboard/' + 'a'.repeat(200)] }),
       ],
       ['una url con NUL', nav({ favorites: ['/dashboard/\u0000'] })],
-      ['order array', nav({ order: [] })],
-      ['order con valores no array', nav({ order: { Grupo: 'x' } })],
-      ['order con una url inválida', nav({ order: { Grupo: ['/otra-cosa'] } })],
-      ['order con un grupo vacío', nav({ order: { '  ': [] } })],
       [
-        'order con una clave de más de 80 caracteres',
-        nav({ order: { ['g'.repeat(81)]: [] } }),
+        'order por grupo (formato anterior)',
+        nav({ order: { Operación: ['/dashboard/inicio'] } }),
       ],
+      ['order con una url inválida', nav({ order: ['/otra-cosa'] })],
+      ['order con algo que no es string', nav({ order: [['/dashboard']] })],
       [
-        'order con más de 20 grupos',
-        nav({
-          order: Object.fromEntries(
-            Array.from({ length: MAX_NAV_GROUPS + 1 }, (_, i) => [`g${i}`, []]),
-          ),
-        }),
-      ],
-      [
-        'order con más de 50 urls en un grupo',
-        nav({ order: { Grupo: urls(MAX_NAV_LIST_ITEMS + 1) } }),
+        'order con más de 100 urls',
+        nav({ order: urls(MAX_NAV_ORDER_ITEMS + 1) }),
       ],
     ])('rechaza %s', async (_name, value) => {
       expect(await errorsFor({ navPreferences: value })).toEqual([
