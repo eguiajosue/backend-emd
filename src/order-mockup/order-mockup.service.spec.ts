@@ -197,6 +197,48 @@ describe('OrderMockupService', () => {
       expect(prisma.orderMockup.create).not.toHaveBeenCalled();
     });
 
+    // Buffer.from(…, 'base64') ignora caracteres inválidos y corta en el
+    // padding: sin validar el string, los magic bytes pasan pero se guarda
+    // basura (y un NUL hace fallar el INSERT en Postgres con un 500).
+    it.each([
+      ['basura después del padding', `${MINIMAL_PNG_BASE64}"><x`],
+      ['un NUL', `${MINIMAL_PNG_BASE64}\u0000`],
+      [
+        'espacios en medio',
+        `${MINIMAL_PNG_BASE64.slice(0, 8)} ${MINIMAL_PNG_BASE64.slice(8)}`,
+      ],
+      ['un string vacío', ''],
+    ])(
+      'rechaza con 400 una imagen PNG válida con %s en el base64',
+      async (_label, base64) => {
+        expect(
+          await statusOf(() =>
+            service.create(
+              10,
+              dto({ imageDataUrl: `data:image/png;base64,${base64}` }),
+              RECEPCION,
+            ),
+          ),
+        ).toBe(HttpStatus.BAD_REQUEST);
+        expect(prisma.orderMockup.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rechaza con 400 una configuración con un NUL (jsonb de Postgres no lo acepta)', async () => {
+      const layer = { ...config().layers[0], name: 'logo\u0000.png' };
+
+      expect(
+        await statusOf(() =>
+          service.create(
+            10,
+            dto({ config: config({ layers: [layer] }) }),
+            RECEPCION,
+          ),
+        ),
+      ).toBe(HttpStatus.BAD_REQUEST);
+      expect(prisma.orderMockup.create).not.toHaveBeenCalled();
+    });
+
     it('rechaza con 400 un contenido que no es PNG aunque se declare image/png', async () => {
       const fake = Buffer.from('<script>alert(1)</script>').toString('base64');
 

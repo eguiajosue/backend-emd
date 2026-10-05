@@ -58,6 +58,13 @@ type MockupSummaryRow = Prisma.OrderMockupGetPayload<{
 /** `data:<mime>;base64,` al principio del data URL. */
 const DATA_URL_PREFIX = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,/i;
 
+/**
+ * Alfabeto base64 estándar con padding final (el largo múltiplo de 4 se
+ * chequea aparte). Clase de caracteres plana a propósito: un grupo repetido
+ * (`(?:[…]{4})*`) revienta el stack de V8 con strings de varios MB.
+ */
+const BASE64_CHARS = /^[A-Za-z0-9+/]*={0,2}$/;
+
 /** Prefijo obligatorio de cada diseño embebido en `config.layers[].dataUrl`. */
 const LAYER_DATA_URL_PREFIX = 'data:image/png;base64,';
 
@@ -214,6 +221,15 @@ export class OrderMockupService {
       );
     }
     const base64 = dataUrl.slice(match[0].length);
+    // `Buffer.from(…, 'base64')` ignora caracteres inválidos y corta en el
+    // padding: sin esto, una lámina válida seguida de basura pasa los magic
+    // bytes y se guarda la basura (un NUL, además, rompe el INSERT con 500).
+    if (base64.length % 4 !== 0 || !BASE64_CHARS.test(base64)) {
+      throw new HttpException(
+        'La imagen del mockup no es un base64 válido',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
     // Tamaños antes de decodificar nada: se calculan sobre los strings.
     if (base64DecodedBytes(base64) > MAX_MOCKUP_BYTES) {
@@ -222,7 +238,8 @@ export class OrderMockupService {
         HttpStatus.PAYLOAD_TOO_LARGE,
       );
     }
-    const configBytes = Buffer.byteLength(JSON.stringify(config ?? null));
+    const configJson = JSON.stringify(config ?? null);
+    const configBytes = Buffer.byteLength(configJson);
     if (configBytes > MAX_MOCKUP_BYTES) {
       throw new HttpException(
         `Los diseños del mockup no pueden superar ${MAX_MOCKUP_MB}MB; usa imágenes más livianas o menos diseños`,
@@ -233,6 +250,14 @@ export class OrderMockupService {
       throw new HttpException(
         `El mockup (imagen más diseños) no puede superar ${MAX_MOCKUP_MB}MB; usa imágenes más livianas o menos diseños`,
         HttpStatus.PAYLOAD_TOO_LARGE,
+      );
+    }
+    // jsonb de Postgres rechaza `\u0000` ("unsupported Unicode escape
+    // sequence"): mejor un 400 claro que un 500 del INSERT.
+    if (configJson.includes('\\u0000')) {
+      throw new HttpException(
+        'La configuración del mockup tiene caracteres inválidos',
+        HttpStatus.BAD_REQUEST,
       );
     }
 
