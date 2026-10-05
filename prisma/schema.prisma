@@ -32,6 +32,7 @@ model Client {
   calendarEvents CalendarEvent[] // Eventos del calendario de Recepción vinculados a este cliente.
   orderTemplates OrderTemplate[] // Plantillas de pedido de este cliente (lo que suele pedir).
   insight        ClientInsight? // Hábitos aprendidos de su historial de pedidos (autocompletado del alta).
+  quotes         Quote[] // Cotizaciones de este cliente (tablero de Cotizaciones de Recepción).
 
   @@index([companyId])
   @@index([last_name, first_name])
@@ -78,6 +79,7 @@ model User {
   orderMockupsCreated     OrderMockup[]            @relation("OrderMockupCreatedBy") // Mockups 3D (playera/gorra) que este usuario adjuntó a un pedido.
   mockupTemplatesCreated  MockupTemplate[]         @relation("MockupTemplateCreatedBy") // Plantillas de mockup (compartidas por la empresa) que guardó este usuario.
   mockupLogosCreated      MockupLogo[]             @relation("MockupLogoCreatedBy") // Logos de la biblioteca de mockups (compartida por la empresa) que subió este usuario.
+  quotesCreated           Quote[]                  @relation("QuoteCreatedBy") // Cotizaciones que este usuario dio de alta.
 
   themePreference      String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor          String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -155,6 +157,7 @@ model Order {
   materialItems      OrderMaterialItem[] // Hoja de materiales del pedido: qué se va a usar en producción (opcional, la carga Recepción).
   inventoryMovements InventoryMovement[] // Consumos de inventario imputados a este pedido (opcional).
   mockups            OrderMockup[] // Mockups 3D (playera/gorra con los diseños del cliente) adjuntados al pedido.
+  quote              Quote? // Cotización aceptada que se convirtió en este pedido (si vino de una).
 
   @@index([statusId])
   @@index([clientId])
@@ -909,4 +912,38 @@ model MockupLogo {
   createdBy User? @relation("MockupLogoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que lo subió.
 
   @@index([useCount, lastUsedAt]) // Listado "más usados primero" (useCount desc, lastUsedAt desc).
+}
+
+// ─── Cotizaciones ───────────────────────────────────────────────────────────
+//
+// Tablero de cotizaciones de Recepción: reemplaza la lista que se llevaba por
+// WhatsApp. Cada cotización está en una etapa (`por_enviar` | `enviada`) y
+// un subestado que pertenece a esa etapa (QUOTE_STATUSES_BY_STAGE de
+// src/quote/quote.constants.ts). Cuando el cliente la acepta se puede
+// convertir en pedido (`orderId`). Ver QuoteService y
+// frontend-emd/docs/plans/cotizaciones.md.
+
+model Quote {
+  id           Int       @id @default(autoincrement()) // Identificador único de la cotización.
+  clientId     Int? // Clave foránea que referencia al Client (opcional: puede ser un cliente libre por nombre; null también si el cliente se borró).
+  clientName   String // Nombre del cliente tal como se muestra: texto libre o el nombre del cliente registrado al momento de cargarla (máx. 120 caracteres).
+  description  String // Qué se cotiza (máx. 1000 caracteres).
+  stage        String // Etapa: 'por_enviar' | 'enviada'.
+  status       String // Subestado dentro de la etapa: por_enviar → 'lista' | 'pendiente_medidas' | 'info' | 'esperando_montaje'; enviada → 'esperando_respuesta' | 'aceptada' | 'no_aceptada' | 'comentarios'.
+  comment      String? // Comentario libre (máx. 1000 caracteres), útil en 'comentarios' / 'no_aceptada'.
+  priorityDate DateTime? @db.Date // Fecha de prioridad (para cuándo hay que mandarla). Null = prioridad normal.
+  sentAt       DateTime? // Momento en que pasó a la etapa 'enviada' (null mientras está por enviar).
+  orderId      Int?      @unique // Clave foránea que referencia al Order en que se convirtió (sólo si fue aceptada; null si el pedido se borró).
+  createdById  Int? // Clave foránea que referencia al User que la dio de alta (null si ese usuario se borró).
+  createdAt    DateTime  @default(now()) // Fecha de alta de la cotización.
+  updatedAt    DateTime  @updatedAt // Última modificación (cambio de etapa, subestado, comentario, etc.).
+
+  client    Client? @relation(fields: [clientId], references: [id], onDelete: SetNull) // Relación con Client: si se borra el cliente, la cotización queda con el nombre escrito.
+  order     Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull) // Relación con el Order en que se convirtió.
+  createdBy User?   @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que la dio de alta.
+
+  @@index([stage, status]) // Pestañas y chips de subestado.
+  @@index([priorityDate]) // Prioridad vencida/hoy/mañana primero.
+  @@index([updatedAt]) // Luego, lo último que se movió.
+  @@index([clientId]) // Cotizaciones de un cliente (y el SET NULL al borrarlo).
 }
