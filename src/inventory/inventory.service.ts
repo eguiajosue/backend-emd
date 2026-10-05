@@ -13,9 +13,14 @@ import { AccessTokenPayload } from '../auth/auth.service';
 import { isFullVisibilityRole } from '../order/role-stage-mapping';
 import { toCsv } from '../common/utils/csv';
 import {
+  BARCODE_MAX_LENGTH,
+  BARCODE_MIN_LENGTH,
+  BARCODE_PATTERN,
   INVENTORY_AREAS,
   InventoryArea,
   InventoryStockStatus,
+  RESERVED_BARCODE_PATTERN,
+  defaultBarcode,
 } from './inventory.constants';
 import { CreateInventoryItemDto } from './dto/create-inventory-item.dto';
 import { UpdateInventoryItemDto } from './dto/update-inventory-item.dto';
@@ -38,6 +43,7 @@ const ITEM_SELECT = {
   area: true,
   name: true,
   sku: true,
+  barcode: true,
   category: true,
   unit: true,
   color: true,
@@ -82,6 +88,34 @@ const toNumber = (value: Prisma.Decimal | null) =>
 /** Texto opcional: "" borra el valor (null); undefined lo deja como está. */
 const optionalText = (value: string | undefined) =>
   value === undefined ? undefined : value === '' ? null : value;
+
+/**
+ * Recorta y valida un código de barras (Code 128: 3..64 caracteres ASCII
+ * imprimibles). Los `EMD-<número>` están reservados para el código por
+ * omisión; sólo se aceptan si son justo el de este artículo (`ownId`).
+ */
+export function normalizeBarcode(raw: string, ownId?: number): string {
+  const code = raw.trim();
+  if (code.length < BARCODE_MIN_LENGTH || code.length > BARCODE_MAX_LENGTH) {
+    throw new BadRequestException(
+      `El código de barras debe tener entre ${BARCODE_MIN_LENGTH} y ${BARCODE_MAX_LENGTH} caracteres`,
+    );
+  }
+  if (!BARCODE_PATTERN.test(code)) {
+    throw new BadRequestException(
+      'El código de barras sólo admite letras sin acentos, números, espacios y símbolos ASCII',
+    );
+  }
+  if (
+    RESERVED_BARCODE_PATTERN.test(code) &&
+    (ownId === undefined || code !== defaultBarcode(ownId))
+  ) {
+    throw new BadRequestException(
+      'Los códigos EMD-<número> los asigna el sistema; deja el campo vacío para usar el automático',
+    );
+  }
+  return code;
+}
 
 export function stockStatusOf(
   quantity: number,
@@ -179,11 +213,37 @@ export class InventoryService {
     return item;
   }
 
+  /**
+   * 409 si el código ya lo tiene OTRO artículo (de cualquier departamento:
+   * quien edita inventario los ve todos), con su nombre para ubicarlo.
+   */
+  private async assertBarcodeFree(code: string, exceptId?: number) {
+    const owner = await this.prisma.inventoryItem.findUnique({
+      where: { barcode: code },
+      select: { id: true, name: true },
+    });
+    if (owner && owner.id !== exceptId) {
+      throw new ConflictException(
+        `Ese código ya está asignado a ${owner.name}`,
+      );
+    }
+  }
+
   private rethrowUnique(error: unknown): never {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
+      // Carrera entre la verificación previa y la escritura.
+      const target = error.meta?.target;
+      if (
+        (Array.isArray(target) && target.includes('barcode')) ||
+        (typeof target === 'string' && target.includes('barcode'))
+      ) {
+        throw new ConflictException(
+          'Ese código ya está asignado a otro artículo',
+        );
+      }
       throw new ConflictException(
         'Ya hay un artículo con ese código (SKU) en este departamento',
       );
@@ -215,10 +275,61 @@ export class InventoryService {
     return this.serializeItem(item);
   }
 
+  /**
+   * Busca un artículo por su código de barras (escaneo). Un código que no
+   * existe o que es de un departamento que el usuario no ve da el mismo 404,
+   * para no revelar artículos ajenos.
+   */
+  async findByBarcode(rawCode: string, actor: Actor) {
+    const code = rawCode.trim();
+    if (
+      code.length < BARCODE_MIN_LENGTH ||
+      code.length > BARCODE_MAX_LENGTH ||
+      !BARCODE_PATTERN.test(code)
+    ) {
+      throw new BadRequestException(
+        `Código de barras inválido: ${code.slice(0, BARCODE_MAX_LENGTH)}`,
+      );
+    }
+    const item = await this.prisma.inventoryItem.findUnique({
+      where: { barcode: code },
+      select: ITEM_SELECT,
+    });
+    if (
+      !item ||
+      !this.areasFor(actor.roles).includes(item.area as InventoryArea)
+    ) {
+      throw new NotFoundException(
+        `No hay ningún artículo con el código ${code}`,
+      );
+    }
+    return this.serializeItem(item);
+  }
+
+  /**
+   * Escaneo en modo Entrada/Salida en una sola petición: ubica el artículo
+   * por su código y registra el movimiento con la misma lógica (y permisos)
+   * que `POST /inventory/:id/movements`.
+   */
+  async registerMovementByBarcode(
+    rawCode: string,
+    dto: CreateInventoryMovementDto,
+    actor: Actor,
+  ) {
+    this.assertCanManage(actor);
+    const item = await this.findByBarcode(rawCode, actor);
+    return this.registerMovement(item.id, dto, actor);
+  }
+
   async create(dto: CreateInventoryItemDto, actor: Actor) {
     this.assertCanManage(actor);
     this.assertArea(actor, dto.area);
     const initial = dto.initialQuantity ?? 0;
+    const customBarcode =
+      dto.barcode === undefined || dto.barcode === null || dto.barcode === ''
+        ? null
+        : normalizeBarcode(dto.barcode);
+    if (customBarcode) await this.assertBarcodeFree(customBarcode);
     try {
       const item = await this.prisma.$transaction(async (tx) => {
         const created = await tx.inventoryItem.create({
@@ -237,9 +348,19 @@ export class InventoryService {
             materialId: dto.materialId ?? null,
             supplierId: dto.supplierId ?? null,
             quantity: initial,
+            barcode: customBarcode,
           },
           select: { id: true },
         });
+        // Sin código propio: el de omisión depende del id, que se conoce
+        // hasta insertar. Misma transacción, así nunca queda sin código.
+        if (!customBarcode) {
+          await tx.inventoryItem.update({
+            where: { id: created.id },
+            data: { barcode: defaultBarcode(created.id) },
+            select: { id: true },
+          });
+        }
         if (initial > 0) {
           await tx.inventoryMovement.create({
             data: {
@@ -271,6 +392,15 @@ export class InventoryService {
     if (dto.area !== undefined && dto.area !== before.area) {
       this.assertArea(actor, dto.area);
     }
+    // undefined: no se toca; null / "": vuelve al código por omisión.
+    let barcode: string | undefined;
+    if (dto.barcode !== undefined) {
+      barcode =
+        dto.barcode === null || dto.barcode === ''
+          ? defaultBarcode(id)
+          : normalizeBarcode(dto.barcode, id);
+      if (barcode !== before.barcode) await this.assertBarcodeFree(barcode, id);
+    }
     try {
       const item = await this.prisma.inventoryItem.update({
         where: { id },
@@ -288,6 +418,7 @@ export class InventoryService {
           ...(dto.unitCost !== undefined && { unitCost: dto.unitCost }),
           ...(dto.materialId !== undefined && { materialId: dto.materialId }),
           ...(dto.supplierId !== undefined && { supplierId: dto.supplierId }),
+          ...(barcode !== undefined && { barcode }),
         },
         select: ITEM_SELECT,
       });
@@ -463,6 +594,7 @@ export class InventoryService {
         'Departamento',
         'Artículo',
         'SKU',
+        'Código de barras',
         'Categoría',
         'Existencia',
         'Unidad',
@@ -478,6 +610,7 @@ export class InventoryService {
         AREA_LABELS[item.area as InventoryArea] ?? item.area,
         item.name,
         item.sku,
+        item.barcode,
         item.category,
         item.quantity,
         item.unit,

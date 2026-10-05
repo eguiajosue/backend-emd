@@ -73,6 +73,32 @@ export class InventoryController {
     res.send(csv);
   }
 
+  /**
+   * Artículo por código de barras (escaneo). El código va URL-encoded
+   * (encodeURIComponent): Code 128 admite "/", "%", "#", "?"...
+   * 404 si no existe o es de un departamento que el usuario no ve.
+   */
+  @Get('items/by-barcode/:code')
+  findByBarcode(
+    @Param('code') code: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.inventoryService.findByBarcode(code, user);
+  }
+
+  /**
+   * Escaneo en modo Entrada/Salida en una sola petición: ubica el artículo y
+   * registra el movimiento igual que `POST /inventory/:id/movements`.
+   */
+  @Post('items/by-barcode/:code/movements')
+  registerMovementByBarcode(
+    @Param('code') code: string,
+    @Body() dto: CreateInventoryMovementDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.inventoryService.registerMovementByBarcode(code, dto, user);
+  }
+
   @Get(':id')
   findOne(
     @Param('id', ParseIntPipe) id: number,

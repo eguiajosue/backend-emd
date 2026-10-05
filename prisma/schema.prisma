@@ -716,6 +716,7 @@ model InventoryItem {
   area       String // Departamento dueño de la existencia: uno de INVENTORY_AREAS (taller/dtf/bordado/diseno/laser/impresiones/recepcion).
   name       String // "Hilo poliéster 40 rojo", "Tinta Eco-Solvente Cyan".
   sku        String? // Código interno o del fabricante (ej. "MAD-1147"). Único por departamento.
+  barcode    String?  @unique // Código de barras Code 128 de la etiqueta, único en todo el inventario. Por omisión "EMD-" + id con 6 ceros (EMD-000123); también puede ligarse el EAN/UPC del fabricante.
   category   String? // Texto libre: "Hilos", "Tintas", "Estabilizador", "Refacciones"...
   unit       String // Unidad en que se cuenta: "cono", "rollo", "litro", "pieza"...
   color      String?

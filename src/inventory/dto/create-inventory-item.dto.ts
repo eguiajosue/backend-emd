@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsIn,
   IsInt,
@@ -6,11 +7,18 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Length,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
-import { INVENTORY_AREAS } from '../inventory.constants';
+import {
+  BARCODE_MAX_LENGTH,
+  BARCODE_MIN_LENGTH,
+  BARCODE_PATTERN,
+  INVENTORY_AREAS,
+} from '../inventory.constants';
 
 /**
  * Alta de un artículo en el inventario de un departamento.
@@ -39,6 +47,27 @@ export class CreateInventoryItemDto {
   @IsString()
   @MaxLength(60)
   sku?: string;
+
+  /**
+   * Código de barras (Code 128) de la etiqueta, único en todo el inventario.
+   * Se recorta; sin él (o con null / "") el artículo usa su código por
+   * omisión `EMD-` + id con ceros. Sirve para ligar el EAN/UPC del fabricante.
+   */
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  })
+  @IsOptional()
+  @IsString()
+  @Length(BARCODE_MIN_LENGTH, BARCODE_MAX_LENGTH, {
+    message: `El código de barras debe tener entre ${BARCODE_MIN_LENGTH} y ${BARCODE_MAX_LENGTH} caracteres`,
+  })
+  @Matches(BARCODE_PATTERN, {
+    message:
+      'El código de barras sólo admite letras sin acentos, números, espacios y símbolos ASCII',
+  })
+  barcode?: string | null;
 
   @TrimString()
   @IsOptional()

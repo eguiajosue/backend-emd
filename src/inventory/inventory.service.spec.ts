@@ -2,9 +2,21 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { InventoryService, stockStatusOf } from './inventory.service';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { readFileSync, readdirSync } from 'fs';
+import { join } from 'path';
+import {
+  InventoryService,
+  normalizeBarcode,
+  stockStatusOf,
+} from './inventory.service';
+import { defaultBarcode } from './inventory.constants';
+import { CreateInventoryItemDto } from './dto/create-inventory-item.dto';
+import { UpdateInventoryItemDto } from './dto/update-inventory-item.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 
@@ -17,6 +29,7 @@ const itemRow = (overrides: Record<string, unknown> = {}) => ({
   area: 'bordado',
   name: 'Hilo poliéster rojo',
   sku: null,
+  barcode: 'EMD-000007',
   category: 'Hilos',
   unit: 'cono',
   color: 'Rojo',
@@ -28,8 +41,8 @@ const itemRow = (overrides: Record<string, unknown> = {}) => ({
   notes: null,
   materialId: null,
   supplierId: null,
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  createdAt: new Date('2026-10-01T12:00:00Z'),
+  updatedAt: new Date('2026-10-01T12:00:00Z'),
   material: null,
   supplier: null,
   ...overrides,
@@ -41,6 +54,99 @@ describe('stockStatusOf', () => {
     expect(stockStatusOf(3, 3)).toBe('low');
     expect(stockStatusOf(4, 3)).toBe('ok');
     expect(stockStatusOf(1, null)).toBe('ok');
+  });
+});
+
+describe('códigos de barras: formato', () => {
+  it('el código por omisión es EMD- + id con 6 ceros (sin recortar ids largos)', () => {
+    expect(defaultBarcode(7)).toBe('EMD-000007');
+    expect(defaultBarcode(123)).toBe('EMD-000123');
+    expect(defaultBarcode(999999)).toBe('EMD-999999');
+    expect(defaultBarcode(1234567)).toBe('EMD-1234567');
+  });
+
+  it('la migración asigna el mismo formato a los artículos existentes', () => {
+    const dir = join(__dirname, '../../prisma/migrations');
+    const folder = readdirSync(dir).find((name) =>
+      name.endsWith('_inventory_barcode'),
+    );
+    expect(folder).toBeDefined();
+    const sql = readFileSync(join(dir, folder!, 'migration.sql'), 'utf8');
+    expect(sql).toContain('ADD COLUMN     "barcode" TEXT');
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "InventoryItem_barcode_key" ON "InventoryItem"("barcode")',
+    );
+    expect(sql).toMatch(/UPDATE "InventoryItem"\s+SET "barcode" = 'EMD-' \|\|/);
+    expect(sql).toContain('lpad("id"::text, 6, \'0\')');
+    expect(sql).toContain('WHERE "barcode" IS NULL');
+  });
+
+  it('normaliza recortando y acepta EAN/UPC y ASCII imprimible', () => {
+    expect(normalizeBarcode('  7501234567890 ')).toBe('7501234567890');
+    expect(normalizeBarcode('AB-12/x %$')).toBe('AB-12/x %$');
+  });
+
+  it('rechaza largo fuera de 3..64 y caracteres fuera de Code 128 (400)', () => {
+    expect(() => normalizeBarcode('ab')).toThrow(BadRequestException);
+    expect(() => normalizeBarcode('x'.repeat(65))).toThrow(BadRequestException);
+    expect(() => normalizeBarcode('CAÑA-01')).toThrow('sólo admite');
+    expect(() => normalizeBarcode('AB\tC')).toThrow(BadRequestException);
+  });
+
+  it('los EMD-<número> están reservados salvo el propio del artículo', () => {
+    expect(() => normalizeBarcode('EMD-000123')).toThrow(
+      'los asigna el sistema',
+    );
+    expect(() => normalizeBarcode('EMD-000123', 5)).toThrow(
+      BadRequestException,
+    );
+    expect(normalizeBarcode('EMD-000123', 123)).toBe('EMD-000123');
+    expect(normalizeBarcode('EMD-ROJO')).toBe('EMD-ROJO');
+  });
+});
+
+describe('códigos de barras: DTO', () => {
+  const errorsOf = async (cls: any, body: Record<string, unknown>) => {
+    const dto = plainToInstance(cls, body) as object;
+    const errors = await validate(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+    return { dto: dto as { barcode?: unknown }, errors };
+  };
+  const base = { area: 'bordado', name: 'Hilo', unit: 'cono' };
+
+  it('recorta y acepta un código válido en alta y edición', async () => {
+    const created = await errorsOf(CreateInventoryItemDto, {
+      ...base,
+      barcode: '  7501234567890  ',
+    });
+    expect(created.errors).toHaveLength(0);
+    expect(created.dto.barcode).toBe('7501234567890');
+    const updated = await errorsOf(UpdateInventoryItemDto, {
+      barcode: 'ABC-1',
+    });
+    expect(updated.errors).toHaveLength(0);
+  });
+
+  it('null y "" limpian (vuelven al código por omisión)', async () => {
+    for (const barcode of [null, '', '   ']) {
+      const { dto, errors } = await errorsOf(UpdateInventoryItemDto, {
+        barcode,
+      });
+      expect(errors).toHaveLength(0);
+      expect(dto.barcode).toBeNull();
+    }
+  });
+
+  it('rechaza caracteres no ASCII y largos fuera de rango', async () => {
+    for (const barcode of ['CAÑA', 'ab', 'x'.repeat(65), 'A\u0007B', 42]) {
+      const { errors } = await errorsOf(CreateInventoryItemDto, {
+        ...base,
+        barcode,
+      });
+      expect(errors.map((e) => e.property)).toContain('barcode');
+    }
   });
 });
 
@@ -332,6 +438,231 @@ describe('InventoryService', () => {
       );
       await new Promise((resolve) => setImmediate(resolve));
       expect(notifications.createNotificationForUsers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('códigos de barras', () => {
+    /** Artículos por código para findUnique({ where: { barcode } }). */
+    let byBarcode: Record<string, ReturnType<typeof itemRow>>;
+
+    beforeEach(() => {
+      byBarcode = {
+        'EMD-000007': itemRow(),
+        '7501234567890': itemRow({
+          id: 9,
+          name: 'Tinta cyan',
+          area: 'impresiones',
+          barcode: '7501234567890',
+        }),
+      };
+      prisma.inventoryItem.findUnique.mockImplementation(
+        ({ where }: { where: { id?: number; barcode?: string } }) =>
+          where.barcode !== undefined
+            ? (byBarcode[where.barcode] ?? null)
+            : itemRow(),
+      );
+    });
+
+    it('el alta sin código asigna EMD- + id en la misma transacción', async () => {
+      prisma.inventoryItem.create.mockResolvedValueOnce({ id: 123 });
+      await service.create(
+        { area: 'bordado', name: 'Hilo', unit: 'cono' },
+        admin,
+      );
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(
+        prisma.inventoryItem.create.mock.calls[0][0].data.barcode,
+      ).toBeNull();
+      expect(prisma.inventoryItem.update).toHaveBeenCalledWith({
+        where: { id: 123 },
+        data: { barcode: 'EMD-000123' },
+        select: { id: true },
+      });
+    });
+
+    it('el alta con código propio lo guarda recortado y no genera otro', async () => {
+      await service.create(
+        { area: 'bordado', name: 'Hilo', unit: 'cono', barcode: ' ABC-77 ' },
+        admin,
+      );
+      expect(prisma.inventoryItem.create.mock.calls[0][0].data.barcode).toBe(
+        'ABC-77',
+      );
+      expect(prisma.inventoryItem.update).not.toHaveBeenCalled();
+    });
+
+    it('el alta con null usa el código por omisión', async () => {
+      await service.create(
+        { area: 'bordado', name: 'Hilo', unit: 'cono', barcode: null },
+        admin,
+      );
+      expect(prisma.inventoryItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { barcode: 'EMD-000007' } }),
+      );
+    });
+
+    it('un código ya asignado devuelve 409 con el nombre del artículo', async () => {
+      await expect(
+        service.create(
+          {
+            area: 'bordado',
+            name: 'Hilo',
+            unit: 'cono',
+            barcode: '7501234567890',
+          },
+          admin,
+        ),
+      ).rejects.toThrow(
+        new ConflictException('Ese código ya está asignado a Tinta cyan'),
+      );
+      await expect(
+        service.update(7, { barcode: '7501234567890' }, admin),
+      ).rejects.toThrow('Ese código ya está asignado a Tinta cyan');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.inventoryItem.update).not.toHaveBeenCalled();
+    });
+
+    it('una carrera en el índice único del código también da 409', async () => {
+      prisma.inventoryItem.update.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('dup', {
+          code: 'P2002',
+          clientVersion: 'x',
+          meta: { target: ['barcode'] },
+        }),
+      );
+      await expect(
+        service.update(7, { barcode: 'NUEVO-1' }, admin),
+      ).rejects.toThrow('Ese código ya está asignado a otro artículo');
+    });
+
+    it('caracteres inválidos o EMD- ajeno dan 400 sin escribir', async () => {
+      await expect(
+        service.create(
+          { area: 'bordado', name: 'Hilo', unit: 'cono', barcode: 'ÑANDÚ-1' },
+          admin,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.update(7, { barcode: 'EMD-000009' }, admin),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.inventoryItem.create).not.toHaveBeenCalled();
+      expect(prisma.inventoryItem.update).not.toHaveBeenCalled();
+    });
+
+    it('al editar: cambia, conserva el propio y null vuelve al EMD- por omisión', async () => {
+      await service.update(7, { barcode: 'NUEVO-1' }, admin);
+      expect(prisma.inventoryItem.update.mock.calls[0][0].data.barcode).toBe(
+        'NUEVO-1',
+      );
+      await service.update(7, { barcode: 'EMD-000007' }, admin);
+      expect(prisma.inventoryItem.update.mock.calls[1][0].data.barcode).toBe(
+        'EMD-000007',
+      );
+      await service.update(7, { barcode: null }, admin);
+      expect(prisma.inventoryItem.update.mock.calls[2][0].data.barcode).toBe(
+        'EMD-000007',
+      );
+      await service.update(7, { name: 'Otro' }, admin);
+      expect(
+        prisma.inventoryItem.update.mock.calls[3][0].data,
+      ).not.toHaveProperty('barcode');
+    });
+
+    it('el artículo serializado incluye su código', async () => {
+      await expect(service.findOne(7, admin)).resolves.toMatchObject({
+        id: 7,
+        barcode: 'EMD-000007',
+        area: 'bordado',
+        quantity: 10,
+        stockStatus: 'ok',
+      });
+    });
+
+    describe('búsqueda por código', () => {
+      it('encuentra el artículo con el mismo formato que el detalle', async () => {
+        const found = await service.findByBarcode(' EMD-000007 ', admin);
+        expect(prisma.inventoryItem.findUnique).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { barcode: 'EMD-000007' } }),
+        );
+        expect(found).toEqual(await service.findOne(7, admin));
+      });
+
+      it('un código desconocido da 404 legible', async () => {
+        await expect(service.findByBarcode('NO-EXISTE', admin)).rejects.toThrow(
+          new NotFoundException(
+            'No hay ningún artículo con el código NO-EXISTE',
+          ),
+        );
+      });
+
+      it('un artículo de otro departamento da el mismo 404 (no se revela)', async () => {
+        await expect(
+          service.findByBarcode('7501234567890', bordado),
+        ).rejects.toThrow(NotFoundException);
+        await expect(
+          service.findByBarcode('EMD-000007', bordado),
+        ).resolves.toMatchObject({ id: 7 });
+      });
+
+      it('un código con formato inválido da 400', async () => {
+        await expect(service.findByBarcode('ÑÑÑ', admin)).rejects.toThrow(
+          BadRequestException,
+        );
+        expect(prisma.inventoryItem.findUnique).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('movimiento por código', () => {
+      it('SALIDA por escaneo resta del artículo encontrado', async () => {
+        const result = await service.registerMovementByBarcode(
+          'EMD-000007',
+          { type: 'SALIDA', quantity: 1 },
+          recepcion,
+        );
+        const movement = prisma.inventoryMovement.create.mock.calls[0][0].data;
+        expect(movement.itemId).toBe(7);
+        expect(Number(movement.delta)).toBe(-1);
+        expect(Number(movement.balanceAfter)).toBe(9);
+        expect(result.item).toMatchObject({ id: 7, barcode: 'EMD-000007' });
+      });
+
+      it('ENTRADA por escaneo suma la cantidad indicada', async () => {
+        await service.registerMovementByBarcode(
+          'EMD-000007',
+          { type: 'ENTRADA', quantity: 3 },
+          admin,
+        );
+        const movement = prisma.inventoryMovement.create.mock.calls[0][0].data;
+        expect(Number(movement.balanceAfter)).toBe(13);
+      });
+
+      it('SALIDA mayor al stock se sigue rechazando', async () => {
+        await expect(
+          service.registerMovementByBarcode(
+            'EMD-000007',
+            { type: 'SALIDA', quantity: 11 },
+            recepcion,
+          ),
+        ).rejects.toThrow('Stock insuficiente');
+      });
+
+      it('código desconocido da 404 y un rol de área 403, sin mover stock', async () => {
+        await expect(
+          service.registerMovementByBarcode(
+            'NO-EXISTE',
+            { type: 'ENTRADA', quantity: 1 },
+            admin,
+          ),
+        ).rejects.toThrow(NotFoundException);
+        await expect(
+          service.registerMovementByBarcode(
+            'EMD-000007',
+            { type: 'ENTRADA', quantity: 1 },
+            bordado,
+          ),
+        ).rejects.toThrow(ForbiddenException);
+        expect(prisma.inventoryMovement.create).not.toHaveBeenCalled();
+      });
     });
   });
 });
