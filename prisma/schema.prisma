@@ -75,6 +75,7 @@ model User {
   calendarTasks           CalendarTask[]           @relation("CalendarTaskCreatedBy") // Tareas pendientes (sin fecha) del calendario de equipo creadas por este usuario.
   orderMaterialItems      OrderMaterialItem[]      @relation("OrderMaterialItemCreatedBy") // Líneas de hoja de materiales cargadas por este usuario.
   inventoryMovements      InventoryMovement[]      @relation("InventoryMovementCreatedBy") // Entradas/salidas/ajustes de inventario registrados por este usuario.
+  orderMockupsCreated     OrderMockup[]            @relation("OrderMockupCreatedBy") // Mockups 3D (playera/gorra) que este usuario adjuntó a un pedido.
 
   themePreference      String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor          String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -149,6 +150,7 @@ model Order {
   calendarEvents     CalendarEvent[] // Eventos del calendario de equipo vinculados a este pedido (instalación, compra de materiales, etc.).
   materialItems      OrderMaterialItem[] // Hoja de materiales del pedido: qué se va a usar en producción (opcional, la carga Recepción).
   inventoryMovements InventoryMovement[] // Consumos de inventario imputados a este pedido (opcional).
+  mockups            OrderMockup[] // Mockups 3D (playera/gorra con los diseños del cliente) adjuntados al pedido.
 
   @@index([statusId])
   @@index([clientId])
@@ -836,4 +838,29 @@ model ClientInsight {
   client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@index([nextExpectedAt])
+}
+
+// ─── Mockups 3D ─────────────────────────────────────────────────────────────
+//
+// Lámina PNG/JPEG que arma Recepción en el creador de mockups 3D (playera
+// Gildan 5000 o gorra trucker Richardson 112, con los diseños del cliente
+// encima) y adjunta al pedido. `config` guarda colores, diseños y posiciones
+// para poder volver a editarlo. Ver OrderMockupService y
+// frontend-emd/docs/plans/mockups-3d.md. Los listados NUNCA traen
+// `imageData`/`config` (cada fila puede pesar varios MB).
+
+model OrderMockup {
+  id          Int      @id @default(autoincrement()) // Identificador único del mockup.
+  orderId     Int // Clave foránea que referencia al Order al que se adjuntó.
+  garment     String // Prenda del mockup: 'tshirt' | 'cap'.
+  imageData   String // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada.
+  imageMime   String // Mime type de la lámina: image/png | image/jpeg.
+  config      Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) para volver a editarlo.
+  createdById Int? // Clave foránea que referencia al User que lo adjuntó (null si ese usuario se borró).
+  createdAt   DateTime @default(now()) // Fecha en que se adjuntó el mockup.
+
+  order     Order @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order: se borra junto con el pedido.
+  createdBy User? @relation("OrderMockupCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que lo adjuntó.
+
+  @@index([orderId])
 }

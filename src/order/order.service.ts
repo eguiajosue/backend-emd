@@ -351,8 +351,12 @@ export class OrderService {
    * criterio de visibilidad por área/rol que `findAll`/`findHistory`), y
    * devuelve el pedido base (`area`, `assignedUserId`) si es así. Usado por
    * los endpoints de notas y auditoría de un pedido individual.
+   *
+   * Público para que otros módulos que cuelgan de un pedido (p. ej.
+   * `OrderMockupService`) apliquen exactamente la misma regla de visibilidad
+   * en vez de duplicarla.
    */
-  private async assertOrderAccess(
+  async assertOrderAccess(
     orderId: number,
     requestingUser?: RequestingUser,
   ): Promise<{

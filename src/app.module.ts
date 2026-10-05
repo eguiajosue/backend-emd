@@ -34,6 +34,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { OrderTemplateModule } from './order-template/order-template.module';
 import { ClientInsightModule } from './client-insight/client-insight.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { OrderMockupModule } from './order-mockup/order-mockup.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -86,6 +87,7 @@ import { AppController } from './app.controller';
     OrderTemplateModule,
     ClientInsightModule,
     DashboardModule,
+    OrderMockupModule,
   ],
   providers: [
     {
