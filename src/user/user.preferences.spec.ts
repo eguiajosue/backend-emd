@@ -98,5 +98,57 @@ describe('UserService preferences', () => {
         frequentProductIds: Prisma.DbNull,
       });
     });
+
+    it('guarda la barra lateral y los colores tal cual llegan', async () => {
+      const navPreferences = {
+        favorites: ['/dashboard/orders'],
+        order: { Operación: ['/dashboard/inicio', '/dashboard/admin'] },
+        hidden: ['/dashboard/historial'],
+        expanded: true,
+      };
+      const mockupColors = { favorites: ['#ff0000'], custom: ['#00aa11'] };
+      prisma.user.update.mockResolvedValue({ navPreferences, mockupColors });
+
+      const result = await service.updatePreferences(1, {
+        navPreferences,
+        mockupColors,
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { navPreferences, mockupColors },
+        select: USER_PREFERENCES_SELECT,
+      });
+      expect(result).toEqual({ navPreferences, mockupColors });
+    });
+
+    it('null en la barra lateral o los colores se guarda como NULL de base (DbNull)', async () => {
+      prisma.user.update.mockResolvedValue({});
+      await service.updatePreferences(1, { navPreferences: null });
+      expect(prisma.user.update.mock.calls[0][0].data).toEqual({
+        navPreferences: Prisma.DbNull,
+      });
+      await service.updatePreferences(1, { mockupColors: null });
+      expect(prisma.user.update.mock.calls[1][0].data).toEqual({
+        mockupColors: Prisma.DbNull,
+      });
+      await service.updatePreferences(1, {
+        navPreferences: null,
+        mockupColors: null,
+        frequentProductIds: null,
+      });
+      expect(prisma.user.update.mock.calls[2][0].data).toEqual({
+        navPreferences: Prisma.DbNull,
+        mockupColors: Prisma.DbNull,
+        frequentProductIds: Prisma.DbNull,
+      });
+    });
+
+    it('lee y devuelve las preferencias nuevas en la misma selección', () => {
+      expect(USER_PREFERENCES_SELECT).toMatchObject({
+        navPreferences: true,
+        mockupColors: true,
+      });
+    });
   });
 });

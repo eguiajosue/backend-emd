@@ -35,6 +35,8 @@ export const USER_PREFERENCES_SELECT = {
   areaViewMode: true,
   timeFormatPreference: true,
   frequentProductIds: true,
+  navPreferences: true,
+  mockupColors: true,
   notificationsMuted: true,
   notifyMentionsOnly: true,
   notifyProductionUpdates: true,
@@ -211,15 +213,20 @@ export class UserService {
     updateUserPreferencesDto: UpdateUserPreferencesDto,
   ) {
     try {
+      const { frequentProductIds, navPreferences, mockupColors } =
+        updateUserPreferencesDto;
       return await this.prisma.user.update({
         where: { id },
         data: {
           ...updateUserPreferencesDto,
           // Prisma no acepta `null` literal en una columna Json: se traduce a
-          // NULL de base (vuelve al orden por defecto).
-          ...(updateUserPreferencesDto.frequentProductIds === null
+          // NULL de base (vuelve al orden / la barra por defecto, sin colores
+          // propios).
+          ...(frequentProductIds === null
             ? { frequentProductIds: Prisma.DbNull }
             : {}),
+          ...(navPreferences === null ? { navPreferences: Prisma.DbNull } : {}),
+          ...(mockupColors === null ? { mockupColors: Prisma.DbNull } : {}),
         },
         select: USER_PREFERENCES_SELECT,
       });

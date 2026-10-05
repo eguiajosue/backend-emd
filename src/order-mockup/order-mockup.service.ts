@@ -2,6 +2,13 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { assertBase64FileValid } from 'src/common/file-validation';
+import { MOCKUP_AUTHOR_SELECT, mockupAuthor } from 'src/common/mockup-author';
+import {
+  assertJsonHasNoNul,
+  assertMockupConfigShape,
+  base64DecodedBytes,
+  parseImageDataUrl,
+} from 'src/common/mockup-validation';
 import { OrderService, RequestingUser } from 'src/order/order.service';
 import {
   CreateOrderMockupDto,
@@ -38,9 +45,7 @@ export const MOCKUP_SUMMARY_SELECT = {
   orderId: true,
   garment: true,
   createdAt: true,
-  createdBy: {
-    select: { id: true, firstName: true, lastName: true, username: true },
-  },
+  createdBy: MOCKUP_AUTHOR_SELECT,
 } satisfies Prisma.OrderMockupSelect;
 
 /** Detalle: lo del listado más la lámina y la configuración del estudio. */
@@ -54,19 +59,6 @@ const MOCKUP_DETAIL_SELECT = {
 type MockupSummaryRow = Prisma.OrderMockupGetPayload<{
   select: typeof MOCKUP_SUMMARY_SELECT;
 }>;
-
-/** `data:<mime>;base64,` al principio del data URL. */
-const DATA_URL_PREFIX = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,/i;
-
-/**
- * Alfabeto base64 estándar con padding final (el largo múltiplo de 4 se
- * chequea aparte). Clase de caracteres plana a propósito: un grupo repetido
- * (`(?:[…]{4})*`) revienta el stack de V8 con strings de varios MB.
- */
-const BASE64_CHARS = /^[A-Za-z0-9+/]*={0,2}$/;
-
-/** Prefijo obligatorio de cada diseño embebido en `config.layers[].dataUrl`. */
-const LAYER_DATA_URL_PREFIX = 'data:image/png;base64,';
 
 const MAX_MOCKUP_MB = MAX_MOCKUP_BYTES / (1024 * 1024);
 
@@ -130,7 +122,7 @@ export class OrderMockupService {
 
     const garment = this.assertGarment(dto.garment);
     const image = await this.assertImageValid(dto.imageDataUrl, dto.config);
-    this.assertConfigValid(dto.config, garment);
+    assertMockupConfigShape(dto.config, garment, 'del mockup');
 
     const row = await this.prisma.orderMockup.create({
       data: {
@@ -162,23 +154,12 @@ export class OrderMockupService {
   }
 
   private toSummary(row: MockupSummaryRow): OrderMockupSummary {
-    const createdBy = row.createdBy
-      ? {
-          id: row.createdBy.id,
-          // Mismo criterio que `OrderService.userDisplayName`: nombre y
-          // apellido, o el username si no tiene nombre cargado.
-          name:
-            [row.createdBy.firstName, row.createdBy.lastName]
-              .filter(Boolean)
-              .join(' ') || row.createdBy.username,
-        }
-      : null;
     return {
       id: row.id,
       orderId: row.orderId,
       garment: row.garment as MockupGarment,
       createdAt: row.createdAt.toISOString(),
-      createdBy,
+      createdBy: mockupAuthor(row.createdBy),
     };
   }
 
@@ -202,34 +183,12 @@ export class OrderMockupService {
     imageDataUrl: unknown,
     config: unknown,
   ): Promise<{ base64: string; mime: string }> {
-    const match =
-      typeof imageDataUrl === 'string'
-        ? DATA_URL_PREFIX.exec(imageDataUrl)
-        : null;
-    if (!match) {
-      throw new HttpException(
-        'La imagen del mockup debe ser un data URL en base64 (PNG o JPEG)',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    const { base64, mime } = parseImageDataUrl(imageDataUrl, {
+      allowedMimeTypes: MOCKUP_IMAGE_MIME_TYPES,
+      subject: 'La imagen del mockup',
+      formats: 'PNG o JPEG',
+    });
     const dataUrl = imageDataUrl as string;
-    const mime = match[1].toLowerCase();
-    if (!(MOCKUP_IMAGE_MIME_TYPES as readonly string[]).includes(mime)) {
-      throw new HttpException(
-        'La imagen del mockup debe ser PNG o JPEG',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    const base64 = dataUrl.slice(match[0].length);
-    // `Buffer.from(…, 'base64')` ignora caracteres inválidos y corta en el
-    // padding: sin esto, una lámina válida seguida de basura pasa los magic
-    // bytes y se guarda la basura (un NUL, además, rompe el INSERT con 500).
-    if (base64.length % 4 !== 0 || !BASE64_CHARS.test(base64)) {
-      throw new HttpException(
-        'La imagen del mockup no es un base64 válido',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
 
     // Tamaños antes de decodificar nada: se calculan sobre los strings.
     if (base64DecodedBytes(base64) > MAX_MOCKUP_BYTES) {
@@ -252,14 +211,10 @@ export class OrderMockupService {
         HttpStatus.PAYLOAD_TOO_LARGE,
       );
     }
-    // jsonb de Postgres rechaza `\u0000` ("unsupported Unicode escape
-    // sequence"): mejor un 400 claro que un 500 del INSERT.
-    if (configJson.includes('\\u0000')) {
-      throw new HttpException(
-        'La configuración del mockup tiene caracteres inválidos',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    assertJsonHasNoNul(
+      configJson,
+      'La configuración del mockup tiene caracteres inválidos',
+    );
 
     await assertBase64FileValid(
       { data: base64, filename: 'mockup', mimeType: mime },
@@ -273,49 +228,4 @@ export class OrderMockupService {
     );
     return { base64, mime };
   }
-
-  /**
-   * Validación liviana de `MockupConfig`: lo justo para que el estudio pueda
-   * volver a abrirlo. Prenda igual a la del mockup, `colors` objeto,
-   * `layers` array de objetos y cada `dataUrl` de diseño, si viene, un PNG.
-   */
-  private assertConfigValid(config: unknown, garment: MockupGarment) {
-    const invalid = (message: string) =>
-      new HttpException(message, HttpStatus.BAD_REQUEST);
-
-    if (!isPlainObject(config)) {
-      throw invalid('La configuración del mockup es obligatoria');
-    }
-    if (config.garment !== garment) {
-      throw invalid('La configuración no corresponde a la prenda del mockup');
-    }
-    if (!isPlainObject(config.colors)) {
-      throw invalid('La configuración del mockup no tiene colores');
-    }
-    if (!Array.isArray(config.layers)) {
-      throw invalid('La configuración del mockup no tiene la lista de diseños');
-    }
-    for (const layer of config.layers) {
-      if (!isPlainObject(layer)) {
-        throw invalid('Cada diseño del mockup debe ser un objeto');
-      }
-      if (
-        layer.dataUrl !== undefined &&
-        (typeof layer.dataUrl !== 'string' ||
-          !layer.dataUrl.startsWith(LAYER_DATA_URL_PREFIX))
-      ) {
-        throw invalid('Cada diseño del mockup debe ser una imagen PNG');
-      }
-    }
-  }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Bytes que ocupa un string base64 ya decodificado, sin decodificarlo. */
-function base64DecodedBytes(base64: string): number {
-  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
-  return Math.floor((base64.length * 3) / 4) - padding;
 }
