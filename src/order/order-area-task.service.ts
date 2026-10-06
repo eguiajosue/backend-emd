@@ -408,6 +408,7 @@ export class OrderAreaTaskService {
     taskId: number,
     status: AreaTaskStatus,
     requestingUser: RequestingUser,
+    orderId?: number,
   ) {
     const task = await this.prisma.orderAreaTask.findUnique({
       where: { id: taskId },
@@ -419,7 +420,7 @@ export class OrderAreaTaskService {
         assignedUserId: true,
       },
     });
-    if (!task) {
+    if (!task || !this.belongsToOrder(task.orderId, orderId)) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
     this.assertCanWorkArea(task.area, requestingUser);
@@ -467,12 +468,13 @@ export class OrderAreaTaskService {
     taskId: number,
     assignedUserId: number | null,
     requestingUser: RequestingUser,
+    orderId?: number,
   ) {
     const task = await this.prisma.orderAreaTask.findUnique({
       where: { id: taskId },
-      select: { id: true, area: true },
+      select: { id: true, area: true, orderId: true },
     });
-    if (!task) {
+    if (!task || !this.belongsToOrder(task.orderId, orderId)) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
 
@@ -515,7 +517,11 @@ export class OrderAreaTaskService {
   }
 
   /** Quita un área del pedido (sólo Recepción/admin). */
-  async remove(taskId: number, requestingUser: RequestingUser) {
+  async remove(
+    taskId: number,
+    requestingUser: RequestingUser,
+    orderId?: number,
+  ) {
     const isManager = requestingUser.roles.some((r) =>
       TASK_MANAGER_ROLES.includes(r),
     );
@@ -529,12 +535,21 @@ export class OrderAreaTaskService {
       where: { id: taskId },
       select: { orderId: true },
     });
-    if (!task) {
+    if (!task || !this.belongsToOrder(task.orderId, orderId)) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
     await this.prisma.orderAreaTask.delete({ where: { id: taskId } });
     await this.syncOrderStatusFromTasks(task.orderId, requestingUser.userId);
     return { deleted: true };
+  }
+
+  /**
+   * La tarea debe ser del pedido de la URL (`/orders/:id/area-tasks/:taskId`):
+   * si no, se responde 404 igual que si no existiera, para no revelar tareas
+   * de otros pedidos. Sin `orderId` (llamadas internas) no se compara.
+   */
+  private belongsToOrder(taskOrderId: number, orderId?: number) {
+    return orderId === undefined || taskOrderId === orderId;
   }
 
   /**

@@ -777,4 +777,52 @@ describe('OrderAreaTaskService', () => {
       expect(prisma.orderAreaTask.findMany).not.toHaveBeenCalled();
     });
   });
+
+  describe('la tarea debe ser del pedido de la URL', () => {
+    const manager = { userId: 1, roles: ['recepcion'] };
+    const statusOf = async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+      } catch (e) {
+        return (e as HttpException).getStatus();
+      }
+      return 200;
+    };
+
+    beforeEach(() => {
+      prisma.orderAreaTask.findUnique.mockResolvedValue({
+        id: 10,
+        orderId: 5,
+        area: 'bordado',
+        status: AreaTaskStatus.pendiente,
+        assignedUserId: null,
+      });
+    });
+
+    it('updateStatus con otro pedido responde 404 y no escribe', async () => {
+      expect(
+        await statusOf(() =>
+          service.updateStatus(10, AreaTaskStatus.en_proceso, manager, 6),
+        ),
+      ).toBe(404);
+      expect(prisma.orderAreaTask.update).not.toHaveBeenCalled();
+    });
+
+    it('assign con otro pedido responde 404 y no escribe', async () => {
+      expect(await statusOf(() => service.assign(10, null, manager, 6))).toBe(
+        404,
+      );
+      expect(prisma.orderAreaTask.update).not.toHaveBeenCalled();
+    });
+
+    it('remove con otro pedido responde 404 y no borra', async () => {
+      expect(await statusOf(() => service.remove(10, manager, 6))).toBe(404);
+      expect(prisma.orderAreaTask.delete).not.toHaveBeenCalled();
+    });
+
+    it('con el pedido correcto sí escribe', async () => {
+      await service.assign(10, null, manager, 5);
+      expect(prisma.orderAreaTask.update).toHaveBeenCalled();
+    });
+  });
 });
