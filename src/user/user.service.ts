@@ -249,19 +249,21 @@ export class UserService {
     try {
       // Primero, elimina las órdenes asociadas al usuario. Las claves de sus
       // archivos en el bucket se juntan antes (la cascada de la DB no lo toca)
-      // y se borran recién cuando el usuario ya se borró.
+      // y se borran en cuanto se borran los pedidos.
       const objectKeys = await collectOrderObjectKeys(this.prisma, {
         userId: id,
       });
       await this.prisma.order.deleteMany({
         where: { userId: id },
       });
+      // Los pedidos ya no existen: sus archivos se borran aunque el borrado
+      // del usuario falle después (si no, quedarían huérfanos en el bucket).
+      await this.storage.deleteQuietly(objectKeys);
 
       // Luego, elimina el usuario
       await this.prisma.user.delete({
         where: { id },
       });
-      await this.storage.deleteQuietly(objectKeys);
 
       return { message: 'Usuario eliminado correctamente' };
     } catch (error) {

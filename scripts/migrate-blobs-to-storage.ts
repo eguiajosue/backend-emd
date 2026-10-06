@@ -17,6 +17,9 @@ import { validateEnv } from '../src/config/env.validation';
 import { createStorageService } from '../src/storage/storage.module';
 import { backfillBlobs, BLOB_TARGETS } from '../src/storage/blob-backfill';
 
+/** Id arbitrario y fijo del candado de `pg_try_advisory_lock`. */
+const BACKFILL_LOCK_ID = 7_310_045_001;
+
 function parseArgs(argv: string[]) {
   const args = {
     dryRun: false,
@@ -72,11 +75,21 @@ async function main() {
   }
   if (!storage.writesToObjectStorage) {
     logger.warn(
-      'STORAGE_DRIVER no es "s3": los archivos NUEVOS se seguirán guardando en la DB. Configurá STORAGE_DRIVER=s3 antes de migrar.',
+      'STORAGE_DRIVER no es "s3": los archivos NUEVOS se seguirán guardando en la DB. Configura STORAGE_DRIVER=s3 antes de migrar.',
     );
   }
 
   const prisma = new PrismaClient();
+  // Candado de sesión de Postgres: dos corridas a la vez se pisarían las
+  // mismas filas. Se libera solo al desconectar.
+  const [{ locked }] = await prisma.$queryRaw<{ locked: boolean }[]>`
+    SELECT pg_try_advisory_lock(${BACKFILL_LOCK_ID}::bigint) AS locked`;
+  if (!locked) {
+    await prisma.$disconnect();
+    throw new Error(
+      'Ya hay otra migración de archivos corriendo. Espera a que termine.',
+    );
+  }
   try {
     logger.log(
       args.dryRun
@@ -100,7 +113,7 @@ async function main() {
     );
     if (t.failed > 0) {
       logger.error(
-        'Hubo errores: esas filas quedaron intactas en la DB. Volvé a correr el comando para reintentarlas.',
+        'Hubo errores: esas filas quedaron intactas en la DB. Vuelve a correr el comando para reintentarlas.',
       );
       process.exitCode = 1;
     }

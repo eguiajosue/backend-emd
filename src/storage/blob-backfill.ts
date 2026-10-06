@@ -268,7 +268,17 @@ export async function backfillBlobs(
           logger.warn(
             `${target.name} #${row.id}: la fila cambió durante la migración, se deja como está`,
           );
-          await storage.deleteQuietly([key]);
+          // La clave es determinística: si otra corrida simultánea ya migró
+          // esta fila, la fila apunta a ESTE mismo objeto y borrarlo dejaría
+          // el archivo perdido (el base64 ya es null). Sólo se borra si la
+          // fila no lo referencia.
+          const current = await delegate.findUnique({
+            where: { id: row.id },
+            select: { [target.keyField]: true },
+          });
+          if (current?.[target.keyField] !== key) {
+            await storage.deleteQuietly([key]);
+          }
         }
       }
       logger.log(

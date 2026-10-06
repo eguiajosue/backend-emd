@@ -41,6 +41,14 @@ function fakeDelegate(rows: Row[]) {
           ),
         ),
     ),
+    findUnique: jest.fn(async (args: any) => {
+      const row = rows.find((r) => r.id === args.where.id);
+      return row
+        ? Object.fromEntries(
+            Object.keys(args.select).map((field) => [field, row[field]]),
+          )
+        : null;
+    }),
     updateMany: jest.fn(async (args: any) => {
       const hit = rows.filter((row) => matches(row, args.where));
       hit.forEach((row) => Object.assign(row, args.data));
@@ -313,6 +321,35 @@ describe('backfillBlobs', () => {
         montageFileData: null,
       },
     });
+  });
+
+  it('dos corridas simultáneas no borran el objeto que la fila ya referencia', async () => {
+    const rows = [
+      {
+        id: 1,
+        imageData: PNG_BASE64,
+        imageKey: null,
+        thumbnailData: null,
+        thumbnailKey: null,
+      },
+    ];
+    const prisma = fakePrisma({ mockupLogo: rows });
+    const store = new InMemoryObjectStore();
+    const storage = new StorageService('s3', store);
+    const opts = {
+      dryRun: false,
+      only: ['MockupLogo.image'],
+      logger: silentLogger(),
+    };
+
+    await Promise.all([
+      backfillBlobs(prisma as unknown as PrismaClient, storage, opts),
+      backfillBlobs(prisma as unknown as PrismaClient, storage, opts),
+    ]);
+
+    expect(rows[0].imageData).toBeNull();
+    expect(rows[0].imageKey).not.toBeNull();
+    expect(store.objects.has(rows[0].imageKey as unknown as string)).toBe(true);
   });
 
   it('--only limita los campos y sin bucket (no dry-run) se niega a correr', async () => {

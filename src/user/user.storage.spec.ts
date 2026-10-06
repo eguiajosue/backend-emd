@@ -35,7 +35,7 @@ describe('UserService.remove - archivos en el almacenamiento', () => {
     expect(store.objects.size).toBe(0);
   });
 
-  it('si el usuario no existe, no toca el bucket', async () => {
+  it('si falla el borrado del usuario, los archivos de sus pedidos ya borrados no quedan huérfanos', async () => {
     const { storage, store } = createS3StorageForTests();
     await store.put('cliente.pdf', Buffer.from('x'), 'application/pdf');
     const prisma = {
@@ -55,6 +55,7 @@ describe('UserService.remove - archivos en el almacenamiento', () => {
     await expect(
       new UserService(prisma as unknown as PrismaService, storage).remove(3),
     ).rejects.toMatchObject({ status: 404 });
-    expect(store.objects.size).toBe(1);
+    expect(prisma.order.deleteMany).toHaveBeenCalled();
+    expect(store.objects.size).toBe(0);
   });
 });

@@ -19,6 +19,11 @@ export function scrubSentryEvent<T extends ErrorEvent>(event: T): T {
   if (event.request) {
     delete event.request.data;
     delete event.request.cookies;
+    // La query puede llevar tokens (p. ej. `?token=` del push de Expo).
+    delete event.request.query_string;
+    if (event.request.url) {
+      event.request.url = event.request.url.split('?')[0];
+    }
     if (event.request.headers) {
       for (const name of Object.keys(event.request.headers)) {
         if (SENSITIVE_HEADERS.has(name.toLowerCase())) {

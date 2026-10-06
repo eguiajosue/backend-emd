@@ -148,6 +148,18 @@ describe('OrderService - almacenamiento de archivos (R2/S3)', () => {
       expect(result.clientResourceFile.dataUrl).toBe(PNG_DATA_URL);
     });
 
+    it('objeto que falta en el bucket: el pedido abre igual, sin archivo', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        ...baseOrder,
+        clientResourceFileData: null,
+        clientResourceFileKey: 'orders/client-resources/perdido.png',
+        clientResourceFileName: 'logo.png',
+        clientResourceFileMime: 'image/png',
+      });
+      const result: any = await buildService(storage).findOne(1, ADMIN);
+      expect(result.clientResourceFile).toBeNull();
+    });
+
     it('sin archivo: null', async () => {
       prisma.order.findUnique.mockResolvedValue({
         ...baseOrder,

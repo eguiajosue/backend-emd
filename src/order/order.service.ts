@@ -856,6 +856,17 @@ export class OrderService {
    * o null si el pedido nunca llegó a ese estado. `histories` debe venir
    * ordenado por `changeDate desc` (ver HISTORY_SELECT_FOR_DELIVERED_AT).
    */
+  private async loadClientResourceFile(
+    filename: string | null,
+    mimeType: string | null,
+    ref: Parameters<typeof hasBlob>[0],
+  ) {
+    if (!hasBlob(ref)) return null;
+    const base64 = await this.storage.loadBase64OrNull(ref);
+    if (base64 == null) return null;
+    return { filename, mimeType, dataUrl: `data:${mimeType};base64,${base64}` };
+  }
+
   private computeDeliveredAt(
     histories: { changeDate: Date; newStatusId: number }[] | undefined,
   ): string | null {
@@ -1036,16 +1047,13 @@ export class OrderService {
         // NO es la hoja de autorización: esa es el montaje de cada ronda de
         // diseño (ver WORKFLOW.md §1 y §2). Puede estar en la DB (legacy) o
         // en el bucket: la respuesta es la misma data URL en los dos casos.
-        clientResourceFile: hasBlob(clientResourceRef)
-          ? {
-              filename: clientResourceFileName,
-              mimeType: clientResourceFileMime,
-              dataUrl: await this.storage.toDataUrl(
-                clientResourceFileMime,
-                clientResourceRef,
-              ),
-            }
-          : null,
+        // Si el objeto no se puede leer (bucket caído, objeto perdido) el
+        // pedido igual abre, sólo que sin el archivo (queda logueado).
+        clientResourceFile: await this.loadClientResourceFile(
+          clientResourceFileName,
+          clientResourceFileMime,
+          clientResourceRef,
+        ),
         deliveredAt: this.computeDeliveredAt(histories),
       };
     } catch (error) {

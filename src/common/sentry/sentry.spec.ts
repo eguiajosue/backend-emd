@@ -83,6 +83,18 @@ describe('Sentry', () => {
     });
   });
 
+  it('quita la query (puede llevar tokens de push)', () => {
+    const event: any = {
+      request: {
+        url: 'https://api/push/expo-token?token=ExponentPushToken[x]',
+        query_string: 'token=ExponentPushToken[x]',
+      },
+    };
+    expect(scrubSentryEvent(event).request).toEqual({
+      url: 'https://api/push/expo-token',
+    });
+  });
+
   describe('AllExceptionsFilter → Sentry', () => {
     const capture = Sentry.captureException as jest.Mock;
     const host = {
