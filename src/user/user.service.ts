@@ -3,6 +3,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateUserPreferencesDto } from './dto/update-user-preferences.dto';
+import {
+  assertJsonPreferencesValid,
+  jsonPreferencesNullToDbNull,
+} from './json-preferences';
 import { Prisma } from '@prisma/client';
 import * as bcryptjs from 'bcryptjs';
 
@@ -35,6 +39,8 @@ export const USER_PREFERENCES_SELECT = {
   areaViewMode: true,
   timeFormatPreference: true,
   frequentProductIds: true,
+  navPreferences: true,
+  mockupColors: true,
   notificationsMuted: true,
   notifyMentionsOnly: true,
   notifyProductionUpdates: true,
@@ -210,16 +216,15 @@ export class UserService {
     id: number,
     updateUserPreferencesDto: UpdateUserPreferencesDto,
   ) {
+    // Forma, claves prohibidas, NUL y tope de 8KB de cada preferencia Json.
+    assertJsonPreferencesValid(updateUserPreferencesDto);
     try {
       return await this.prisma.user.update({
         where: { id },
         data: {
           ...updateUserPreferencesDto,
-          // Prisma no acepta `null` literal en una columna Json: se traduce a
-          // NULL de base (vuelve al orden por defecto).
-          ...(updateUserPreferencesDto.frequentProductIds === null
-            ? { frequentProductIds: Prisma.DbNull }
-            : {}),
+          // `null` en una preferencia Json → NULL de base (valor por defecto).
+          ...jsonPreferencesNullToDbNull(updateUserPreferencesDto),
         },
         select: USER_PREFERENCES_SELECT,
       });

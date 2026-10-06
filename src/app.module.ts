@@ -35,6 +35,9 @@ import { OrderTemplateModule } from './order-template/order-template.module';
 import { ClientInsightModule } from './client-insight/client-insight.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { OrderMockupModule } from './order-mockup/order-mockup.module';
+import { MockupTemplateModule } from './mockup-template/mockup-template.module';
+import { MockupLogoModule } from './mockup-logo/mockup-logo.module';
+import { QuoteModule } from './quote/quote.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AppController } from './app.controller';
@@ -88,6 +91,9 @@ import { AppController } from './app.controller';
     ClientInsightModule,
     DashboardModule,
     OrderMockupModule,
+    MockupTemplateModule,
+    MockupLogoModule,
+    QuoteModule,
   ],
   providers: [
     {

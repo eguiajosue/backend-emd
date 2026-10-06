@@ -28,11 +28,24 @@ describe('CreateOrderMockupDto', () => {
     ).toEqual([]);
   });
 
-  it('rechaza una prenda fuera de tshirt/cap', async () => {
-    expect(await errorsFor({ ...valid, garment: 'hoodie' })).toEqual([
+  it('rechaza una prenda fuera de la lista compartida', async () => {
+    expect(await errorsFor({ ...valid, garment: 'pants' })).toEqual([
       'garment',
     ]);
   });
+
+  it.each(['tshirt', 'cap', 'hoodie', 'dress-shirt'])(
+    'acepta la prenda %s (misma lista que las plantillas)',
+    async (garment) => {
+      expect(
+        await errorsFor({
+          ...valid,
+          garment,
+          config: { ...valid.config, garment },
+        }),
+      ).toEqual([]);
+    },
+  );
 
   it('exige imageDataUrl y un config objeto (no array)', async () => {
     expect(

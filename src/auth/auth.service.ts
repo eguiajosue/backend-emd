@@ -8,10 +8,20 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcryptjs from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { UserService } from 'src/user/user.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
+
+/**
+ * Hash bcrypt (mismo cost que user.service) de un valor aleatorio, sólo para
+ * igualar el tiempo de login de usuarios inexistentes con el de existentes.
+ */
+const DUMMY_PASSWORD_HASH = bcryptjs.hashSync(
+  randomBytes(16).toString('hex'),
+  10,
+);
 
 export interface AccessTokenPayload {
   username: string;
@@ -55,21 +65,19 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const user = await this.userService.findOneByUsername(loginDto.username);
 
-    if (!user) {
-      this.logger.warn(
-        `Intento de login fallido: usuario inexistente "${loginDto.username}"`,
-      );
-      throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
-    }
-
+    // Siempre se corre bcrypt (contra un hash señuelo si el usuario no
+    // existe) y se responde lo mismo: ni el status ni el tiempo de respuesta
+    // deben revelar si un username existe.
     const isValidPassword = await bcryptjs.compare(
       loginDto.password,
-      user.password,
+      user?.password ?? DUMMY_PASSWORD_HASH,
     );
 
-    if (!isValidPassword) {
+    if (!user || !isValidPassword) {
       this.logger.warn(
-        `Intento de login fallido: contraseña incorrecta para "${loginDto.username}"`,
+        user
+          ? `Intento de login fallido: contraseña incorrecta para "${loginDto.username}"`
+          : `Intento de login fallido: usuario inexistente "${loginDto.username}"`,
       );
       throw new HttpException(
         'Credenciales incorrectas',

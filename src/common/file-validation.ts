@@ -40,6 +40,13 @@ export async function assertBase64FileValid(
     throw new HttpException(options.sizeErrorMessage, HttpStatus.BAD_REQUEST);
   }
 
+  // `file-type` < 21.3.1 entra en loop infinito con ciertos ASF malformados
+  // (GHSA-5v7r-6r5c-r473). v21+ es ESM-only (ver arriba), así que se corta
+  // antes: ASF (wma/wmv) nunca es un tipo permitido aquí.
+  if (startsWithAsfHeader(buffer)) {
+    throw new HttpException(options.typeErrorMessage, HttpStatus.BAD_REQUEST);
+  }
+
   const detected = await fromBuffer(buffer);
 
   if (!detected || !options.allowedMimeTypes.includes(detected.mime)) {
@@ -54,4 +61,14 @@ export async function assertBase64FileValid(
   }
 
   return buffer;
+}
+
+/** GUID del header ASF: 30 26 B2 75 8E 66 CF 11 A6 D9 00 AA 00 62 CE 6C. */
+const ASF_HEADER_GUID = Buffer.from('3026b2758e66cf11a6d900aa0062ce6c', 'hex');
+
+function startsWithAsfHeader(buffer: Buffer): boolean {
+  return (
+    buffer.length >= ASF_HEADER_GUID.length &&
+    buffer.subarray(0, ASF_HEADER_GUID.length).equals(ASF_HEADER_GUID)
+  );
 }

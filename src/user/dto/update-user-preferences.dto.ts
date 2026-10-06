@@ -11,6 +11,12 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  IsMockupColors,
+  IsNavPreferences,
+  MockupColors,
+  NavPreferences,
+} from './user-preferences-shapes';
 
 /**
  * Preferencias de usuario (tema, color de acento, idioma) persistidas por
@@ -78,6 +84,28 @@ export class UpdateUserPreferencesDto {
   @IsInt({ each: true })
   @Min(1, { each: true })
   frequentProductIds?: number[] | null;
+
+  // Barra lateral personalizada de este usuario: favoritos arriba, orden de
+  // los ítems dentro de cada grupo, ocultos y si va expandida. Los ids son
+  // las urls de los ítems; null vuelve a la barra por defecto.
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      '{ favorites: string[]; order: Record<string, string[]>; hidden: string[]; expanded: boolean } (urls de /dashboard).',
+  })
+  @IsOptional()
+  @IsNavPreferences()
+  navPreferences?: NavPreferences | null;
+
+  // "Mis colores" del creador de mockups (por usuario): favoritos y colores
+  // propios, hex #rrggbb, máx. 48 cada lista; null los borra.
+  @ApiPropertyOptional({
+    nullable: true,
+    description: '{ favorites: string[]; custom: string[] } (hex #rrggbb).',
+  })
+  @IsOptional()
+  @IsMockupColors()
+  mockupColors?: MockupColors | null;
 
   // Preferencias de notificaciones (Fase 4). Ver NotificationService para
   // cómo se aplican al decidir si se persiste/pushea cada notificación.

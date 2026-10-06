@@ -1,8 +1,9 @@
 import { IsIn, IsNotEmpty, IsObject, IsString } from 'class-validator';
-
-/** Prendas que arma el creador de mockups 3D (frontend `Garment`). */
-export const MOCKUP_GARMENTS = ['tshirt', 'cap'] as const;
-export type MockupGarment = (typeof MOCKUP_GARMENTS)[number];
+import {
+  MOCKUP_GARMENT_MESSAGE,
+  MOCKUP_GARMENTS,
+  MockupGarment,
+} from 'src/common/mockup-garments';
 
 /** Formatos aceptados para la lámina exportada del mockup. */
 export const MOCKUP_IMAGE_MIME_TYPES = ['image/png', 'image/jpeg'] as const;
@@ -28,9 +29,7 @@ export const MAX_MOCKUP_BYTES = 8 * 1024 * 1024;
  * nuevo que agregue el estudio rompería el guardado.
  */
 export class CreateOrderMockupDto {
-  @IsIn(MOCKUP_GARMENTS, {
-    message: 'La prenda del mockup debe ser playera (tshirt) o gorra (cap)',
-  })
+  @IsIn(MOCKUP_GARMENTS, { message: MOCKUP_GARMENT_MESSAGE })
   garment: MockupGarment;
 
   @IsString({ message: 'La imagen del mockup es obligatoria' })

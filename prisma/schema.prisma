@@ -32,6 +32,7 @@ model Client {
   calendarEvents CalendarEvent[] // Eventos del calendario de Recepción vinculados a este cliente.
   orderTemplates OrderTemplate[] // Plantillas de pedido de este cliente (lo que suele pedir).
   insight        ClientInsight? // Hábitos aprendidos de su historial de pedidos (autocompletado del alta).
+  quotes         Quote[] // Cotizaciones de este cliente (tablero de Cotizaciones de Recepción).
 
   @@index([companyId])
   @@index([last_name, first_name])
@@ -76,6 +77,9 @@ model User {
   orderMaterialItems      OrderMaterialItem[]      @relation("OrderMaterialItemCreatedBy") // Líneas de hoja de materiales cargadas por este usuario.
   inventoryMovements      InventoryMovement[]      @relation("InventoryMovementCreatedBy") // Entradas/salidas/ajustes de inventario registrados por este usuario.
   orderMockupsCreated     OrderMockup[]            @relation("OrderMockupCreatedBy") // Mockups 3D (playera/gorra) que este usuario adjuntó a un pedido.
+  mockupTemplatesCreated  MockupTemplate[]         @relation("MockupTemplateCreatedBy") // Plantillas de mockup (compartidas por la empresa) que guardó este usuario.
+  mockupLogosCreated      MockupLogo[]             @relation("MockupLogoCreatedBy") // Logos de la biblioteca de mockups (compartida por la empresa) que subió este usuario.
+  quotesCreated           Quote[]                  @relation("QuoteCreatedBy") // Cotizaciones que este usuario dio de alta.
 
   themePreference      String? // Preferencia de tema: 'light' | 'dark' | 'system'.
   accentColor          String? // Nombre de preset (ej "rose") o hex custom (ej "#3366ff").
@@ -86,6 +90,8 @@ model User {
   areaViewMode         String? // Cómo ver las tareas de producción: 'unified' (todo junto, etiquetado por área) | 'split' (una vista por área). Preferencia personal, ver WORKFLOW.md §4.
   timeFormatPreference String? // Formato de hora: '24h' | '12h' (AM/PM).
   frequentProductIds   Json? // Productos frecuentes del alta de pedido elegidos y ordenados por este usuario (array de ids de OrderProductPreset). Null = usar el orden por defecto.
+  navPreferences       Json? // Barra lateral personalizada de este usuario: { favorites: string[]; order: Record<grupo, string[]>; hidden: string[]; expanded: boolean } (ids = url del ítem). Null = barra por defecto.
+  mockupColors         Json? // Colores propios del creador de mockups de este usuario: { favorites: string[]; custom: string[] } (hex #rrggbb, máx. 48 c/u). Null = sin colores guardados.
 
   notificationsMuted      Boolean @default(false) // Modo silencio general: si está activo, no se persisten ni pushean notificaciones (salvo menciones directas, cuando ese tipo exista).
   notifyMentionsOnly      Boolean @default(false) // Sólo notificar menciones directas. Sin efecto práctico hoy: el sistema no tiene un tipo de notificación de "mención" implementado aún (ver NotificationService).
@@ -151,6 +157,7 @@ model Order {
   materialItems      OrderMaterialItem[] // Hoja de materiales del pedido: qué se va a usar en producción (opcional, la carga Recepción).
   inventoryMovements InventoryMovement[] // Consumos de inventario imputados a este pedido (opcional).
   mockups            OrderMockup[] // Mockups 3D (playera/gorra con los diseños del cliente) adjuntados al pedido.
+  quote              Quote? // Cotización aceptada que se convirtió en este pedido (si vino de una).
 
   @@index([statusId])
   @@index([clientId])
@@ -709,6 +716,7 @@ model InventoryItem {
   area       String // Departamento dueño de la existencia: uno de INVENTORY_AREAS (taller/dtf/bordado/diseno/laser/impresiones/recepcion).
   name       String // "Hilo poliéster 40 rojo", "Tinta Eco-Solvente Cyan".
   sku        String? // Código interno o del fabricante (ej. "MAD-1147"). Único por departamento.
+  barcode    String?  @unique // Código de barras Code 128 de la etiqueta, único en todo el inventario. Por omisión "EMD-" + id con 6 ceros (EMD-000123); también puede ligarse el EAN/UPC del fabricante.
   category   String? // Texto libre: "Hilos", "Tintas", "Estabilizador", "Refacciones"...
   unit       String // Unidad en que se cuenta: "cono", "rollo", "litro", "pieza"...
   color      String?
@@ -852,7 +860,7 @@ model ClientInsight {
 model OrderMockup {
   id          Int      @id @default(autoincrement()) // Identificador único del mockup.
   orderId     Int // Clave foránea que referencia al Order al que se adjuntó.
-  garment     String // Prenda del mockup: 'tshirt' | 'cap'.
+  garment     String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
   imageData   String // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada.
   imageMime   String // Mime type de la lámina: image/png | image/jpeg.
   config      Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) para volver a editarlo.
@@ -863,4 +871,80 @@ model OrderMockup {
   createdBy User? @relation("OrderMockupCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que lo adjuntó.
 
   @@index([orderId])
+}
+
+// ─── Plantillas y biblioteca de logos de mockups ───────────────────────────
+//
+// Compartidas por toda la empresa (las administran Recepción, admin y
+// superuser). Una plantilla guarda la configuración completa del estudio
+// (prenda, colores, diseños embebidos) más una miniatura liviana para el
+// panel; un logo es un PNG reutilizable con contador de usos para ordenar
+// "más usados primero". Ver MockupTemplateService / MockupLogoService y
+// frontend-emd/docs/plans/sidebar-y-mockups-v2.md.
+
+model MockupTemplate {
+  id            Int      @id @default(autoincrement()) // Identificador único de la plantilla.
+  name          String // Nombre que le puso el usuario (máx. 80 caracteres).
+  garment       String // Prenda de la plantilla: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
+  config        Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) que se aplica al elegirla. Máx. 8MB.
+  thumbnailData String // Miniatura en base64 (sin prefijo data:), PNG o JPEG, máx. 96KB decodificada. Se lista junto con la plantilla.
+  thumbnailMime String // Mime type de la miniatura: image/png | image/jpeg.
+  createdById   Int? // Clave foránea que referencia al User que la guardó (null si ese usuario se borró).
+  createdAt     DateTime @default(now()) // Fecha en que se guardó la plantilla.
+  updatedAt     DateTime @updatedAt // Última modificación (ej. renombrarla).
+
+  createdBy User? @relation("MockupTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que la guardó.
+
+  @@index([createdAt]) // Listado "más nuevas primero".
+}
+
+model MockupLogo {
+  id            Int       @id @default(autoincrement()) // Identificador único del logo.
+  name          String // Nombre del logo (máx. 80 caracteres).
+  imageData     String // Imagen PNG en base64 (sin prefijo data:), máx. 2MB decodificada. Nunca se trae en el listado.
+  imageMime     String // Mime type de la imagen: image/png.
+  thumbnailData String // Miniatura PNG en base64 (sin prefijo data:), máx. 160px de lado y 24KB, para la grilla de logos. Nunca se trae en el listado: se pide por tarjeta visible.
+  thumbnailMime String // Mime type de la miniatura: image/png.
+  createdById   Int? // Clave foránea que referencia al User que lo subió (null si ese usuario se borró).
+  createdAt     DateTime  @default(now()) // Fecha en que se subió el logo.
+  useCount      Int       @default(0) // Veces que se agregó a un mockup (para ordenar "más usados primero").
+  lastUsedAt    DateTime? // Última vez que se agregó a un mockup. Null = nunca se usó.
+
+  createdBy User? @relation("MockupLogoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que lo subió.
+
+  @@index([useCount, lastUsedAt]) // Listado "más usados primero" (useCount desc, lastUsedAt desc).
+}
+
+// ─── Cotizaciones ───────────────────────────────────────────────────────────
+//
+// Tablero de cotizaciones de Recepción: reemplaza la lista que se llevaba por
+// WhatsApp. Cada cotización está en una etapa (`por_enviar` | `enviada`) y
+// un subestado que pertenece a esa etapa (QUOTE_STATUSES_BY_STAGE de
+// src/quote/quote.constants.ts). Cuando el cliente la acepta se puede
+// convertir en pedido (`orderId`). Ver QuoteService y
+// frontend-emd/docs/plans/cotizaciones.md.
+
+model Quote {
+  id           Int       @id @default(autoincrement()) // Identificador único de la cotización.
+  clientId     Int? // Clave foránea que referencia al Client (opcional: puede ser un cliente libre por nombre; null también si el cliente se borró).
+  clientName   String // Nombre del cliente tal como se muestra: texto libre o el nombre del cliente registrado al momento de cargarla (máx. 120 caracteres).
+  description  String // Qué se cotiza (máx. 1000 caracteres).
+  stage        String // Etapa: 'por_enviar' | 'enviada'.
+  status       String // Subestado dentro de la etapa: por_enviar → 'lista' | 'pendiente_medidas' | 'info' | 'esperando_montaje'; enviada → 'esperando_respuesta' | 'aceptada' | 'no_aceptada' | 'comentarios'.
+  comment      String? // Comentario libre (máx. 1000 caracteres), útil en 'comentarios' / 'no_aceptada'.
+  priorityDate DateTime? @db.Date // Fecha de prioridad (para cuándo hay que mandarla). Null = prioridad normal.
+  sentAt       DateTime? // Momento en que pasó a la etapa 'enviada' (null mientras está por enviar).
+  orderId      Int?      @unique // Clave foránea que referencia al Order en que se convirtió (sólo si fue aceptada; null si el pedido se borró).
+  createdById  Int? // Clave foránea que referencia al User que la dio de alta (null si ese usuario se borró).
+  createdAt    DateTime  @default(now()) // Fecha de alta de la cotización.
+  updatedAt    DateTime  @updatedAt // Última modificación (cambio de etapa, subestado, comentario, etc.).
+
+  client    Client? @relation(fields: [clientId], references: [id], onDelete: SetNull) // Relación con Client: si se borra el cliente, la cotización queda con el nombre escrito.
+  order     Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull) // Relación con el Order en que se convirtió.
+  createdBy User?   @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que la dio de alta.
+
+  @@index([stage, status]) // Pestañas y chips de subestado.
+  @@index([priorityDate]) // Prioridad vencida/hoy/mañana primero.
+  @@index([updatedAt]) // Luego, lo último que se movió.
+  @@index([clientId]) // Cotizaciones de un cliente (y el SET NULL al borrarlo).
 }

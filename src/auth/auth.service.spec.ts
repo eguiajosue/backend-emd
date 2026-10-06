@@ -84,12 +84,15 @@ describe('AuthService', () => {
       });
     });
 
-    it('should throw an HttpException when the user does not exist', async () => {
+    it('responds to an unknown user exactly like a wrong password (no username enumeration)', async () => {
       userService.findOneByUsername.mockResolvedValue(null);
 
       await expect(
         authService.login({ username: 'unknown', password: 'whatever' }),
-      ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
+      ).rejects.toMatchObject({
+        status: HttpStatus.UNAUTHORIZED,
+        message: 'Credenciales incorrectas',
+      });
     });
 
     it('should throw an HttpException when the password is incorrect', async () => {
