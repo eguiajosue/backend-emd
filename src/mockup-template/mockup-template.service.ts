@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import { MOCKUP_AUTHOR_SELECT, mockupAuthor } from 'src/common/mockup-author';
+import { STORAGE_FOLDERS, StorageService } from 'src/storage/storage.service';
 import {
   MOCKUP_GARMENT_MESSAGE,
   MockupGarment,
@@ -52,6 +53,7 @@ export const MOCKUP_TEMPLATE_SUMMARY_SELECT = {
   name: true,
   garment: true,
   thumbnailData: true,
+  thumbnailKey: true,
   thumbnailMime: true,
   createdAt: true,
   updatedAt: true,
@@ -77,7 +79,12 @@ const MAX_CONFIG_MB = MAX_MOCKUP_TEMPLATE_CONFIG_BYTES / (1024 * 1024);
  */
 @Injectable()
 export class MockupTemplateService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta siempre StorageModule (global).
+    private readonly storage: StorageService = StorageService.database(),
+  ) {}
 
   /** Todas las plantillas, más nuevas primero, con miniatura y sin config. */
   async findAll(): Promise<MockupTemplateSummary[]> {
@@ -85,7 +92,12 @@ export class MockupTemplateService {
       select: MOCKUP_TEMPLATE_SUMMARY_SELECT,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
-    return rows.map((row) => this.toSummary(row));
+    // Miniaturas del bucket con concurrencia acotada; una ilegible no rompe
+    // el panel entero (sale con `thumbnailUrl` vacío y queda logueada).
+    const thumbnails = await this.storage.loadManyBase64OrNull(
+      rows.map((row) => ({ data: row.thumbnailData, key: row.thumbnailKey })),
+    );
+    return rows.map((row, index) => this.toSummary(row, thumbnails[index]));
   }
 
   /** Una plantilla con su configuración completa (404 si no existe). */
@@ -95,7 +107,11 @@ export class MockupTemplateService {
       select: MOCKUP_TEMPLATE_DETAIL_SELECT,
     });
     if (!row) throw notFound();
-    return { ...this.toSummary(row), config: row.config };
+    const thumbnail = await this.storage.loadBase64OrNull({
+      data: row.thumbnailData,
+      key: row.thumbnailKey,
+    });
+    return { ...this.toSummary(row, thumbnail), config: row.config };
   }
 
   /** Guarda una plantilla nueva. Devuelve la fila tal como sale en el listado. */
@@ -110,18 +126,30 @@ export class MockupTemplateService {
     assertConfigSize(dto.config);
     const thumbnail = await assertThumbnailValid(dto.thumbnailDataUrl);
 
-    const row = await this.prisma.mockupTemplate.create({
-      data: {
-        name,
-        garment,
-        config: dto.config as Prisma.InputJsonObject,
-        thumbnailData: thumbnail.base64,
-        thumbnailMime: thumbnail.mime,
-        createdById: userId,
-      },
-      select: MOCKUP_TEMPLATE_SUMMARY_SELECT,
-    });
-    return this.toSummary(row);
+    const blob = await this.storage.saveBase64(
+      STORAGE_FOLDERS.mockupTemplateThumbnail,
+      thumbnail.base64,
+      thumbnail.mime,
+    );
+    const row = await this.prisma.mockupTemplate
+      .create({
+        data: {
+          name,
+          garment,
+          config: dto.config as Prisma.InputJsonObject,
+          thumbnailData: blob.data,
+          thumbnailKey: blob.key,
+          thumbnailMime: thumbnail.mime,
+          createdById: userId,
+        },
+        select: MOCKUP_TEMPLATE_SUMMARY_SELECT,
+      })
+      .catch(async (error) => {
+        await this.storage.deleteQuietly([blob.key]);
+        throw error;
+      });
+    // La miniatura recién validada ya está en memoria: no se vuelve a leer.
+    return this.toSummary(row, thumbnail.base64);
   }
 
   /** Renombra una plantilla (404 si no existe). */
@@ -136,7 +164,11 @@ export class MockupTemplateService {
         data: { name },
         select: MOCKUP_TEMPLATE_SUMMARY_SELECT,
       });
-      return this.toSummary(row);
+      const thumbnail = await this.storage.loadBase64OrNull({
+        data: row.thumbnailData,
+        key: row.thumbnailKey,
+      });
+      return this.toSummary(row, thumbnail);
     } catch (error) {
       if (error?.code === 'P2025') throw notFound();
       throw error;
@@ -145,18 +177,35 @@ export class MockupTemplateService {
 
   /** Borra una plantilla (404 si no existe). */
   async remove(id: number): Promise<void> {
+    // La clave se lee antes de borrar la fila; el objeto se borra después, a
+    // mejor esfuerzo.
+    const existing = await this.prisma.mockupTemplate.findUnique({
+      where: { id },
+      select: { thumbnailKey: true },
+    });
     const { count } = await this.prisma.mockupTemplate.deleteMany({
       where: { id },
     });
     if (count === 0) throw notFound();
+    await this.storage.deleteQuietly([existing?.thumbnailKey]);
   }
 
-  private toSummary(row: MockupTemplateSummaryRow): MockupTemplateSummary {
+  /**
+   * `thumbnailBase64` ya resuelto (columna legacy o bucket). Si no se pudo
+   * leer, `thumbnailUrl` sale vacío: el panel muestra la tarjeta sin imagen.
+   */
+  private toSummary(
+    row: MockupTemplateSummaryRow,
+    thumbnailBase64: string | null,
+  ): MockupTemplateSummary {
     return {
       id: row.id,
       name: row.name,
       garment: row.garment as MockupGarment,
-      thumbnailUrl: `data:${row.thumbnailMime};base64,${row.thumbnailData}`,
+      thumbnailUrl:
+        thumbnailBase64 == null
+          ? ''
+          : `data:${row.thumbnailMime};base64,${thumbnailBase64}`,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       createdBy: mockupAuthor(row.createdBy),

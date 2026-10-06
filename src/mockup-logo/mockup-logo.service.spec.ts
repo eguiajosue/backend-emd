@@ -142,7 +142,7 @@ describe('MockupLogoService', () => {
       });
       expect(prisma.mockupLogo.findUnique).toHaveBeenCalledWith({
         where: { id: 5 },
-        select: { imageData: true, imageMime: true },
+        select: { imageData: true, imageKey: true, imageMime: true },
       });
     });
 
@@ -165,7 +165,11 @@ describe('MockupLogoService', () => {
       });
       expect(prisma.mockupLogo.findUnique).toHaveBeenCalledWith({
         where: { id: 5 },
-        select: { thumbnailData: true, thumbnailMime: true },
+        select: {
+          thumbnailData: true,
+          thumbnailKey: true,
+          thumbnailMime: true,
+        },
       });
     });
 
@@ -188,8 +192,11 @@ describe('MockupLogoService', () => {
       expect(args.data).toEqual({
         name: 'Logo Acme',
         imageData: MINIMAL_PNG_BASE64,
+        // Driver `db` (default): el base64 en la columna, sin clave.
+        imageKey: null,
         imageMime: 'image/png',
         thumbnailData: thumbnailDataUrl.slice('data:image/png;base64,'.length),
+        thumbnailKey: null,
         thumbnailMime: 'image/png',
         createdById: 7,
       });

@@ -35,6 +35,13 @@ import { StatusIdResolver } from './status-id-resolver';
 import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
 import { chatAreaLabel } from 'src/chat/chat.constants';
 import { StartDesignDto } from './dto/start-design.dto';
+import {
+  hasBlob,
+  STORAGE_FOLDERS,
+  StorageService,
+  StoredBlob,
+} from 'src/storage/storage.service';
+import { collectOrderObjectKeys } from 'src/storage/order-object-keys';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -179,6 +186,9 @@ export class OrderService {
     private readonly auditLogService: AuditLogService,
     private readonly orderAreaTaskService: OrderAreaTaskService,
     private readonly calendarEventService: CalendarEventService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta siempre StorageModule (global).
+    private readonly storage: StorageService = StorageService.database(),
   ) {
     this.statusIds = new StatusIdResolver(this.prisma);
   }
@@ -591,6 +601,16 @@ export class OrderService {
         ? await this.resolveStatusIdByName(STATUS_NAME_EN_DISENO)
         : statusId;
 
+      // El archivo del cliente se guarda ANTES de crear la fila (en el bucket
+      // con STORAGE_DRIVER=s3); si el alta falla se borra lo subido.
+      const clientResourceBlob = clientResourceFile
+        ? await this.storage.saveBase64(
+            STORAGE_FOLDERS.orderClientResource,
+            clientResourceFile.data,
+            clientResourceFile.mimeType,
+          )
+        : null;
+
       const data: Prisma.OrderCreateInput = {
         description,
         area: resolvedArea,
@@ -626,16 +646,22 @@ export class OrderService {
             }
           : undefined,
         ...(clientResourceFile && {
-          clientResourceFileData: clientResourceFile.data,
+          clientResourceFileData: clientResourceBlob.data,
+          clientResourceFileKey: clientResourceBlob.key,
           clientResourceFileName: clientResourceFile.filename,
           clientResourceFileMime: clientResourceFile.mimeType,
         }),
       };
 
-      const order = await this.prisma.order.create({
-        data,
-        include: ORDER_WRITE_INCLUDE,
-      });
+      const order = await this.prisma.order
+        .create({
+          data,
+          include: ORDER_WRITE_INCLUDE,
+        })
+        .catch(async (error) => {
+          await this.storage.deleteQuietly([clientResourceBlob?.key]);
+          throw error;
+        });
 
       // Tareas de área (WORKFLOW.md §3). Las áreas que trabajan el pedido las
       // define Recepción aquí y/o Diseño al autorizar el montaje.
@@ -830,6 +856,17 @@ export class OrderService {
    * o null si el pedido nunca llegó a ese estado. `histories` debe venir
    * ordenado por `changeDate desc` (ver HISTORY_SELECT_FOR_DELIVERED_AT).
    */
+  private async loadClientResourceFile(
+    filename: string | null,
+    mimeType: string | null,
+    ref: Parameters<typeof hasBlob>[0],
+  ) {
+    if (!hasBlob(ref)) return null;
+    const base64 = await this.storage.loadBase64OrNull(ref);
+    if (base64 == null) return null;
+    return { filename, mimeType, dataUrl: `data:${mimeType};base64,${base64}` };
+  }
+
   private computeDeliveredAt(
     histories: { changeDate: Date; newStatusId: number }[] | undefined,
   ): string | null {
@@ -993,24 +1030,30 @@ export class OrderService {
 
       const {
         clientResourceFileData,
+        clientResourceFileKey,
         clientResourceFileName,
         clientResourceFileMime,
         histories,
         ...rest
       } = order;
+      const clientResourceRef = {
+        data: clientResourceFileData,
+        key: clientResourceFileKey,
+      };
 
       return {
         ...rest,
         // Los recursos que mandó el cliente en el alta (logo, referencias).
         // NO es la hoja de autorización: esa es el montaje de cada ronda de
-        // diseño (ver WORKFLOW.md §1 y §2).
-        clientResourceFile: clientResourceFileData
-          ? {
-              filename: clientResourceFileName,
-              mimeType: clientResourceFileMime,
-              dataUrl: `data:${clientResourceFileMime};base64,${clientResourceFileData}`,
-            }
-          : null,
+        // diseño (ver WORKFLOW.md §1 y §2). Puede estar en la DB (legacy) o
+        // en el bucket: la respuesta es la misma data URL en los dos casos.
+        // Si el objeto no se puede leer (bucket caído, objeto perdido) el
+        // pedido igual abre, sólo que sin el archivo (queda logueado).
+        clientResourceFile: await this.loadClientResourceFile(
+          clientResourceFileName,
+          clientResourceFileMime,
+          clientResourceRef,
+        ),
         deliveredAt: this.computeDeliveredAt(histories),
       };
     } catch (error) {
@@ -1244,6 +1287,16 @@ export class OrderService {
         );
       }
 
+      // Archivo nuevo del cliente: se guarda antes de escribir la fila (ver
+      // `create`). Con driver `s3` la columna base64 queda en null.
+      const clientResourceBlob: StoredBlob | null = clientResourceFile
+        ? await this.storage.saveBase64(
+            STORAGE_FOLDERS.orderClientResource,
+            clientResourceFile.data,
+            clientResourceFile.mimeType,
+          )
+        : null;
+
       const data: Prisma.OrderUpdateInput = {
         ...(description && { description }),
         ...(area && { area }),
@@ -1290,17 +1343,33 @@ export class OrderService {
           },
         }),
         ...(clientResourceFile && {
-          clientResourceFileData: clientResourceFile.data,
+          clientResourceFileData: clientResourceBlob.data,
+          clientResourceFileKey: clientResourceBlob.key,
           clientResourceFileName: clientResourceFile.filename,
           clientResourceFileMime: clientResourceFile.mimeType,
         }),
       };
 
-      const updatedOrder = await this.prisma.order.update({
-        where: { id },
-        data,
-        include: ORDER_WRITE_INCLUDE,
-      });
+      const updatedOrder = await this.prisma.order
+        .update({
+          where: { id },
+          data,
+          include: ORDER_WRITE_INCLUDE,
+        })
+        .catch(async (error) => {
+          await this.storage.deleteQuietly([clientResourceBlob?.key]);
+          throw error;
+        });
+
+      // El archivo nuevo reemplazó al anterior: si el anterior estaba en el
+      // bucket, se borra (a mejor esfuerzo) para no dejar huérfanos.
+      if (
+        clientResourceBlob &&
+        existingOrder.clientResourceFileKey &&
+        existingOrder.clientResourceFileKey !== clientResourceBlob.key
+      ) {
+        await this.storage.deleteQuietly([existingOrder.clientResourceFileKey]);
+      }
 
       // Verificar si el estatus de la orden ha cambiado y notificar al administrador
       if (existingOrder.status.id !== updatedOrder.status.id) {
@@ -2189,44 +2258,59 @@ export class OrderService {
     // Los escalares legacy quedan con el PRIMER archivo, para que los clientes
     // que sólo conocen un montaje por ronda sigan funcionando.
     const [firstMontage] = montageFiles;
+    // Con driver `s3` cada archivo se sube una vez; el escalar legacy de la
+    // ronda apunta al MISMO objeto que su primer `DesignRevisionFile` (en la
+    // DB se duplicaba el base64). Por eso nunca hay que borrar el objeto de
+    // un archivo suelto sin mirar `montageFileKey`/`feedbackFileKey`.
+    const montageBlobs = await this.storage.saveManyBase64(
+      STORAGE_FOLDERS.designRevisionFile,
+      montageFiles,
+    );
 
-    const [revision] = await this.prisma.$transaction([
-      this.prisma.designRevision.create({
-        data: {
-          round,
-          montageFileData: firstMontage.data,
-          montageFileName: firstMontage.filename,
-          montageFileMime: firstMontage.mimeType,
-          sentAt: new Date(),
-          order: { connect: { id: orderId } },
-          sentByUser: { connect: { id: requestingUser.userId } },
-          files: {
-            create: montageFiles.map((file, index) => ({
-              kind: REVISION_FILE_KIND_MONTAGE,
-              data: file.data,
-              filename: file.filename,
-              mimeType: file.mimeType,
-              position: index,
-            })),
+    const [revision] = await this.prisma
+      .$transaction([
+        this.prisma.designRevision.create({
+          data: {
+            round,
+            montageFileData: montageBlobs[0].data,
+            montageFileKey: montageBlobs[0].key,
+            montageFileName: firstMontage.filename,
+            montageFileMime: firstMontage.mimeType,
+            sentAt: new Date(),
+            order: { connect: { id: orderId } },
+            sentByUser: { connect: { id: requestingUser.userId } },
+            files: {
+              create: montageFiles.map((file, index) => ({
+                kind: REVISION_FILE_KIND_MONTAGE,
+                data: montageBlobs[index].data,
+                dataKey: montageBlobs[index].key,
+                filename: file.filename,
+                mimeType: file.mimeType,
+                position: index,
+              })),
+            },
           },
-        },
-      }),
-      this.prisma.order.update({
-        where: { id: orderId },
-        // Una ronda nueva es trabajo VIVO de Diseño: si el pedido había
-        // quedado archivado (montaje autorizado antes), se desarchiva para
-        // que vuelva a verse en el tablero de Diseño.
-        data: { status: { connect: { id: statusId } }, archivedAt: null },
-      }),
-      this.prisma.orderAuditLog.create({
-        data: {
-          action: 'design_montage_sent',
-          changes: { round, statusId } as Prisma.InputJsonValue,
-          order: { connect: { id: orderId } },
-          user: { connect: { id: requestingUser.userId } },
-        },
-      }),
-    ]);
+        }),
+        this.prisma.order.update({
+          where: { id: orderId },
+          // Una ronda nueva es trabajo VIVO de Diseño: si el pedido había
+          // quedado archivado (montaje autorizado antes), se desarchiva para
+          // que vuelva a verse en el tablero de Diseño.
+          data: { status: { connect: { id: statusId } }, archivedAt: null },
+        }),
+        this.prisma.orderAuditLog.create({
+          data: {
+            action: 'design_montage_sent',
+            changes: { round, statusId } as Prisma.InputJsonValue,
+            order: { connect: { id: orderId } },
+            user: { connect: { id: requestingUser.userId } },
+          },
+        }),
+      ])
+      .catch(async (error) => {
+        await this.storage.deleteQuietly(montageBlobs.map((b) => b.key));
+        throw error;
+      });
 
     // El aviso va SÓLO a UNA recepcionista, no a todo el área: la que está
     // hablando con ese cliente (WORKFLOW.md §2). Es la que ATIENDE el pedido
@@ -2284,8 +2368,13 @@ export class OrderService {
     if (feedbackFiles.length > 0) {
       await this.assertDesignRevisionFilesValid(feedbackFiles);
     }
-    // Escalares legacy = PRIMER archivo (ver createDesignRevision).
+    // Escalares legacy = PRIMER archivo (ver createDesignRevision), que
+    // comparte objeto con su `DesignRevisionFile` si van al bucket.
     const [firstFeedbackFile] = feedbackFiles;
+    const feedbackBlobs = await this.storage.saveManyBase64(
+      STORAGE_FOLDERS.designRevisionFile,
+      feedbackFiles,
+    );
 
     const statusId = await this.resolveStatusIdByName(
       STATUS_NAME_CAMBIOS_SOLICITADOS,
@@ -2296,58 +2385,65 @@ export class OrderService {
     // con el PATCH normal del pedido si esa persona no está disponible.
     const previousDesignerId = existingRevision.sentByUserId ?? undefined;
 
-    const [revision] = await this.prisma.$transaction([
-      this.prisma.designRevision.update({
-        where: { id: revisionId },
-        data: {
-          feedbackText: dto.feedbackText,
-          feedbackAt: new Date(),
-          feedbackByUser: { connect: { id: requestingUser.userId } },
-          ...(firstFeedbackFile && {
-            feedbackFileData: firstFeedbackFile.data,
-            feedbackFileName: firstFeedbackFile.filename,
-            feedbackFileMime: firstFeedbackFile.mimeType,
-          }),
-          ...(feedbackFiles.length > 0 && {
-            files: {
-              create: feedbackFiles.map((file, index) => ({
-                kind: REVISION_FILE_KIND_FEEDBACK,
-                data: file.data,
-                filename: file.filename,
-                mimeType: file.mimeType,
-                position: index,
-              })),
-            },
-          }),
-        },
-      }),
-      this.prisma.order.update({
-        where: { id: orderId },
-        data: {
-          area: 'diseno',
-          status: { connect: { id: statusId } },
-          // El pedido vuelve a Diseño: si estaba archivado (por una ronda
-          // autorizada previa) hay que desarchivarlo, o el diseñador recibe
-          // la notificación de un pedido que el tablero no le muestra.
-          archivedAt: null,
-          ...(previousDesignerId && {
-            assignedUser: { connect: { id: previousDesignerId } },
-          }),
-        },
-      }),
-      this.prisma.orderAuditLog.create({
-        data: {
-          action: 'design_feedback_added',
-          changes: {
-            revisionId,
-            statusId,
+    const [revision] = await this.prisma
+      .$transaction([
+        this.prisma.designRevision.update({
+          where: { id: revisionId },
+          data: {
             feedbackText: dto.feedbackText,
-          } as Prisma.InputJsonValue,
-          order: { connect: { id: orderId } },
-          user: { connect: { id: requestingUser.userId } },
-        },
-      }),
-    ]);
+            feedbackAt: new Date(),
+            feedbackByUser: { connect: { id: requestingUser.userId } },
+            ...(firstFeedbackFile && {
+              feedbackFileData: feedbackBlobs[0].data,
+              feedbackFileKey: feedbackBlobs[0].key,
+              feedbackFileName: firstFeedbackFile.filename,
+              feedbackFileMime: firstFeedbackFile.mimeType,
+            }),
+            ...(feedbackFiles.length > 0 && {
+              files: {
+                create: feedbackFiles.map((file, index) => ({
+                  kind: REVISION_FILE_KIND_FEEDBACK,
+                  data: feedbackBlobs[index].data,
+                  dataKey: feedbackBlobs[index].key,
+                  filename: file.filename,
+                  mimeType: file.mimeType,
+                  position: index,
+                })),
+              },
+            }),
+          },
+        }),
+        this.prisma.order.update({
+          where: { id: orderId },
+          data: {
+            area: 'diseno',
+            status: { connect: { id: statusId } },
+            // El pedido vuelve a Diseño: si estaba archivado (por una ronda
+            // autorizada previa) hay que desarchivarlo, o el diseñador recibe
+            // la notificación de un pedido que el tablero no le muestra.
+            archivedAt: null,
+            ...(previousDesignerId && {
+              assignedUser: { connect: { id: previousDesignerId } },
+            }),
+          },
+        }),
+        this.prisma.orderAuditLog.create({
+          data: {
+            action: 'design_feedback_added',
+            changes: {
+              revisionId,
+              statusId,
+              feedbackText: dto.feedbackText,
+            } as Prisma.InputJsonValue,
+            order: { connect: { id: orderId } },
+            user: { connect: { id: requestingUser.userId } },
+          },
+        }),
+      ])
+      .catch(async (error) => {
+        await this.storage.deleteQuietly(feedbackBlobs.map((b) => b.key));
+        throw error;
+      });
 
     // El pedido vuelve al diseñador que hizo esa ronda, así que el aviso va a
     // esa persona y no a todo el área. Si la ronda no tiene diseñador
@@ -2557,7 +2653,11 @@ export class OrderService {
   ) {
     await this.assertOrderAccess(orderId, requestingUser);
     const revision = await this.getDesignRevisionOrThrow(orderId, revisionId);
-    if (!revision.montageFileData) {
+    const montageRef = {
+      data: revision.montageFileData,
+      key: revision.montageFileKey,
+    };
+    if (!hasBlob(montageRef)) {
       throw new HttpException(
         'Esta ronda no tiene montaje cargado',
         HttpStatus.NOT_FOUND,
@@ -2566,7 +2666,10 @@ export class OrderService {
     return {
       filename: revision.montageFileName,
       mimeType: revision.montageFileMime,
-      dataUrl: `data:${revision.montageFileMime};base64,${revision.montageFileData}`,
+      dataUrl: await this.storage.toDataUrl(
+        revision.montageFileMime,
+        montageRef,
+      ),
     };
   }
 
@@ -2578,7 +2681,11 @@ export class OrderService {
   ) {
     await this.assertOrderAccess(orderId, requestingUser);
     const revision = await this.getDesignRevisionOrThrow(orderId, revisionId);
-    if (!revision.feedbackFileData) {
+    const feedbackRef = {
+      data: revision.feedbackFileData,
+      key: revision.feedbackFileKey,
+    };
+    if (!hasBlob(feedbackRef)) {
       throw new HttpException(
         'Esta ronda no tiene archivo de feedback',
         HttpStatus.NOT_FOUND,
@@ -2587,7 +2694,10 @@ export class OrderService {
     return {
       filename: revision.feedbackFileName,
       mimeType: revision.feedbackFileMime,
-      dataUrl: `data:${revision.feedbackFileMime};base64,${revision.feedbackFileData}`,
+      dataUrl: await this.storage.toDataUrl(
+        revision.feedbackFileMime,
+        feedbackRef,
+      ),
     };
   }
 
@@ -2616,7 +2726,10 @@ export class OrderService {
     return {
       filename: file.filename,
       mimeType: file.mimeType,
-      dataUrl: `data:${file.mimeType};base64,${file.data}`,
+      dataUrl: await this.storage.toDataUrl(file.mimeType, {
+        data: file.data,
+        key: file.dataKey,
+      }),
     };
   }
 
@@ -2759,9 +2872,13 @@ export class OrderService {
 
   async remove(id: number) {
     try {
+      // Las claves de los archivos en el bucket se juntan ANTES: el borrado
+      // en cascada (rondas, archivos, mockups) se las lleva de la DB.
+      const objectKeys = await collectOrderObjectKeys(this.prisma, { id });
       await this.prisma.order.delete({
         where: { id },
       });
+      await this.storage.deleteQuietly(objectKeys);
       return { message: 'Orden eliminada correctamente' };
     } catch (error) {
       if (error.code === 'P2025') {

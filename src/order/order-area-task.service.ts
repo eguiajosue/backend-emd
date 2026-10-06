@@ -80,6 +80,9 @@ export interface MyTaskItem {
 }
 
 /** Roles que pueden reasignar cualquier tarea (ver WORKFLOW.md §5). */
+/** Cuánto tiempo siguen visibles las tareas terminadas en `findForUser`. */
+const FINISHED_TASKS_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 const TASK_MANAGER_ROLES: string[] = [
   Role.RECEPCION,
   Role.ADMIN,
@@ -203,11 +206,17 @@ export class OrderAreaTaskService {
       body: `Pedido #${orderId}: hay trabajo pendiente para ${area}`,
       orderId,
     });
+    // La fecha de entrega deja que el Modo TV elija color/animación al
+    // instante, sin esperar a recargar la lista.
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { deliveryDate: true },
+    });
     this.notificationsGateway.notifyNewOrderToArea(area, {
       orderId,
       description: `Nueva tarea de ${area} en el pedido #${orderId}`,
       area,
-      deliveryDate: null,
+      deliveryDate: order?.deliveryDate ?? null,
     });
   }
 
@@ -234,11 +243,23 @@ export class OrderAreaTaskService {
     // propias que ver (ej. sólo Diseño): lista vacía en vez de todas.
     if (!isManager && ownAreas.length === 0) return [];
 
+    // Lo terminado sólo interesa reciente (columna "Terminado" del Modo TV):
+    // así la respuesta no crece sin límite.
+    const finishedSince = new Date(Date.now() - FINISHED_TASKS_WINDOW_MS);
     return this.prisma.orderAreaTask.findMany({
       where: {
         ...(isManager ? {} : { area: { in: ownAreas } }),
-        // Los pedidos cerrados no ensucian la bandeja de trabajo.
-        order: { statusId: { notIn: closedStatusIds } },
+        // Los pedidos cerrados no ensucian la bandeja de trabajo, y las tareas
+        // planificadas mientras el pedido sigue en Diseño todavía no son
+        // trabajo (mismo criterio que `findMyTasks`).
+        order: {
+          statusId: { notIn: closedStatusIds },
+          NOT: { area: Role.DISENO },
+        },
+        OR: [
+          { status: { not: AreaTaskStatus.terminado } },
+          { completedAt: { gte: finishedSince } },
+        ],
       },
       select: {
         ...this.taskSelect(),
@@ -247,7 +268,10 @@ export class OrderAreaTaskService {
             id: true,
             description: true,
             deliveryDate: true,
+            creationDate: true,
+            area: true,
             statusId: true,
+            status: { select: { id: true, name: true } },
             clientNameOverride: true,
             client: { select: { first_name: true, last_name: true } },
           },
@@ -408,6 +432,7 @@ export class OrderAreaTaskService {
     taskId: number,
     status: AreaTaskStatus,
     requestingUser: RequestingUser,
+    orderId?: number,
   ) {
     const task = await this.prisma.orderAreaTask.findUnique({
       where: { id: taskId },
@@ -419,7 +444,7 @@ export class OrderAreaTaskService {
         assignedUserId: true,
       },
     });
-    if (!task) {
+    if (!task || !this.belongsToOrder(task.orderId, orderId)) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
     this.assertCanWorkArea(task.area, requestingUser);
@@ -467,12 +492,13 @@ export class OrderAreaTaskService {
     taskId: number,
     assignedUserId: number | null,
     requestingUser: RequestingUser,
+    orderId?: number,
   ) {
     const task = await this.prisma.orderAreaTask.findUnique({
       where: { id: taskId },
-      select: { id: true, area: true },
+      select: { id: true, area: true, orderId: true },
     });
-    if (!task) {
+    if (!task || !this.belongsToOrder(task.orderId, orderId)) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
 
@@ -515,7 +541,11 @@ export class OrderAreaTaskService {
   }
 
   /** Quita un área del pedido (sólo Recepción/admin). */
-  async remove(taskId: number, requestingUser: RequestingUser) {
+  async remove(
+    taskId: number,
+    requestingUser: RequestingUser,
+    orderId?: number,
+  ) {
     const isManager = requestingUser.roles.some((r) =>
       TASK_MANAGER_ROLES.includes(r),
     );
@@ -529,12 +559,21 @@ export class OrderAreaTaskService {
       where: { id: taskId },
       select: { orderId: true },
     });
-    if (!task) {
+    if (!task || !this.belongsToOrder(task.orderId, orderId)) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
     await this.prisma.orderAreaTask.delete({ where: { id: taskId } });
     await this.syncOrderStatusFromTasks(task.orderId, requestingUser.userId);
     return { deleted: true };
+  }
+
+  /**
+   * La tarea debe ser del pedido de la URL (`/orders/:id/area-tasks/:taskId`):
+   * si no, se responde 404 igual que si no existiera, para no revelar tareas
+   * de otros pedidos. Sin `orderId` (llamadas internas) no se compara.
+   */
+  private belongsToOrder(taskOrderId: number, orderId?: number) {
+    return orderId === undefined || taskOrderId === orderId;
   }
 
   /**

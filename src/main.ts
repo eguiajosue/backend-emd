@@ -1,3 +1,6 @@
+// Tiene que ser el PRIMER import: Sentry instrumenta los módulos que se
+// cargan después (ver src/instrument.ts). Sin SENTRY_DSN no hace nada.
+import './instrument';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';

@@ -551,6 +551,21 @@ describe('QuoteService', () => {
       });
     });
 
+    it('dejar de estar aceptada conserva el pedido ligado (decisión de producto)', async () => {
+      prisma.quote.findUnique.mockResolvedValue(
+        current({
+          stage: 'enviada',
+          status: 'aceptada',
+          sentAt: NOW,
+          orderId: 42,
+        }),
+      );
+      await service.update(10, { status: 'comentarios' });
+      expect(prisma.quote.update.mock.calls[0][0].data).not.toHaveProperty(
+        'orderId',
+      );
+    });
+
     it('400 si el subestado no corresponde a la etapa', async () => {
       prisma.quote.findUnique.mockResolvedValue(current());
       expect(

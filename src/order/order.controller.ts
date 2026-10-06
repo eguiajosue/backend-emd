@@ -622,14 +622,17 @@ export class OrderController {
   )
   @Patch(':id/area-tasks/:taskId/status')
   updateAreaTaskStatus(
+    @Param('id') id: string,
     @Param('taskId') taskId: string,
     @Body() dto: UpdateAreaTaskStatusDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.orderAreaTaskService.updateStatus(+taskId, dto.status, {
-      userId: user.sub,
-      roles: user.roles,
-    });
+    return this.orderAreaTaskService.updateStatus(
+      +taskId,
+      dto.status,
+      { userId: user.sub, roles: user.roles },
+      +id,
+    );
   }
 
   /** Reasigna una tarea (o alguien del área se la toma). */
@@ -645,6 +648,7 @@ export class OrderController {
   )
   @Patch(':id/area-tasks/:taskId/assign')
   assignAreaTask(
+    @Param('id') id: string,
     @Param('taskId') taskId: string,
     @Body() dto: AssignAreaTaskDto,
     @ActiveUser() user: AccessTokenPayload,
@@ -652,10 +656,8 @@ export class OrderController {
     return this.orderAreaTaskService.assign(
       +taskId,
       dto.assignedUserId ?? null,
-      {
-        userId: user.sub,
-        roles: user.roles,
-      },
+      { userId: user.sub, roles: user.roles },
+      +id,
     );
   }
 
@@ -663,13 +665,15 @@ export class OrderController {
   @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
   @Delete(':id/area-tasks/:taskId')
   removeAreaTask(
+    @Param('id') id: string,
     @Param('taskId') taskId: string,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.orderAreaTaskService.remove(+taskId, {
-      userId: user.sub,
-      roles: user.roles,
-    });
+    return this.orderAreaTaskService.remove(
+      +taskId,
+      { userId: user.sub, roles: user.roles },
+      +id,
+    );
   }
 
   /**

@@ -35,4 +35,58 @@ describe('validateEnv', () => {
     const env = validateEnv({ ...baseEnv, PORT: '8080' });
     expect(env.PORT).toBe(8080);
   });
+
+  describe('almacenamiento y Sentry', () => {
+    it('sin variables: driver db, región auto y Sentry apagado', () => {
+      const env = validateEnv({ ...baseEnv });
+      expect(env.STORAGE_DRIVER).toBe('db');
+      expect(env.S3_REGION).toBe('auto');
+      expect(env.SENTRY_DSN).toBeUndefined();
+      expect(env.SENTRY_TRACES_SAMPLE_RATE).toBe(0);
+    });
+
+    it('los strings vacíos de .env.example cuentan como no definidos', () => {
+      const env = validateEnv({
+        ...baseEnv,
+        STORAGE_DRIVER: '',
+        S3_BUCKET: '',
+        SENTRY_DSN: '',
+        SENTRY_TRACES_SAMPLE_RATE: '',
+      });
+      expect(env.STORAGE_DRIVER).toBe('db');
+      expect(env.S3_BUCKET).toBeUndefined();
+      expect(env.SENTRY_DSN).toBeUndefined();
+    });
+
+    it('STORAGE_DRIVER=s3 exige todas las S3_*', () => {
+      expect(() =>
+        validateEnv({
+          ...baseEnv,
+          STORAGE_DRIVER: 's3',
+          S3_ENDPOINT: 'https://x.r2.cloudflarestorage.com',
+        }),
+      ).toThrow(/S3_BUCKET es obligatoria con STORAGE_DRIVER=s3/);
+    });
+
+    it('STORAGE_DRIVER=s3 completo valida', () => {
+      const env = validateEnv({
+        ...baseEnv,
+        STORAGE_DRIVER: 's3',
+        S3_ENDPOINT: 'https://x.r2.cloudflarestorage.com',
+        S3_BUCKET: 'emd',
+        S3_ACCESS_KEY_ID: 'id',
+        S3_SECRET_ACCESS_KEY: 'secret',
+      });
+      expect(env.STORAGE_DRIVER).toBe('s3');
+    });
+
+    it('rechaza un driver desconocido y un sample rate fuera de rango', () => {
+      expect(() => validateEnv({ ...baseEnv, STORAGE_DRIVER: 'gcs' })).toThrow(
+        /STORAGE_DRIVER/,
+      );
+      expect(() =>
+        validateEnv({ ...baseEnv, SENTRY_TRACES_SAMPLE_RATE: '1.5' }),
+      ).toThrow(/SENTRY_TRACES_SAMPLE_RATE/);
+    });
+  });
 });

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import { MOCKUP_AUTHOR_SELECT, mockupAuthor } from 'src/common/mockup-author';
+import { STORAGE_FOLDERS, StorageService } from 'src/storage/storage.service';
 import {
   base64DecodedBytes,
   parseImageDataUrl,
@@ -66,7 +67,12 @@ const MAX_THUMBNAIL_KB = MAX_MOCKUP_LOGO_THUMBNAIL_BYTES / 1024;
  */
 @Injectable()
 export class MockupLogoService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta siempre StorageModule (global).
+    private readonly storage: StorageService = StorageService.database(),
+  ) {}
 
   /** Todos los logos, más usados primero, sin la imagen. */
   async findAll(): Promise<MockupLogoSummary[]> {
@@ -81,21 +87,29 @@ export class MockupLogoService {
   async findImage(id: number): Promise<{ dataUrl: string }> {
     const row = await this.prisma.mockupLogo.findUnique({
       where: { id },
-      select: { imageData: true, imageMime: true },
+      select: { imageData: true, imageKey: true, imageMime: true },
     });
     if (!row) throw notFound();
-    return { dataUrl: `data:${row.imageMime};base64,${row.imageData}` };
+    return {
+      dataUrl: await this.storage.toDataUrl(row.imageMime, {
+        data: row.imageData,
+        key: row.imageKey,
+      }),
+    };
   }
 
   /** La miniatura (≤ 160px) de un logo como data URL (404 si no existe). */
   async findThumbnail(id: number): Promise<{ dataUrl: string }> {
     const row = await this.prisma.mockupLogo.findUnique({
       where: { id },
-      select: { thumbnailData: true, thumbnailMime: true },
+      select: { thumbnailData: true, thumbnailKey: true, thumbnailMime: true },
     });
     if (!row) throw notFound();
     return {
-      dataUrl: `data:${row.thumbnailMime};base64,${row.thumbnailData}`,
+      dataUrl: await this.storage.toDataUrl(row.thumbnailMime, {
+        data: row.thumbnailData,
+        key: row.thumbnailKey,
+      }),
     };
   }
 
@@ -108,17 +122,39 @@ export class MockupLogoService {
     const name = assertName(dto.name);
     const image = await assertImageValid(dto.imageDataUrl);
     const thumbnail = await assertThumbnailValid(dto.thumbnailDataUrl);
-    const row = await this.prisma.mockupLogo.create({
-      data: {
-        name,
-        imageData: image.base64,
-        imageMime: image.mime,
-        thumbnailData: thumbnail.base64,
-        thumbnailMime: thumbnail.mime,
-        createdById: userId,
-      },
-      select: MOCKUP_LOGO_SUMMARY_SELECT,
-    });
+    const imageBlob = await this.storage.saveBase64(
+      STORAGE_FOLDERS.mockupLogoImage,
+      image.base64,
+      image.mime,
+    );
+    const thumbnailBlob = await this.storage
+      .saveBase64(
+        STORAGE_FOLDERS.mockupLogoThumbnail,
+        thumbnail.base64,
+        thumbnail.mime,
+      )
+      .catch(async (error) => {
+        await this.storage.deleteQuietly([imageBlob.key]);
+        throw error;
+      });
+    const row = await this.prisma.mockupLogo
+      .create({
+        data: {
+          name,
+          imageData: imageBlob.data,
+          imageKey: imageBlob.key,
+          imageMime: image.mime,
+          thumbnailData: thumbnailBlob.data,
+          thumbnailKey: thumbnailBlob.key,
+          thumbnailMime: thumbnail.mime,
+          createdById: userId,
+        },
+        select: MOCKUP_LOGO_SUMMARY_SELECT,
+      })
+      .catch(async (error) => {
+        await this.storage.deleteQuietly([imageBlob.key, thumbnailBlob.key]);
+        throw error;
+      });
     return this.toSummary(row);
   }
 
@@ -155,10 +191,20 @@ export class MockupLogoService {
 
   /** Borra un logo (404 si no existe). */
   async remove(id: number): Promise<void> {
+    // Las claves se leen antes de borrar la fila; los objetos se borran
+    // después, a mejor esfuerzo.
+    const existing = await this.prisma.mockupLogo.findUnique({
+      where: { id },
+      select: { imageKey: true, thumbnailKey: true },
+    });
     const { count } = await this.prisma.mockupLogo.deleteMany({
       where: { id },
     });
     if (count === 0) throw notFound();
+    await this.storage.deleteQuietly([
+      existing?.imageKey,
+      existing?.thumbnailKey,
+    ]);
   }
 
   private toSummary(row: MockupLogoSummaryRow): MockupLogoSummary {

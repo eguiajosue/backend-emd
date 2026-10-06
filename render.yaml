@@ -36,3 +36,24 @@ services:
         sync: false
       - key: VAPID_SUBJECT
         sync: false
+      # Almacenamiento de archivos en Cloudflare R2 (docs/storage-r2.md).
+      # Sin STORAGE_DRIVER todo sigue en la DB como antes.
+      - key: STORAGE_DRIVER
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: auto
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      # Monitoreo de errores (docs/monitoring.md). Sin SENTRY_DSN queda apagado.
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        sync: false

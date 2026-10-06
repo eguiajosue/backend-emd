@@ -14,7 +14,8 @@ import { ServerOptions } from 'socket.io';
  * los eventos emitidos desde la instancia B.
  */
 export class RedisIoAdapter extends IoAdapter {
-  private readonly logger = new Logger('RedisIoAdapter');
+  // `IoAdapter` (Nest 11) ya declara su propio `logger` protegido.
+  private readonly redisLogger = new Logger('RedisIoAdapter');
   private adapterConstructor: ReturnType<typeof createAdapter>;
 
   constructor(
@@ -31,7 +32,7 @@ export class RedisIoAdapter extends IoAdapter {
     await Promise.all([pubClient.connect(), subClient.connect()]);
 
     this.adapterConstructor = createAdapter(pubClient, subClient);
-    this.logger.log(
+    this.redisLogger.log(
       'Socket.io usando adaptador Redis (escalado horizontal OK)',
     );
   }

@@ -169,6 +169,8 @@ describe('MockupTemplateService', () => {
         garment: 'tshirt',
         config: config(),
         thumbnailData: MINIMAL_PNG_BASE64,
+        // Driver `db` (default): el base64 en la columna, sin clave.
+        thumbnailKey: null,
         thumbnailMime: 'image/png',
         createdById: 7,
       });

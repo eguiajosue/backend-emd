@@ -11,7 +11,9 @@ export class GenerateUsernameMiddleware implements NestMiddleware {
   constructor(private userService: UserService) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
-    const { firstName, lastName, isSharedAccount } = req.body;
+    // Express 5 deja `req.body` en undefined si no hay body parseable (antes
+    // era `{}`): sin el fallback esto sería un 500 en vez del 400 de abajo.
+    const { firstName, lastName, isSharedAccount } = req.body ?? {};
 
     // Cuenta compartida de área: el cliente manda su propio `username`
     // (ej. "taller") en vez de derivarlo de firstName+lastName.

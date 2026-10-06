@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import * as Sentry from '@sentry/nestjs';
 import { Request, Response } from 'express';
 
 export interface ErrorResponseBody {
@@ -51,6 +52,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      // Sólo los 5xx van a Sentry (no-op si SENTRY_DSN no está). Los 4xx son
+      // errores esperados del cliente (validación, permisos, 404) y no se
+      // reportan. Se hace acá y no con el SentryGlobalFilter de
+      // `@sentry/nestjs` porque ese filtro trata TODA HttpException como
+      // esperada, incluidas las 500 que lanzan los services.
+      Sentry.captureException(exception, {
+        tags: requestId ? { requestId } : undefined,
+        extra: { statusCode },
+      });
       this.logger.error(
         `${request?.method} ${request?.url} -> ${statusCode}${
           requestId ? ` [${requestId}]` : ''

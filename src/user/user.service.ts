@@ -9,6 +9,8 @@ import {
 } from './json-preferences';
 import { Prisma } from '@prisma/client';
 import * as bcryptjs from 'bcryptjs';
+import { StorageService } from '../storage/storage.service';
+import { collectOrderObjectKeys } from '../storage/order-object-keys';
 
 /**
  * Campos que se devuelven al cliente. Excluye `password` explícitamente:
@@ -49,7 +51,12 @@ export const USER_PREFERENCES_SELECT = {
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta siempre StorageModule (global).
+    private readonly storage: StorageService = StorageService.database(),
+  ) {}
 
   async usernameExists(username: string): Promise<boolean> {
     const user = await this.prisma.user.findUnique({
@@ -240,10 +247,18 @@ export class UserService {
 
   async remove(id: number) {
     try {
-      // Primero, elimina las órdenes asociadas al usuario
+      // Primero, elimina las órdenes asociadas al usuario. Las claves de sus
+      // archivos en el bucket se juntan antes (la cascada de la DB no lo toca)
+      // y se borran en cuanto se borran los pedidos.
+      const objectKeys = await collectOrderObjectKeys(this.prisma, {
+        userId: id,
+      });
       await this.prisma.order.deleteMany({
         where: { userId: id },
       });
+      // Los pedidos ya no existen: sus archivos se borran aunque el borrado
+      // del usuario falle después (si no, quedarían huérfanos en el bucket).
+      await this.storage.deleteQuietly(objectKeys);
 
       // Luego, elimina el usuario
       await this.prisma.user.delete({

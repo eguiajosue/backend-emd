@@ -10,6 +10,7 @@ import { NotificationService } from 'src/notification/notification.service';
 import { Role } from 'src/common/enums/roles.enum';
 import { OrderService } from 'src/order/order.service';
 import { assertBase64FileValid } from 'src/common/file-validation';
+import { STORAGE_FOLDERS, StorageService } from 'src/storage/storage.service';
 import {
   ChatAttachmentDto,
   CHAT_ATTACHMENT_MIME_TYPES,
@@ -33,22 +34,25 @@ const MESSAGE_ATTACHMENT_SELECT = {
   attachmentSize: true,
 } as const;
 
-/** Forma cruda de un mensaje leído de la DB, con o sin `attachmentData`. */
+/** Forma cruda de un mensaje leído de la DB (sin el contenido del adjunto). */
 interface MessageAttachmentFields {
   attachmentFilename: string | null;
   attachmentMimeType: string | null;
   attachmentSize: number | null;
-  attachmentData?: string | null;
 }
 
 /**
  * Arma el objeto `attachment` expuesto en las respuestas/eventos de chat a
- * partir de las columnas crudas de `ChatMessage`. Sigue el mismo patrón que
- * `OrderService.findOne` con `clientResourceFile`: el binario en base64 se
- * expone como `dataUrl` (`data:<mime>;base64,<...>`), listo para usar en un
- * `<img>`/`<audio>`/link de descarga en el cliente.
+ * partir de las columnas crudas de `ChatMessage` y del contenido en base64
+ * ya resuelto (de la columna legacy o del bucket, ver `StorageService`).
+ * Sigue el mismo patrón que `OrderService.findOne` con `clientResourceFile`:
+ * el binario se expone como `dataUrl` (`data:<mime>;base64,<...>`), listo
+ * para usar en un `<img>`/`<audio>`/link de descarga en el cliente.
  */
-function toAttachmentDto(message: MessageAttachmentFields) {
+function toAttachmentDto(
+  message: MessageAttachmentFields,
+  attachmentBase64: string | null | undefined,
+) {
   if (!message.attachmentFilename || !message.attachmentMimeType) {
     return null;
   }
@@ -56,8 +60,8 @@ function toAttachmentDto(message: MessageAttachmentFields) {
     filename: message.attachmentFilename,
     mimeType: message.attachmentMimeType,
     size: message.attachmentSize,
-    ...(message.attachmentData != null && {
-      dataUrl: `data:${message.attachmentMimeType};base64,${message.attachmentData}`,
+    ...(attachmentBase64 != null && {
+      dataUrl: `data:${message.attachmentMimeType};base64,${attachmentBase64}`,
     }),
   };
 }
@@ -104,6 +108,9 @@ export class ChatService {
     private readonly notificationsGateway: NotificationsGateway,
     private readonly orderService: OrderService,
     private readonly notificationService: NotificationService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta siempre StorageModule (global).
+    private readonly storage: StorageService = StorageService.database(),
   ) {}
 
   // ---------------------------------------------------------------------
@@ -588,15 +595,27 @@ export class ChatService {
       orderId: true,
       order: { select: MESSAGE_ORDER_SELECT },
       attachmentData: true,
+      attachmentKey: true,
       ...MESSAGE_ATTACHMENT_SELECT,
     };
 
-    const toDto = (message: any) => {
-      const { attachmentData, ...rest } = message;
-      return {
-        ...rest,
-        attachment: toAttachmentDto({ attachmentData, ...rest }),
-      };
+    // Los adjuntos que están en el bucket se descargan con concurrencia
+    // acotada; uno ilegible sale sin `dataUrl` en vez de romper el historial.
+    const toDtos = async (rows: any[]) => {
+      const contents = await this.storage.loadManyBase64OrNull(
+        rows.map((row) => ({
+          data: row.attachmentData,
+          key: row.attachmentKey,
+        })),
+      );
+      return rows.map((message, index) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { attachmentData, attachmentKey, ...rest } = message;
+        return {
+          ...rest,
+          attachment: toAttachmentDto(rest, contents[index]),
+        };
+      });
     };
 
     let messages: any[];
@@ -607,7 +626,7 @@ export class ChatService {
         orderBy: { createdAt: 'desc' },
         take: 100,
       });
-      return messages.map(toDto);
+      return toDtos(messages);
     }
 
     const [data, total] = await this.prisma.$transaction([
@@ -622,7 +641,7 @@ export class ChatService {
     ]);
     messages = data;
 
-    return buildPaginatedResult(messages.map(toDto), total, page, limit);
+    return buildPaginatedResult(await toDtos(messages), total, page, limit);
   }
 
   /**
@@ -653,8 +672,9 @@ export class ChatService {
     if (orderId != null) {
       // Reusa la misma verificación de visibilidad que `GET /orders/:id`:
       // si quien manda el mensaje no puede ver ese pedido, no puede
-      // adjuntarlo. `findOne` tira 403/404 por sí solo si corresponde.
-      await this.orderService.findOne(orderId, {
+      // adjuntarlo. `assertOrderAccess` tira 403/404 sin cargar el pedido
+      // completo (ni descargar su archivo del cliente del almacenamiento).
+      await this.orderService.assertOrderAccess(orderId, {
         userId: user.userId,
         roles: user.roles,
       });
@@ -665,32 +685,47 @@ export class ChatService {
       attachmentBuffer = await this.assertChatAttachmentValid(attachment);
     }
 
-    const message = await this.prisma.chatMessage.create({
-      data: {
-        conversationId,
-        senderId: user.userId,
-        body: body ?? null,
-        orderId,
-        ...(attachment && {
-          attachmentData: attachment.data,
-          attachmentFilename: attachment.filename,
-          attachmentMimeType: attachment.mimeType,
-          attachmentSize: attachmentBuffer!.length,
-        }),
-      },
-      select: {
-        id: true,
-        conversationId: true,
-        body: true,
-        createdAt: true,
-        senderId: true,
-        sender: { select: USER_SUMMARY_SELECT },
-        orderId: true,
-        order: { select: MESSAGE_ORDER_SELECT },
-        attachmentData: true,
-        ...MESSAGE_ATTACHMENT_SELECT,
-      },
-    });
+    // Con STORAGE_DRIVER=s3 el adjunto va al bucket antes de crear la fila
+    // (y se borra si la fila no se llega a crear).
+    const attachmentBlob = attachment
+      ? await this.storage.saveBase64(
+          STORAGE_FOLDERS.chatAttachment,
+          attachment.data,
+          attachment.mimeType,
+        )
+      : null;
+
+    const message = await this.prisma.chatMessage
+      .create({
+        data: {
+          conversationId,
+          senderId: user.userId,
+          body: body ?? null,
+          orderId,
+          ...(attachment && {
+            attachmentData: attachmentBlob.data,
+            attachmentKey: attachmentBlob.key,
+            attachmentFilename: attachment.filename,
+            attachmentMimeType: attachment.mimeType,
+            attachmentSize: attachmentBuffer!.length,
+          }),
+        },
+        select: {
+          id: true,
+          conversationId: true,
+          body: true,
+          createdAt: true,
+          senderId: true,
+          sender: { select: USER_SUMMARY_SELECT },
+          orderId: true,
+          order: { select: MESSAGE_ORDER_SELECT },
+          ...MESSAGE_ATTACHMENT_SELECT,
+        },
+      })
+      .catch(async (error) => {
+        await this.storage.deleteQuietly([attachmentBlob?.key]);
+        throw error;
+      });
 
     await this.prisma.chatConversation.update({
       where: { id: conversationId },
@@ -705,8 +740,9 @@ export class ChatService {
       data: { lastReadAt: message.createdAt },
     });
 
-    const { attachmentData, ...messageRest } = message;
-    const attachmentDto = toAttachmentDto({ attachmentData, ...messageRest });
+    // El contenido ya está en memoria (vino en el request): no hace falta
+    // volver a leerlo de la DB ni del bucket.
+    const attachmentDto = toAttachmentDto(message, attachment?.data);
 
     const senderName =
       `${message.sender.firstName} ${message.sender.lastName ?? ''}`.trim() ||
@@ -749,7 +785,7 @@ export class ChatService {
       });
     }
 
-    return { ...messageRest, attachment: attachmentDto };
+    return { ...message, attachment: attachmentDto };
   }
 
   /** Valida tamaño y tipo real (magic bytes) de un adjunto de chat, igual
