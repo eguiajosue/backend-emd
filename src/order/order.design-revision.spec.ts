@@ -606,4 +606,117 @@ describe('OrderService - flujo de diseño', () => {
       ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
     });
   });
+
+  /**
+   * Hoja de autorización en el detalle del pedido: las áreas de producción
+   * leen las rondas y sus archivos de los pedidos que ven (misma regla que
+   * GET /orders/:id vía assertOrderAccess), y nada de los que no ven.
+   */
+  describe('lectura de la hoja de autorización por área', () => {
+    const PRODUCTION_ROLES = [
+      'taller',
+      'dtf',
+      'bordado',
+      'laser',
+      'impresiones',
+    ];
+    const areaUser = (role: string): RequestingUser => ({
+      userId: 30,
+      roles: [role],
+    });
+    const orderInArea = (area: string) => ({
+      id: 1,
+      area,
+      assignedUserId: null,
+      userId: CREATOR_USER_ID,
+      attendedByUserId: null,
+    });
+
+    beforeEach(() => {
+      prisma.designRevision.findMany = jest.fn().mockResolvedValue([
+        {
+          id: 100,
+          orderId: 1,
+          round: 1,
+          approved: true,
+          montageFileName: 'hoja.pdf',
+          feedbackFileName: null,
+          files: [
+            {
+              id: 500,
+              kind: 'montage',
+              filename: 'hoja.pdf',
+              mimeType: 'application/pdf',
+            },
+          ],
+        },
+      ]);
+      prisma.designRevisionFile.findUnique.mockResolvedValue({
+        id: 500,
+        revisionId: 100,
+        filename: 'hoja.pdf',
+        mimeType: 'application/pdf',
+        data: 'JVBERi0xLjQK',
+      });
+    });
+
+    it.each(PRODUCTION_ROLES)(
+      '%s lista las rondas y baja la hoja de un pedido de su área',
+      async (role) => {
+        prisma.order.findUnique.mockResolvedValue(orderInArea(role));
+
+        const revisions = await orderService.getDesignRevisions(
+          1,
+          areaUser(role),
+        );
+        expect(revisions).toEqual([
+          expect.objectContaining({
+            id: 100,
+            approved: true,
+            hasMontageFile: true,
+            montageFiles: [
+              { id: 500, filename: 'hoja.pdf', mimeType: 'application/pdf' },
+            ],
+          }),
+        ]);
+
+        await expect(
+          orderService.getDesignRevisionFile(1, 100, 500, areaUser(role)),
+        ).resolves.toEqual({
+          filename: 'hoja.pdf',
+          mimeType: 'application/pdf',
+          dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK',
+        });
+      },
+    );
+
+    it.each(PRODUCTION_ROLES)(
+      '%s no lee rondas ni archivos de un pedido de otra área (403)',
+      async (role) => {
+        const other = role === 'taller' ? 'dtf' : 'taller';
+        prisma.order.findUnique.mockResolvedValue(orderInArea(other));
+
+        await expect(
+          orderService.getDesignRevisions(1, areaUser(role)),
+        ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+        await expect(
+          orderService.getDesignRevisionFile(1, 100, 500, areaUser(role)),
+        ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+        await expect(
+          orderService.getDesignRevisionMontageFile(1, 100, areaUser(role)),
+        ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+
+        expect(prisma.designRevision.findMany).not.toHaveBeenCalled();
+        expect(prisma.designRevision.findUnique).not.toHaveBeenCalled();
+        expect(prisma.designRevisionFile.findUnique).not.toHaveBeenCalled();
+      },
+    );
+
+    it('un pedido todavía en Diseño no lo ve Producción', async () => {
+      prisma.order.findUnique.mockResolvedValue(orderInArea('diseno'));
+      await expect(
+        orderService.getDesignRevisions(1, areaUser('bordado')),
+      ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+    });
+  });
 });
