@@ -3,7 +3,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { SentryModule } from '@sentry/nestjs/setup';
 import { PrismaModule } from './prisma/prisma.module';
+import { StorageModule } from './storage/storage.module';
 import { CompanyModule } from './company/company.module';
 import { ClientModule } from './client/client.module';
 import { RoleModule } from './role/role.module';
@@ -44,6 +46,9 @@ import { AppController } from './app.controller';
 
 @Module({
   imports: [
+    // Primero, como pide la guía de Sentry para Nest: nombra las transacciones
+    // por ruta. Sin SENTRY_DSN (Sentry.init no corrió) no hace nada.
+    SentryModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
@@ -60,6 +65,7 @@ import { AppController } from './app.controller';
       ],
     }),
     PrismaModule,
+    StorageModule,
     CompanyModule,
     ClientModule,
     RoleModule,

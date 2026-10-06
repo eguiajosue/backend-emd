@@ -36,7 +36,7 @@ describe('ChatService - autorización', () => {
   let chatService: ChatService;
   let prisma: any;
   let gateway: { emitChatMessage: jest.Mock };
-  let orderService: { findOne: jest.Mock };
+  let orderService: { assertOrderAccess: jest.Mock };
   let notificationService: { createNotificationForUsers: jest.Mock };
 
   beforeEach(() => {
@@ -94,7 +94,9 @@ describe('ChatService - autorización', () => {
       },
     };
     gateway = { emitChatMessage: jest.fn() };
-    orderService = { findOne: jest.fn().mockResolvedValue({ id: 1 }) };
+    orderService = {
+      assertOrderAccess: jest.fn().mockResolvedValue({ id: 1 }),
+    };
     notificationService = { createNotificationForUsers: jest.fn() };
 
     chatService = new ChatService(
@@ -272,7 +274,7 @@ describe('ChatService - checks y presencia', () => {
     emitChatRead: jest.Mock;
     isUserOnline: jest.Mock;
   };
-  let orderService: { findOne: jest.Mock };
+  let orderService: { assertOrderAccess: jest.Mock };
   let notificationService: { createNotificationForUsers: jest.Mock };
 
   beforeEach(() => {
@@ -321,7 +323,9 @@ describe('ChatService - checks y presencia', () => {
       emitChatRead: jest.fn(),
       isUserOnline: jest.fn().mockReturnValue(false),
     };
-    orderService = { findOne: jest.fn().mockResolvedValue({ id: 1 }) };
+    orderService = {
+      assertOrderAccess: jest.fn().mockResolvedValue({ id: 1 }),
+    };
     notificationService = { createNotificationForUsers: jest.fn() };
 
     chatService = new ChatService(

@@ -1,6 +1,16 @@
 import { z } from 'zod';
 
 /**
+ * En `.env.example` las opcionales vienen como `VAR=""`: un string vacío
+ * cuenta como "no definida" (si no, una URL o un enum vacío no validaría).
+ */
+const optionalString = () =>
+  z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().optional(),
+  );
+
+/**
  * Esquema de variables de entorno.
  *
  * Se valida al arranque (ConfigModule.forRoot({ validate })): si falta algo
@@ -46,12 +56,58 @@ export const envSchema = z.object({
   // de la cuenta de Resend.
   BUG_REPORT_RECIPIENT: z.string().optional(),
   BUG_REPORT_FROM: z.string().optional(),
+
+  // Almacenamiento de archivos (ver src/storage y docs/storage-r2.md).
+  // `db` (default) = base64 en Postgres como siempre; `s3` = Cloudflare R2 o
+  // cualquier S3 compatible, con las S3_* obligatorias.
+  STORAGE_DRIVER: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.enum(['db', 's3']).default('db'),
+  ),
+  S3_ENDPOINT: optionalString(),
+  S3_REGION: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().default('auto'),
+  ),
+  S3_BUCKET: optionalString(),
+  S3_ACCESS_KEY_ID: optionalString(),
+  S3_SECRET_ACCESS_KEY: optionalString(),
+
+  // Monitoreo de errores con Sentry (ver src/instrument.ts y
+  // docs/monitoring.md). Sin SENTRY_DSN queda apagado.
+  SENTRY_DSN: optionalString(),
+  SENTRY_ENVIRONMENT: optionalString(),
+  SENTRY_TRACES_SAMPLE_RATE: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.coerce.number().min(0).max(1).default(0),
+  ),
 });
+
+/** Variables S3_* sin las que el driver `s3` no puede funcionar. */
+export const REQUIRED_S3_VARS = [
+  'S3_ENDPOINT',
+  'S3_BUCKET',
+  'S3_ACCESS_KEY_ID',
+  'S3_SECRET_ACCESS_KEY',
+] as const;
 
 export type Env = z.infer<typeof envSchema>;
 
 export function validateEnv(config: Record<string, unknown>): Env {
-  const parsed = envSchema.safeParse(config);
+  const parsed = envSchema
+    .superRefine((env, ctx) => {
+      if (env.STORAGE_DRIVER !== 's3') return;
+      for (const name of REQUIRED_S3_VARS) {
+        if (!env[name]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [name],
+            message: `${name} es obligatoria con STORAGE_DRIVER=s3`,
+          });
+        }
+      }
+    })
+    .safeParse(config);
 
   if (!parsed.success) {
     const details = parsed.error.issues

@@ -135,7 +135,8 @@ model Order {
   // referencias, arte previo). Es opcional y lo carga Recepción en el alta.
   // NO es la hoja de autorización: esa es el montaje que sube Diseño en cada
   // ronda (ver `DesignRevision`). Ver WORKFLOW.md §1.
-  clientResourceFileData String? // Contenido en base64 (sin prefijo data:) del archivo que mandó el cliente.
+  clientResourceFileData String? // Contenido en base64 (sin prefijo data:) del archivo que mandó el cliente. Legacy: null si el archivo está en el almacenamiento de objetos (ver clientResourceFileKey).
+  clientResourceFileKey  String? // Clave del objeto en el almacenamiento externo (R2/S3) cuando STORAGE_DRIVER=s3. Si está, manda sobre clientResourceFileData (ver src/storage).
   clientResourceFileName String? // Nombre de archivo original del archivo del cliente.
   clientResourceFileMime String? // Mime type del archivo del cliente (image/png, image/jpeg, application/pdf).
 
@@ -176,7 +177,8 @@ model DesignRevision {
   round   Int // Número de ronda dentro del pedido: 1, 2, 3... (max(round)+1 al crear).
 
   // Montaje enviado por Diseño (imagen/PDF), una versión por ronda.
-  montageFileData String? // Contenido en base64 (sin prefijo data:) del montaje.
+  montageFileData String? // Contenido en base64 (sin prefijo data:) del montaje. Legacy: null si está en el almacenamiento de objetos.
+  montageFileKey  String? // Clave del objeto (R2/S3) del montaje. Comparte el objeto con el primer DesignRevisionFile 'montage' de la ronda.
   montageFileName String? // Nombre de archivo original del montaje.
   montageFileMime String? // Mime type del montaje (image/png, image/jpeg, application/pdf).
   sentAt          DateTime? // Fecha en que Diseño envió el montaje.
@@ -184,7 +186,8 @@ model DesignRevision {
 
   // Feedback del cliente, cargado por Recepción.
   feedbackText     String? // Texto del feedback del cliente (máx. 2000 caracteres, validado en el DTO).
-  feedbackFileData String? // Contenido en base64 (sin prefijo data:) del adjunto de feedback.
+  feedbackFileData String? // Contenido en base64 (sin prefijo data:) del adjunto de feedback. Legacy: null si está en el almacenamiento de objetos.
+  feedbackFileKey  String? // Clave del objeto (R2/S3) del adjunto de feedback. Comparte el objeto con el primer DesignRevisionFile 'feedback' de la ronda.
   feedbackFileName String? // Nombre de archivo original del adjunto de feedback.
   feedbackFileMime String? // Mime type del adjunto de feedback.
   feedbackAt       DateTime? // Fecha en que Recepción cargó el feedback.
@@ -218,7 +221,8 @@ model DesignRevisionFile {
   id         Int      @id @default(autoincrement()) // Identificador único del archivo.
   revisionId Int // Clave foránea que referencia a DesignRevision.
   kind       String // Para qué lado de la ronda es: 'montage' | 'feedback'.
-  data       String // Contenido en base64 (sin prefijo data:).
+  data       String? // Contenido en base64 (sin prefijo data:). Legacy: null si está en el almacenamiento de objetos (ver dataKey).
+  dataKey    String? // Clave del objeto en el almacenamiento externo (R2/S3). Si está, manda sobre `data`.
   filename   String // Nombre de archivo original.
   mimeType   String // Mime type real del archivo (image/png, image/jpeg, application/pdf).
   position   Int      @default(0) // Orden de visualización dentro de la ronda.
@@ -546,11 +550,13 @@ model ChatMessage {
   // referencia en lugar de desaparecer.
   orderId            Int?
   // Adjunto opcional (foto, documento o audio). Mismo esquema que
-  // Order.clientResourceFile*: el contenido va en base64 directo en la
-  // columna (sin storage externo), y el tipo/tamaño se validan en
+  // Order.clientResourceFile*: el contenido va en base64 en la columna
+  // (legacy, STORAGE_DRIVER=db) o en R2/S3 con su clave en `attachmentKey`
+  // (STORAGE_DRIVER=s3, ver src/storage), y el tipo/tamaño se validan en
   // ChatService.sendMessage (magic-byte sniffing con `file-type`, igual que
   // OrderService.assertOrderFileValid).
-  attachmentData     String?
+  attachmentData     String? // Legacy: null si el adjunto está en el almacenamiento de objetos (ver attachmentKey).
+  attachmentKey      String? // Clave del objeto en el almacenamiento externo (R2/S3). Si está, manda sobre attachmentData.
   attachmentFilename String?
   attachmentMimeType String?
   attachmentSize     Int?
@@ -861,7 +867,8 @@ model OrderMockup {
   id          Int      @id @default(autoincrement()) // Identificador único del mockup.
   orderId     Int // Clave foránea que referencia al Order al que se adjuntó.
   garment     String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
-  imageData   String // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada.
+  imageData   String? // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada. Legacy: null si está en el almacenamiento de objetos.
+  imageKey    String? // Clave del objeto (R2/S3) de la lámina. Si está, manda sobre imageData.
   imageMime   String // Mime type de la lámina: image/png | image/jpeg.
   config      Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) para volver a editarlo.
   createdById Int? // Clave foránea que referencia al User que lo adjuntó (null si ese usuario se borró).
@@ -887,7 +894,8 @@ model MockupTemplate {
   name          String // Nombre que le puso el usuario (máx. 80 caracteres).
   garment       String // Prenda de la plantilla: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
   config        Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) que se aplica al elegirla. Máx. 8MB.
-  thumbnailData String // Miniatura en base64 (sin prefijo data:), PNG o JPEG, máx. 96KB decodificada. Se lista junto con la plantilla.
+  thumbnailData String? // Miniatura en base64 (sin prefijo data:), PNG o JPEG, máx. 96KB decodificada. Se lista junto con la plantilla. Legacy: null si está en el almacenamiento de objetos.
+  thumbnailKey  String? // Clave del objeto (R2/S3) de la miniatura. Si está, manda sobre thumbnailData.
   thumbnailMime String // Mime type de la miniatura: image/png | image/jpeg.
   createdById   Int? // Clave foránea que referencia al User que la guardó (null si ese usuario se borró).
   createdAt     DateTime @default(now()) // Fecha en que se guardó la plantilla.
@@ -901,9 +909,11 @@ model MockupTemplate {
 model MockupLogo {
   id            Int       @id @default(autoincrement()) // Identificador único del logo.
   name          String // Nombre del logo (máx. 80 caracteres).
-  imageData     String // Imagen PNG en base64 (sin prefijo data:), máx. 2MB decodificada. Nunca se trae en el listado.
+  imageData     String? // Imagen PNG en base64 (sin prefijo data:), máx. 2MB decodificada. Nunca se trae en el listado. Legacy: null si está en el almacenamiento de objetos.
+  imageKey      String? // Clave del objeto (R2/S3) de la imagen. Si está, manda sobre imageData.
   imageMime     String // Mime type de la imagen: image/png.
-  thumbnailData String // Miniatura PNG en base64 (sin prefijo data:), máx. 160px de lado y 24KB, para la grilla de logos. Nunca se trae en el listado: se pide por tarjeta visible.
+  thumbnailData String? // Miniatura PNG en base64 (sin prefijo data:), máx. 160px de lado y 24KB, para la grilla de logos. Nunca se trae en el listado: se pide por tarjeta visible. Legacy: null si está en el almacenamiento de objetos.
+  thumbnailKey  String? // Clave del objeto (R2/S3) de la miniatura. Si está, manda sobre thumbnailData.
   thumbnailMime String // Mime type de la miniatura: image/png.
   createdById   Int? // Clave foránea que referencia al User que lo subió (null si ese usuario se borró).
   createdAt     DateTime  @default(now()) // Fecha en que se subió el logo.

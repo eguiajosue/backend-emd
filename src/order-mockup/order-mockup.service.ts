@@ -15,6 +15,7 @@ import {
   parseImageDataUrl,
 } from 'src/common/mockup-validation';
 import { OrderService, RequestingUser } from 'src/order/order.service';
+import { STORAGE_FOLDERS, StorageService } from 'src/storage/storage.service';
 import {
   CreateOrderMockupDto,
   MAX_MOCKUP_BYTES,
@@ -55,6 +56,7 @@ export const MOCKUP_SUMMARY_SELECT = {
 const MOCKUP_DETAIL_SELECT = {
   ...MOCKUP_SUMMARY_SELECT,
   imageData: true,
+  imageKey: true,
   imageMime: true,
   config: true,
 } satisfies Prisma.OrderMockupSelect;
@@ -76,6 +78,9 @@ export class OrderMockupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly orderService: OrderService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta siempre StorageModule (global).
+    private readonly storage: StorageService = StorageService.database(),
   ) {}
 
   /** Mockups del pedido, más nuevos primero, sin imagen ni configuración. */
@@ -110,7 +115,11 @@ export class OrderMockupService {
     }
     return {
       ...this.toSummary(row),
-      dataUrl: `data:${row.imageMime};base64,${row.imageData}`,
+      // La lámina puede estar en la DB (legacy) o en el bucket.
+      dataUrl: await this.storage.toDataUrl(row.imageMime, {
+        data: row.imageData,
+        key: row.imageKey,
+      }),
       config: row.config,
     };
   }
@@ -127,17 +136,28 @@ export class OrderMockupService {
     const image = await this.assertImageValid(dto.imageDataUrl, dto.config);
     assertMockupConfigShape(dto.config, garment, 'del mockup');
 
-    const row = await this.prisma.orderMockup.create({
-      data: {
-        orderId,
-        garment,
-        imageData: image.base64,
-        imageMime: image.mime,
-        config: dto.config as Prisma.InputJsonObject,
-        createdById: requestingUser.userId,
-      },
-      select: MOCKUP_SUMMARY_SELECT,
-    });
+    const blob = await this.storage.saveBase64(
+      STORAGE_FOLDERS.orderMockup,
+      image.base64,
+      image.mime,
+    );
+    const row = await this.prisma.orderMockup
+      .create({
+        data: {
+          orderId,
+          garment,
+          imageData: blob.data,
+          imageKey: blob.key,
+          imageMime: image.mime,
+          config: dto.config as Prisma.InputJsonObject,
+          createdById: requestingUser.userId,
+        },
+        select: MOCKUP_SUMMARY_SELECT,
+      })
+      .catch(async (error) => {
+        await this.storage.deleteQuietly([blob.key]);
+        throw error;
+      });
     return this.toSummary(row);
   }
 
@@ -148,12 +168,19 @@ export class OrderMockupService {
     requestingUser: RequestingUser,
   ): Promise<void> {
     await this.orderService.assertOrderAccess(orderId, requestingUser);
+    // La clave del objeto se lee antes de borrar la fila; el objeto se borra
+    // después, a mejor esfuerzo.
+    const existing = await this.prisma.orderMockup.findFirst({
+      where: { id: mockupId, orderId },
+      select: { imageKey: true },
+    });
     const { count } = await this.prisma.orderMockup.deleteMany({
       where: { id: mockupId, orderId },
     });
     if (count === 0) {
       throw new HttpException('Mockup no encontrado', HttpStatus.NOT_FOUND);
     }
+    await this.storage.deleteQuietly([existing?.imageKey]);
   }
 
   private toSummary(row: MockupSummaryRow): OrderMockupSummary {

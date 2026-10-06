@@ -117,6 +117,8 @@ describe('OrderMockupService', () => {
         orderId: 10,
         garment: 'tshirt',
         imageData: MINIMAL_PNG_BASE64,
+        // Driver `db` (default): el base64 en la columna, sin clave.
+        imageKey: null,
         imageMime: 'image/png',
         config: config(),
         createdById: 7,
