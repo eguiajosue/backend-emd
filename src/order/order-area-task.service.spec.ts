@@ -578,16 +578,34 @@ describe('OrderAreaTaskService', () => {
       expect(args.where).not.toHaveProperty('area');
     });
 
-    it('deja fuera los pedidos entregados y cancelados', async () => {
+    it('deja fuera pedidos cerrados y los que siguen en Diseño', async () => {
       await service.findForUser({ userId: 3, roles: ['dtf'] });
 
       expect(prisma.orderAreaTask.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            order: { statusId: { notIn: [5, 10] } },
+            order: {
+              statusId: { notIn: [5, 10] },
+              NOT: { area: 'diseno' },
+            },
           }),
         }),
       );
+    });
+
+    it('sólo trae terminadas de las últimas 24 h', async () => {
+      const before = Date.now();
+      await service.findForUser({ userId: 3, roles: ['dtf'] });
+
+      const args = prisma.orderAreaTask.findMany.mock.calls.at(-1)?.[0] as {
+        where: { OR: [unknown, { completedAt: { gte: Date } }] };
+      };
+      expect(args.where.OR[0]).toEqual({
+        status: { not: AreaTaskStatus.terminado },
+      });
+      const since = args.where.OR[1].completedAt.gte.getTime();
+      expect(before - since).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000 - 5);
+      expect(before - since).toBeLessThan(24 * 60 * 60 * 1000 + 5000);
     });
 
     it('sin áreas de producción ni gestión, no hay bandeja', async () => {
