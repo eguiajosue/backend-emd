@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import * as bcryptjs from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { UserService } from 'src/user/user.service';
@@ -46,8 +46,12 @@ export class AuthService {
     );
   }
 
-  private get refreshExpiresIn(): string {
-    return this.configService?.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+  private get refreshExpiresIn(): JwtSignOptions['expiresIn'] {
+    return (
+      this.configService?.get<JwtSignOptions['expiresIn']>(
+        'JWT_REFRESH_EXPIRES_IN',
+      ) ?? '7d'
+    );
   }
 
   private async signTokens(payload: AccessTokenPayload) {

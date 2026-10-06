@@ -105,6 +105,8 @@ import { AppController } from './app.controller';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestIdMiddleware).forRoutes('*');
+    // Express 5 (path-to-regexp v8) exige wildcards con nombre: `{*splat}`
+    // matchea todas las rutas, incluida la raíz.
+    consumer.apply(RequestIdMiddleware).forRoutes('{*splat}');
   }
 }
