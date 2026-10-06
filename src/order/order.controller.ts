@@ -589,7 +589,16 @@ export class OrderController {
     Role.IMPRESIONES,
   )
   @Get(':id/area-tasks')
-  getAreaTasks(@Param('id') id: string) {
+  async getAreaTasks(
+    @Param('id') id: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    // Mismo criterio de visibilidad por área que GET /orders/:id: sin esto
+    // cualquier rol operativo leía las tareas de pedidos ajenos a su área.
+    await this.orderService.assertOrderAccess(+id, {
+      userId: user.sub,
+      roles: user.roles,
+    });
     return this.orderAreaTaskService.findByOrder(+id);
   }
 
@@ -680,7 +689,14 @@ export class OrderController {
     Role.IMPRESIONES,
   )
   @Get(':id/materials')
-  getMaterialItems(@Param('id') id: string) {
+  async getMaterialItems(
+    @Param('id') id: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    await this.orderService.assertOrderAccess(+id, {
+      userId: user.sub,
+      roles: user.roles,
+    });
     return this.orderMaterialItemService.findByOrder(+id);
   }
 

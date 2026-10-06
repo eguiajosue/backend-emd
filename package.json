@@ -102,5 +102,22 @@
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
+  },
+  "overrides": {
+    "lodash": "^4.18.1",
+    "multer": "^2.1.1",
+    "qs": "^6.16.0",
+    "body-parser@1": "^1.20.6",
+    "express@4": "^4.22.3",
+    "@nestjs/schedule": {
+      "uuid": "^11.1.1"
+    },
+    "picomatch@4": "^4.0.4",
+    "brace-expansion@2": "^2.1.7",
+    "glob@10": "^10.5.0",
+    "tmp": "^0.2.6",
+    "ajv@8": "^8.18.0",
+    "webpack": "^5.104.1",
+    "js-yaml@4": "^4.3.2"
   }
 }
