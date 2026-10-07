@@ -202,4 +202,12 @@ export class CreateOrderDto {
   @ArrayMaxSize(PRODUCTION_AREAS.length)
   @IsIn(PRODUCTION_AREAS, { each: true })
   productionAreas?: (typeof PRODUCTION_AREAS)[number][];
+
+  // Empleado de la sucursal que levanta el pedido. Obligatorio desde la
+  // cuenta de sucursal (lo valida OrderService.create: activo y de esa
+  // sucursal); para la matriz se ignora.
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  branchEmployeeId?: number;
 }

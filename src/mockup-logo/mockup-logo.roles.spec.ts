@@ -24,13 +24,22 @@ describe('MockupLogoController: roles y contrato de rutas', () => {
 
   const ROLES = [Role.RECEPCION, Role.ADMIN, Role.SUPERUSER].sort();
 
+  // La cuenta de sucursal usa Mockups: lee, guarda y usa; renombrar y borrar
+  // quedan para la matriz.
   it.each([
     ['GET /mockup-logos', 'findAll'],
     ['GET /mockup-logos/:id/image', 'findImage'],
     ['GET /mockup-logos/:id/thumbnail', 'findThumbnail'],
     ['POST /mockup-logos', 'create'],
-    ['PATCH /mockup-logos/:id', 'rename'],
     ['POST /mockup-logos/:id/use', 'markUsed'],
+  ])('%s acepta recepcion, admin, superuser y sucursal', (_name, method) => {
+    expect(rolesFor(MockupLogoController, method)).toEqual(
+      [...ROLES, Role.SUCURSAL].sort(),
+    );
+  });
+
+  it.each([
+    ['PATCH /mockup-logos/:id', 'rename'],
     ['DELETE /mockup-logos/:id', 'remove'],
   ])('%s sólo acepta recepcion, admin y superuser', (_name, method) => {
     expect(rolesFor(MockupLogoController, method)).toEqual(ROLES);

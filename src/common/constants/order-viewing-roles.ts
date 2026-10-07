@@ -20,3 +20,13 @@ export const ORDER_VIEWING_ROLES: Role[] = [
   Role.LASER,
   Role.IMPRESIONES,
 ];
+
+/**
+ * Lectura del detalle de UN pedido para la cuenta de sucursal (ej. "Punto
+ * Madero"): sus pedidos, su avance y la hoja de autorización, sólo lectura.
+ * El service limita la sucursal a SUS pedidos (`assertOrderAccess`).
+ */
+export const ORDER_VIEWING_ROLES_WITH_BRANCH: Role[] = [
+  ...ORDER_VIEWING_ROLES,
+  Role.SUCURSAL,
+];

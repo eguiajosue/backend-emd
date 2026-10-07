@@ -1,3 +1,4 @@
+import { BRANCH_BADGE_SELECT } from 'src/branch/branch-access';
 import {
   BadRequestException,
   HttpException,
@@ -85,6 +86,7 @@ export interface MyTaskItem {
     designStartedAt: Date | null;
     designStartedByName: string | null;
     client: { first_name: string; last_name: string | null } | null;
+    branch: { id: number; name: string } | null;
     status: { id: number; name: string };
   };
 }
@@ -290,6 +292,8 @@ export class OrderAreaTaskService {
             status: { select: { id: true, name: true } },
             clientNameOverride: true,
             client: { select: { first_name: true, last_name: true } },
+            // Badge "Punto Madero" en el tablero de tareas / TV.
+            branch: BRANCH_BADGE_SELECT,
           },
         },
       },
@@ -345,6 +349,7 @@ export class OrderAreaTaskService {
       designStartedAt: true,
       designStartedByName: true,
       client: { select: { first_name: true, last_name: true } },
+      branch: BRANCH_BADGE_SELECT,
       status: { select: { id: true, name: true } },
     } satisfies Prisma.OrderSelect;
 

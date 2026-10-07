@@ -1,4 +1,10 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  assertActiveBranchEmployee,
+  BRANCH_BADGE_SELECT,
+  branchOfUser,
+} from 'src/branch/branch-access';
+import { Role } from 'src/common/enums/roles.enum';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { assertBase64FileValid } from 'src/common/file-validation';
@@ -30,6 +36,8 @@ export interface OrderMockupSummary {
   /** ISO 8601. */
   createdAt: string;
   createdBy: { id: number; name: string } | null;
+  /** Empleado de la sucursal que lo armó (sólo mockups de sucursal). */
+  branchEmployee?: { id: number; name: string };
 }
 
 /** Mockup completo (frontend `OrderMockupDetail`). */
@@ -50,6 +58,7 @@ export const MOCKUP_SUMMARY_SELECT = {
   garment: true,
   createdAt: true,
   createdBy: MOCKUP_AUTHOR_SELECT,
+  branchEmployee: BRANCH_BADGE_SELECT,
 } satisfies Prisma.OrderMockupSelect;
 
 /** Detalle: lo del listado más la lámina y la configuración del estudio. */
@@ -135,6 +144,10 @@ export class OrderMockupService {
     const garment = this.assertGarment(dto.garment);
     const image = await this.assertImageValid(dto.imageDataUrl, dto.config);
     assertMockupConfigShape(dto.config, garment, 'del mockup');
+    const branchEmployeeId = await this.resolveBranchEmployee(
+      dto.branchEmployeeId,
+      requestingUser,
+    );
 
     const blob = await this.storage.saveBase64(
       STORAGE_FOLDERS.orderMockup,
@@ -151,6 +164,7 @@ export class OrderMockupService {
           imageMime: image.mime,
           config: dto.config as Prisma.InputJsonObject,
           createdById: requestingUser.userId,
+          ...(branchEmployeeId && { branchEmployeeId }),
         },
         select: MOCKUP_SUMMARY_SELECT,
       })
@@ -190,7 +204,23 @@ export class OrderMockupService {
       garment: row.garment as MockupGarment,
       createdAt: row.createdAt.toISOString(),
       createdBy: mockupAuthor(row.createdBy),
+      branchEmployee: row.branchEmployee ?? undefined,
     };
+  }
+
+  /**
+   * Empleado de sucursal opcional: sólo cuenta desde la cuenta de sucursal y
+   * tiene que ser de esa sucursal y estar activo. La matriz lo ignora.
+   */
+  private async resolveBranchEmployee(
+    branchEmployeeId: number | undefined,
+    requestingUser: RequestingUser,
+  ): Promise<number | undefined> {
+    if (!branchEmployeeId) return undefined;
+    if (!requestingUser.roles?.includes(Role.SUCURSAL)) return undefined;
+    const branch = await branchOfUser(this.prisma, requestingUser.userId);
+    await assertActiveBranchEmployee(this.prisma, branch.id, branchEmployeeId);
+    return branchEmployeeId;
   }
 
   /** Repite la validación del DTO: el service también se usa sin el pipe. */

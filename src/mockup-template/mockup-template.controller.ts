@@ -13,6 +13,7 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Auth } from 'src/common/decorators/auth.decorator';
+import { Roles } from 'src/common/decorators/roles.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
@@ -28,7 +29,8 @@ import { MockupTemplateService } from './mockup-template.service';
  * superuser (también para leer).
  */
 @ApiTags('mockup-templates')
-@Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+// La sucursal usa Mockups: lee, guarda y usa; renombrar/borrar no.
+@Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.SUCURSAL)
 @Controller('mockup-templates')
 export class MockupTemplateController {
   constructor(private readonly mockupTemplateService: MockupTemplateService) {}
@@ -54,6 +56,7 @@ export class MockupTemplateController {
     return this.mockupTemplateService.create(dto, user.sub);
   }
 
+  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
   @Patch(':id')
   rename(
     @Param('id', ParseIntPipe) id: number,
@@ -63,6 +66,7 @@ export class MockupTemplateController {
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.mockupTemplateService.remove(id);

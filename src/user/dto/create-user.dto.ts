@@ -5,6 +5,8 @@ import {
   IsInt,
   IsNotEmpty,
   IsOptional,
+  IsPositive,
+  ValidateIf,
   IsString,
   Matches,
   MaxLength,
@@ -58,4 +60,14 @@ export class CreateUserDto {
   @IsOptional()
   @IsBoolean()
   isSharedAccount?: boolean;
+
+  /**
+   * Sucursal de la cuenta (obligatoria con el rol "sucursal", ver Branch).
+   * `null` en una edición la desvincula.
+   */
+  @ValidateIf((dto: CreateUserDto) => dto.branchId !== null)
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  branchId?: number | null;
 }

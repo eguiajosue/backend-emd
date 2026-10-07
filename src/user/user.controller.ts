@@ -67,6 +67,8 @@ export class UserController {
     Role.DISENO,
     Role.LASER,
     Role.IMPRESIONES,
+    // Alta de pedidos desde la sucursal: elige diseñador responsable.
+    Role.SUCURSAL,
   )
   @Get()
   findAll() {

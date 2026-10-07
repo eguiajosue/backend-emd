@@ -1,4 +1,12 @@
-import { IsIn, IsNotEmpty, IsObject, IsString } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsPositive,
+  IsString,
+} from 'class-validator';
 import {
   MOCKUP_GARMENT_MESSAGE,
   MOCKUP_GARMENTS,
@@ -38,4 +46,13 @@ export class CreateOrderMockupDto {
 
   @IsObject({ message: 'La configuración del mockup es obligatoria' })
   config: Record<string, unknown>;
+
+  /**
+   * Empleado de la sucursal que armó el mockup (opcional, sólo desde la
+   * cuenta de sucursal; se valida que sea de esa sucursal y esté activo).
+   */
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  branchEmployeeId?: number;
 }
