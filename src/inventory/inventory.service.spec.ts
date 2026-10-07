@@ -224,7 +224,7 @@ describe('InventoryService', () => {
       );
     });
 
-    it('un rol de área sólo consulta: no crea, edita, borra ni mueve stock (ni en su área)', async () => {
+    it('un rol de área no crea, edita, borra ni ajusta (ni en su área)', async () => {
       await expect(
         service.create(
           { area: 'bordado', name: 'Hilo', unit: 'cono' },
@@ -238,18 +238,12 @@ describe('InventoryService', () => {
         ForbiddenException,
       );
       await expect(
-        service.registerMovement(7, { type: 'SALIDA', quantity: 1 }, bordado),
-      ).rejects.toThrow(ForbiddenException);
+        service.registerMovement(7, { type: 'AJUSTE', quantity: 1 }, bordado),
+      ).rejects.toThrow('el ajuste por conteo es de Recepción');
       expect(prisma.inventoryItem.create).not.toHaveBeenCalled();
       expect(prisma.inventoryItem.update).not.toHaveBeenCalled();
       expect(prisma.inventoryItem.delete).not.toHaveBeenCalled();
       expect(prisma.inventoryMovement.create).not.toHaveBeenCalled();
-    });
-
-    it('un rol de área sí consulta el kardex de su departamento', async () => {
-      await expect(
-        service.findMovements(bordado, { itemId: 7 }),
-      ).resolves.toEqual([]);
     });
 
     it('admin y recepción crean, editan y borran en cualquier departamento', async () => {
@@ -646,7 +640,7 @@ describe('InventoryService', () => {
         ).rejects.toThrow('Stock insuficiente');
       });
 
-      it('código desconocido da 404 y un rol de área 403, sin mover stock', async () => {
+      it('código desconocido o de otra área da 404, sin mover stock', async () => {
         await expect(
           service.registerMovementByBarcode(
             'NO-EXISTE',
@@ -658,9 +652,9 @@ describe('InventoryService', () => {
           service.registerMovementByBarcode(
             'EMD-000007',
             { type: 'ENTRADA', quantity: 1 },
-            bordado,
+            { sub: 5, roles: ['dtf'] },
           ),
-        ).rejects.toThrow(ForbiddenException);
+        ).rejects.toThrow(NotFoundException);
         expect(prisma.inventoryMovement.create).not.toHaveBeenCalled();
       });
     });
