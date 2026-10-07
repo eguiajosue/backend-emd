@@ -23,7 +23,12 @@ const USER_SAFE_SELECT = {
   username: true,
   roles: true,
   isSharedAccount: true,
+  branchId: true,
+  branch: { select: { id: true, name: true } },
 } satisfies Prisma.UserSelect;
+
+/** Nombre del rol de las cuentas de sucursal (Role.SUCURSAL). */
+const BRANCH_ROLE_NAME = 'sucursal';
 
 /**
  * Campos de preferencia que se devuelven al usuario. Una sola definición para
@@ -65,9 +70,31 @@ export class UserService {
     return !!user;
   }
 
+  /**
+   * Una cuenta con el rol "sucursal" tiene que tener sucursal: sin ella no
+   * puede levantar pedidos ni ver los suyos.
+   */
+  private async assertBranchForRoles(
+    roleIds: number[] | undefined,
+    branchId: number | null | undefined,
+  ) {
+    if (!roleIds || roleIds.length === 0) return;
+    const branchRole = await this.prisma.role.findFirst({
+      where: { id: { in: roleIds }, name: BRANCH_ROLE_NAME },
+      select: { id: true },
+    });
+    if (branchRole && !branchId) {
+      throw new HttpException(
+        'Elige la sucursal de la cuenta de sucursal',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   async create(createUserDto: CreateUserDto) {
     try {
-      const { roleIds, password, ...rest } = createUserDto;
+      const { roleIds, password, branchId, ...rest } = createUserDto;
+      await this.assertBranchForRoles(roleIds, branchId);
       const hashedPassword = await bcryptjs.hash(password, 10);
 
       const data: Prisma.UserCreateInput = {
@@ -76,6 +103,7 @@ export class UserService {
         roles: {
           connect: roleIds.map((id) => ({ id })),
         },
+        ...(branchId && { branch: { connect: { id: branchId } } }),
       };
 
       const user = await this.prisma.user.create({
@@ -93,7 +121,16 @@ export class UserService {
       }
       if (error.code === 'P2003') {
         // Fallo en restricción de clave foránea (roleId inválido)
-        throw new HttpException('ID de rol inválido', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'ID de rol o de sucursal inválido',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (error.code === 'P2025') {
+        throw new HttpException(
+          'Sucursal no encontrada',
+          HttpStatus.BAD_REQUEST,
+        );
       }
       // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
       // detalles internos (Prisma, stack) al cliente en producción.
@@ -152,7 +189,8 @@ export class UserService {
 
   async update(id: number, updateUserDto: UpdateUserDto) {
     try {
-      const { roleIds, password, firstName, lastName, ...rest } = updateUserDto;
+      const { roleIds, password, firstName, lastName, branchId, ...rest } =
+        updateUserDto;
 
       // Obtiene el usuario actual si firstName o lastName no están definidos
       let currentUser;
@@ -164,6 +202,19 @@ export class UserService {
             HttpStatus.NOT_FOUND,
           );
         }
+      }
+
+      if (roleIds) {
+        const effectiveBranchId =
+          branchId !== undefined
+            ? branchId
+            : (
+                await this.prisma.user.findUnique({
+                  where: { id },
+                  select: { branchId: true },
+                })
+              )?.branchId;
+        await this.assertBranchForRoles(roleIds, effectiveBranchId);
       }
 
       let hashedPassword;
@@ -180,6 +231,11 @@ export class UserService {
           roles: {
             set: roleIds.map((id) => ({ id })),
           },
+        }),
+        ...(branchId !== undefined && {
+          branch: branchId
+            ? { connect: { id: branchId } }
+            : { disconnect: true },
         }),
       };
 
@@ -247,23 +303,49 @@ export class UserService {
 
   async remove(id: number) {
     try {
-      // Primero, elimina las órdenes asociadas al usuario. Las claves de sus
-      // archivos en el bucket se juntan antes (la cascada de la DB no lo toca)
-      // y se borran en cuanto se borran los pedidos.
+      // Las cuentas de sucursal son COMPARTIDAS: `Order.userId` de todos los
+      // pedidos de la sucursal es esa cuenta, así que borrarla se llevaría el
+      // historial completo de la sucursal. Se rechaza (hay que renombrarla o
+      // cambiarle la contraseña) en vez de borrar pedidos ajenos.
+      const target = await this.prisma.user.findUnique({
+        where: { id },
+        select: { branchId: true, roles: { select: { name: true } } },
+      });
+      if (!target) {
+        throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
+      }
+      const branchOrders = target.branchId
+        ? 0
+        : await this.prisma.order.count({
+            where: { userId: id, branchId: { not: null } },
+          });
+      if (
+        target.branchId !== null ||
+        target.roles.some((r) => r.name === BRANCH_ROLE_NAME) ||
+        branchOrders > 0
+      ) {
+        throw new HttpException(
+          'No se puede eliminar una cuenta de sucursal: es una cuenta compartida y borrarla eliminaría todos los pedidos de la sucursal. Cambia su nombre de usuario o su contraseña, o desactiva la sucursal.',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      // Las claves de sus archivos en el bucket se juntan antes (la cascada de
+      // la DB no lo toca) y se borran SÓLO si la transacción se confirma.
       const objectKeys = await collectOrderObjectKeys(this.prisma, {
         userId: id,
       });
-      await this.prisma.order.deleteMany({
-        where: { userId: id },
-      });
-      // Los pedidos ya no existen: sus archivos se borran aunque el borrado
-      // del usuario falle después (si no, quedarían huérfanos en el bucket).
+      // Pedidos + usuario en UNA transacción: si falla el borrado del
+      // usuario, los pedidos no quedan borrados a medias.
+      await this.prisma.$transaction(
+        async (tx) => {
+          await tx.order.deleteMany({ where: { userId: id } });
+          await tx.user.delete({ where: { id } });
+        },
+        { timeout: 20000, maxWait: 10000 },
+      );
+      // Los pedidos ya no existen: sus archivos se borran del bucket.
       await this.storage.deleteQuietly(objectKeys);
-
-      // Luego, elimina el usuario
-      await this.prisma.user.delete({
-        where: { id },
-      });
 
       return { message: 'Usuario eliminado correctamente' };
     } catch (error) {

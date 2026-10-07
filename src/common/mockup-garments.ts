@@ -12,6 +12,8 @@ export const MOCKUP_GARMENTS = [
   'cap',
   'hoodie',
   'dress-shirt',
+  'termo',
+  'taza',
 ] as const;
 export type MockupGarment = (typeof MOCKUP_GARMENTS)[number];
 
@@ -21,4 +23,4 @@ export function isMockupGarment(value: unknown): value is MockupGarment {
 
 /** Mensaje de 400 para una prenda fuera de `MOCKUP_GARMENTS`. */
 export const MOCKUP_GARMENT_MESSAGE =
-  'La prenda debe ser playera (tshirt), gorra (cap), sudadera (hoodie) o camisa (dress-shirt)';
+  'La prenda debe ser playera (tshirt), gorra (cap), sudadera (hoodie), camisa (dress-shirt), termo (termo) o taza (taza)';

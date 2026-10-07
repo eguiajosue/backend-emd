@@ -23,6 +23,8 @@ describe('OrderController: roles de las rondas de diseño', () => {
     return [...roles].sort();
   };
 
+  // La cuenta de sucursal también lee el detalle de SUS pedidos (el service
+  // la limita a su sucursal).
   const ORDER_DETAIL_ROLES = [
     Role.RECEPCION,
     Role.ADMIN,
@@ -33,6 +35,7 @@ describe('OrderController: roles de las rondas de diseño', () => {
     Role.DISENO,
     Role.LASER,
     Role.IMPRESIONES,
+    Role.SUCURSAL,
   ].sort();
 
   it.each([

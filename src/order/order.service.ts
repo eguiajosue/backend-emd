@@ -1,3 +1,7 @@
+import {
+  normalizeSizeBreakdown,
+  sizeBreakdownTotal,
+} from 'src/common/garment-sizes';
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import { PrismaService } from '../prisma/prisma.service';
@@ -42,6 +46,19 @@ import {
   StoredBlob,
 } from 'src/storage/storage.service';
 import { collectOrderObjectKeys } from 'src/storage/order-object-keys';
+import {
+  SUPPLY_TX_OPTIONS,
+  TASK_SUPPLY_SELECT,
+  saveSuppliesTx,
+  validateSupplies,
+} from './order-area-supply';
+import {
+  assertActiveBranchEmployee,
+  BRANCH_BADGE_SELECT,
+  branchOfUser,
+  branchOrdersWhere,
+  isBranchOnlyUser,
+} from 'src/branch/branch-access';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -170,6 +187,9 @@ const ORDER_WRITE_INCLUDE = {
   attendedBy: ATTENDED_BY_USER_SELECT,
   status: true,
   orderProducts: true,
+  // Sucursal de origen y quién la levantó ("Creado por Punto Madero · Ana").
+  branch: BRANCH_BADGE_SELECT,
+  branchEmployee: BRANCH_BADGE_SELECT,
 } satisfies Prisma.OrderInclude;
 
 @Injectable()
@@ -246,7 +266,19 @@ export class OrderService {
     return order.attendedByUserId ?? order.userId;
   }
 
-  /** Valida que cada línea de producto traiga nombre y cantidad. */
+  /** Datos de una línea de producto para Prisma (con tallas normalizadas). */
+  private toOrderProductData(op: OrderProductDto) {
+    return {
+      quantity: op.quantity,
+      customName: op.customName.trim(),
+      sizes: (normalizeSizeBreakdown(op.sizes) ?? Prisma.DbNull) as
+        | Prisma.InputJsonValue
+        | typeof Prisma.DbNull,
+    };
+  }
+
+  /** Valida que cada línea de producto traiga nombre y cantidad, y que el
+   * desglose de tallas (si viene) sea válido y sume la cantidad. */
   private assertOrderProductsValid(orderProducts?: OrderProductDto[]) {
     if (!orderProducts) {
       return;
@@ -255,6 +287,14 @@ export class OrderService {
       if (!op.customName?.trim()) {
         throw new HttpException(
           'Cada producto debe tener un producto registrado o un nombre',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const sizes = normalizeSizeBreakdown(op.sizes);
+      const total = sizeBreakdownTotal(sizes);
+      if (sizes && total !== op.quantity) {
+        throw new HttpException(
+          `La cantidad de "${op.customName.trim()}" (${op.quantity}) no coincide con el total de tallas (${total})`,
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -346,6 +386,10 @@ export class OrderService {
       return {};
     }
     const { roles } = requestingUser;
+    // Cuenta de sucursal: sólo los pedidos levantados desde SU sucursal.
+    if (isBranchOnlyUser(roles)) {
+      return branchOrdersWhere(requestingUser.userId);
+    }
     if (isFullVisibilityRole(roles)) {
       return {};
     }
@@ -390,6 +434,18 @@ export class OrderService {
     });
     if (!order) {
       throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
+    }
+    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) {
+      const own = await this.prisma.order.count({
+        where: { id: orderId, ...branchOrdersWhere(requestingUser.userId) },
+      });
+      if (own === 0) {
+        throw new HttpException(
+          'Sin acceso a este pedido',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      return order;
     }
     const visible = await this.filterOrdersForUser([order], requestingUser);
     if (visible.length === 0) {
@@ -525,25 +581,76 @@ export class OrderService {
     }
   }
 
-  async create(createOrderDto: CreateOrderDto) {
+  /**
+   * Alta desde la cuenta de una sucursal: el empleado que lo levanta es
+   * obligatorio y tiene que ser de ESA sucursal y estar activo. Devuelve
+   * null para los usuarios de la matriz (el empleado se ignora).
+   */
+  private async resolveBranchOrigin(
+    branchEmployeeId: number | undefined,
+    requestingUser?: RequestingUser,
+  ) {
+    if (!requestingUser?.roles?.includes(Role.SUCURSAL)) return null;
+    const branch = await branchOfUser(this.prisma, requestingUser.userId);
+    if (!branchEmployeeId) {
+      throw new HttpException(
+        'Elige qué empleado de la sucursal levanta el pedido',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const employee = await assertActiveBranchEmployee(
+      this.prisma,
+      branch.id,
+      branchEmployeeId,
+    );
+    return { branch, employee };
+  }
+
+  async create(
+    createOrderDto: CreateOrderDto,
+    requestingUser?: RequestingUser,
+  ) {
     try {
+      // Una cuenta de sucursal sólo levanta pedidos nuevos "normales": no
+      // decide estado, si pasa por Diseño, el área inicial ni a nombre de quién
+      // queda. Se ignora lo que mande y se fuerza el alta estándar (con
+      // montaje, igual que un pedido de Recepción que requiere diseño).
+      const branchAccount =
+        !!requestingUser && isBranchOnlyUser(requestingUser.roles);
       const {
+        branchEmployeeId,
         clientId,
         clientNameOverride,
-        userId,
-        assignedUserId,
-        // Default de alta: "pendiente". Vive aquí y no en el DTO (ver
-        // CreateOrderDto.statusId).
-        statusId = 1,
-        area,
         productionArea,
         productionAreas,
-        requiresDesign,
         description,
         deliveryDate,
         orderProducts,
         clientResourceFile,
       } = createOrderDto;
+      // Default de alta: "pendiente". Vive aquí y no en el DTO (ver
+      // CreateOrderDto.statusId).
+      const statusId = branchAccount ? 1 : (createOrderDto.statusId ?? 1);
+      const area = branchAccount ? undefined : createOrderDto.area;
+      const requiresDesign = branchAccount
+        ? true
+        : createOrderDto.requiresDesign;
+      const userId = branchAccount
+        ? requestingUser.userId
+        : createOrderDto.userId;
+      // La sucursal no elige responsable: el pedido cae en la cuenta compartida
+      // de Diseño ("Cualquier diseñador"), o sin responsable si no existe.
+      const assignedUserId = branchAccount
+        ? ((
+            await this.prisma.user.findFirst({
+              where: {
+                isSharedAccount: true,
+                roles: { some: { name: Role.DISENO } },
+              },
+              select: { id: true },
+            })
+          )?.id ?? undefined)
+        : createOrderDto.assignedUserId;
 
       // Default true: si no viene explícito, el pedido pasa por Diseño
       // (comportamiento nuevo). Recepción puede desmarcarlo para ir directo
@@ -566,6 +673,11 @@ export class OrderService {
         );
       }
 
+      const branchOrigin = await this.resolveBranchOrigin(
+        branchEmployeeId,
+        requestingUser,
+      );
+
       const trimmedClientNameOverride = clientNameOverride?.trim();
       if (!clientId && !trimmedClientNameOverride) {
         throw new HttpException(
@@ -585,7 +697,10 @@ export class OrderService {
       // diseñador concreto, o la cuenta compartida del área ("Cualquier
       // diseñador"). Ver WORKFLOW.md §1.a.
       if (needsDesign) {
-        await this.assertUserBelongsToArea(assignedUserId, Role.DISENO);
+        // (La cuenta de sucursal ya recibe la compartida de Diseño: sin recheck.)
+        if (!branchAccount) {
+          await this.assertUserBelongsToArea(assignedUserId, Role.DISENO);
+        }
       } else if (assignedUserId !== undefined && area) {
         // Sin montaje, si se nomina a alguien debe ser del área destino.
         await this.assertUserBelongsToArea(assignedUserId, area);
@@ -629,6 +744,10 @@ export class OrderService {
         user: {
           connect: { id: userId },
         },
+        ...(branchOrigin && {
+          branch: { connect: { id: branchOrigin.branch.id } },
+          branchEmployee: { connect: { id: branchOrigin.employee.id } },
+        }),
         ...(assignedUserId && {
           assignedUser: {
             connect: { id: assignedUserId },
@@ -639,10 +758,7 @@ export class OrderService {
         },
         orderProducts: orderProducts
           ? {
-              create: orderProducts.map((op) => ({
-                quantity: op.quantity,
-                customName: op.customName.trim(),
-              })),
+              create: orderProducts.map((op) => this.toOrderProductData(op)),
             }
           : undefined,
         ...(clientResourceFile && {
@@ -695,16 +811,37 @@ export class OrderService {
         order.user &&
         order.user.username
       ) {
+        // Pedido de sucursal: "Punto Madero · Ana López" en vez del usuario
+        // compartido, y también le llega a Recepción, que es quien lo recibe.
+        const createdBy = branchOrigin
+          ? `${branchOrigin.branch.name} · ${branchOrigin.employee.name}`
+          : order.user.username;
         const adminNotificationData = {
           id: order.id,
           description: order.description,
           clientName: clientNameForNotification,
-          createdBy: order.user.username,
+          createdBy,
           creationDate: order.creationDate,
           deliveryDate: order.deliveryDate,
+          ...(branchOrigin && { branchName: branchOrigin.branch.name }),
         };
 
         this.notificationsGateway.notifyNewOrderToAdmin(adminNotificationData);
+
+        if (branchOrigin) {
+          const receptionIds = await this.notificationService.userIdsForArea(
+            Role.RECEPCION,
+          );
+          await this.notificationService.createNotificationForUsers(
+            receptionIds,
+            {
+              type: 'order_assigned',
+              title: `Nuevo pedido de ${branchOrigin.branch.name}`,
+              body: `Pedido #${order.id} de ${clientNameForNotification}, levantado por ${createdBy}`,
+              orderId: order.id,
+            },
+          );
+        }
 
         // "Cualquier diseñador" (o cualquiera del área) se guarda como la
         // cuenta COMPARTIDA del área: avisarle sólo a esa cuenta dejaba sin
@@ -791,8 +928,8 @@ export class OrderService {
    * expone un booleano `hasClientResourceFile` calculado.
    */
   /** Select común para listados: incluye `histories` liviano para calcular `deliveredAt`. */
-  private orderListSelect() {
-    return {
+  private orderListSelect(requestingUser?: RequestingUser) {
+    const select = {
       id: true,
       clientId: true,
       clientNameOverride: true,
@@ -814,6 +951,11 @@ export class OrderService {
       designStartedAt: true,
       designStartedByName: true,
       materialsPriority: true,
+      // Sucursal de origen: badge "Punto Madero" en listas, TV y filtros.
+      branchId: true,
+      branchEmployeeId: true,
+      branch: BRANCH_BADGE_SELECT,
+      branchEmployee: BRANCH_BADGE_SELECT,
       description: true,
       creationDate: true,
       deliveryDate: true,
@@ -830,6 +972,7 @@ export class OrderService {
           area: true,
           status: true,
           assignedUserId: true,
+          supply: TASK_SUPPLY_SELECT,
         },
       },
       // Hoja de materiales: liviana en el listado (sólo lo que necesita el
@@ -849,6 +992,19 @@ export class OrderService {
       orderProducts: true,
       histories: HISTORY_SELECT_FOR_DELIVERED_AT,
     } satisfies Prisma.OrderSelect;
+    // Las cuentas de sucursal no ven los insumos de inventario (nombres,
+    // códigos de barras, cantidades) de las tareas de área.
+    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) {
+      const taskSelect: Record<string, unknown> = {
+        ...select.areaTasks.select,
+      };
+      delete taskSelect.supply;
+      return {
+        ...select,
+        areaTasks: { select: taskSelect },
+      } as unknown as typeof select;
+    }
+    return select;
   }
 
   /**
@@ -891,7 +1047,7 @@ export class OrderService {
 
   async findAll(query?: PaginationQueryDto, requestingUser?: RequestingUser) {
     try {
-      const select = this.orderListSelect();
+      const select = this.orderListSelect(requestingUser);
       const { enabled, page, limit, skip } = resolvePagination(query);
       const where = this.orderVisibilityWhere(requestingUser);
 
@@ -947,7 +1103,7 @@ export class OrderService {
     requestingUser?: RequestingUser,
   ) {
     try {
-      const select = this.orderListSelect();
+      const select = this.orderListSelect(requestingUser);
       // Paginación siempre activa para /orders/history (a diferencia de
       // `findAll`, que es opt-in): evita traer todo el histórico sin límite.
       const { page, limit, skip } = resolvePagination(query ?? {});
@@ -1336,10 +1492,7 @@ export class OrderService {
         ...(orderProducts && {
           orderProducts: {
             deleteMany: {}, // Elimina los productos existentes en la orden
-            create: orderProducts.map((op) => ({
-              quantity: op.quantity,
-              customName: op.customName.trim(),
-            })),
+            create: orderProducts.map((op) => this.toOrderProductData(op)),
           },
         }),
         ...(clientResourceFile && {
@@ -2505,20 +2658,6 @@ export class OrderService {
     await this.assertRevisionAwaitingResponse(orderId, revisionToApprove);
     const order = await this.getOrderOrThrow(orderId);
 
-    // La hoja de materiales se tiene que cargar ANTES de autorizar: producción
-    // necesita saber qué se va a usar desde el momento en que arranca, no
-    // enterarse después. Al menos una línea alcanza — no hace falta que ya
-    // esté todo comprado.
-    const materialCount = await this.prisma.orderMaterialItem.count({
-      where: { orderId },
-    });
-    if (materialCount === 0) {
-      throw new HttpException(
-        'Carga la hoja de materiales del pedido antes de autorizar el diseño',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
     // Áreas que van a producir el pedido. Pueden ser varias y trabajan en
     // paralelo (WORKFLOW.md §3): las define Diseño aquí, o vienen planificadas
     // por Recepción desde el alta como tareas ya creadas.
@@ -2542,58 +2681,90 @@ export class OrderService {
     // toda la lógica existente de visibilidad y listados.
     const productionArea = dto.productionArea ?? resolvedAreas[0];
 
+    // Hoja de materiales al autorizar (WORKFLOW.md §3): por cada área se dice
+    // si los insumos los trae el cliente o los ponemos nosotros. Reemplaza la
+    // vieja regla de "al menos una línea de materiales antes de autorizar".
+    const supplies = dto.supplies ?? [];
+    validateSupplies(supplies);
+    const coveredAreas = new Set(supplies.map((s) => s.area as string));
+    const uncovered = resolvedAreas.filter((area) => !coveredAreas.has(area));
+    if (uncovered.length > 0) {
+      throw new HttpException(
+        `Captura la hoja de materiales (origen de insumos) de: ${uncovered.map(chatAreaLabel).join(', ')}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const extra = supplies.filter((s) => !resolvedAreas.includes(s.area));
+    if (extra.length > 0) {
+      throw new HttpException(
+        `${chatAreaLabel(extra[0].area)} no es un área de este pedido`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     const statusId = await this.resolveStatusIdByName(STATUS_NAME_AUTORIZADO);
 
-    const [revision] = await this.prisma.$transaction([
-      this.prisma.designRevision.update({
-        where: { id: revisionId },
-        data: {
-          approved: true,
-          approvedAt: new Date(),
-          approvedByUser: { connect: { id: requestingUser.userId } },
-        },
-      }),
-      this.prisma.order.update({
-        where: { id: orderId },
-        data: {
-          area: productionArea,
-          productionArea,
-          status: { connect: { id: statusId } },
-          // El diseñador deja de ser el responsable del pedido: a partir de aquí
-          // manda cada tarea de área con su propio asignado (WORKFLOW.md §3).
-          // Queda registrado abajo en la auditoría y en las rondas de montaje.
-          assignedUser: { disconnect: true },
-          // Archivado: sale del tablero ACTIVO de Diseño (ya no es trabajo
-          // pendiente de esa área) pero sigue en el historial. WORKFLOW.md §2.
-          archivedAt: new Date(),
-        },
-      }),
-      this.prisma.orderAuditLog.create({
-        data: {
-          action: 'design_approved',
-          changes: {
-            revisionId,
-            statusId,
+    // Autorización + tareas de área + hoja de materiales en UNA transacción:
+    // el pedido pasa a producción sólo si la hoja quedó guardada.
+    const { revision, supplyWarnings } = await this.prisma.$transaction(
+      async (tx) => {
+        const approvedRevision = await tx.designRevision.update({
+          where: { id: revisionId },
+          data: {
+            approved: true,
+            approvedAt: new Date(),
+            approvedByUser: { connect: { id: requestingUser.userId } },
+          },
+        });
+        await tx.order.update({
+          where: { id: orderId },
+          data: {
+            area: productionArea,
             productionArea,
-            productionAreas: resolvedAreas,
-            // Quién venía trabajando el montaje, para no perder el rastro al
-            // liberar `assignedUserId`.
-            previousAssignedUserId: order.assignedUserId ?? null,
-          } as Prisma.InputJsonValue,
-          order: { connect: { id: orderId } },
-          user: { connect: { id: requestingUser.userId } },
-        },
-      }),
-    ]);
+            status: { connect: { id: statusId } },
+            // El diseñador deja de ser el responsable del pedido: a partir de aquí
+            // manda cada tarea de área con su propio asignado (WORKFLOW.md §3).
+            // Queda registrado abajo en la auditoría y en las rondas de montaje.
+            assignedUser: { disconnect: true },
+            // Archivado: sale del tablero ACTIVO de Diseño (ya no es trabajo
+            // pendiente de esa área) pero sigue en el historial. WORKFLOW.md §2.
+            archivedAt: new Date(),
+          },
+        });
+        await tx.orderAuditLog.create({
+          data: {
+            action: 'design_approved',
+            changes: {
+              revisionId,
+              statusId,
+              productionArea,
+              productionAreas: resolvedAreas,
+              // Quién venía trabajando el montaje, para no perder el rastro al
+              // liberar `assignedUserId`.
+              previousAssignedUserId: order.assignedUserId ?? null,
+            } as Prisma.InputJsonValue,
+            order: { connect: { id: orderId } },
+            user: { connect: { id: requestingUser.userId } },
+          },
+        });
 
-    // Crea las tareas de las áreas que falten (idempotente: las planificadas
-    // desde el alta ya existen y no se duplican).
-    await this.orderAreaTaskService.createTasksForAreas(
-      orderId,
-      resolvedAreas,
-      {
-        notify: false,
+        // Crea las tareas de las áreas que falten (idempotente: las
+        // planificadas desde el alta ya existen y no se duplican).
+        await this.orderAreaTaskService.createTasksForAreas(
+          orderId,
+          resolvedAreas,
+          { notify: false, tx },
+        );
+        const warnings = await saveSuppliesTx(
+          tx,
+          orderId,
+          supplies,
+          requestingUser.userId,
+        );
+        return { revision: approvedRevision, supplyWarnings: warnings };
       },
+      // Crea tareas + hoja de materiales (varias escrituras y candados).
+      SUPPLY_TX_OPTIONS,
     );
 
     // Recién ahora hay trabajo real para producción: se avisa a cada área
@@ -2631,7 +2802,7 @@ export class OrderService {
       where: { id: revision.id },
       select: this.designRevisionListSelect(),
     });
-    return this.toDesignRevisionListItem(updated);
+    return { ...this.toDesignRevisionListItem(updated), supplyWarnings };
   }
 
   /** GET /orders/:id/design-revisions — rondas ordenadas asc, sin blobs. */
@@ -2743,7 +2914,7 @@ export class OrderService {
     query?: PaginationQueryDto,
     requestingUser?: RequestingUser,
   ) {
-    const select = this.orderListSelect();
+    const select = this.orderListSelect(requestingUser);
     const { enabled, page, limit, skip } = resolvePagination(query);
     const visibilityWhere = this.orderVisibilityWhere(requestingUser);
 

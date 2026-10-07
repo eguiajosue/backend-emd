@@ -137,6 +137,26 @@ paralelo**, no en secuencia.
   entregar", el pedido vuelve a **autorizado**: sin tareas no hay nada
   terminado.
 
+### Hoja de materiales al autorizar (origen de insumos)
+
+- Cuando Recepción marca que el cliente autorizó, captura en el mismo paso la
+  **hoja de materiales**: una sección por cada tarea de área, con el **origen
+  del insumo**: **lo trae el cliente** (descripción + cantidad opcional, ej.
+  "12 playeras negras del cliente") o **lo ponemos nosotros** (artículos de
+  inventario buscados por nombre/código + cantidad, y líneas de texto libre
+  para lo que no está dado de alta). Autorización + tareas + hoja van en
+  **una sola transacción**: el pedido pasa a producción al guardarla. Ya no
+  se exige "al menos una línea de compra" (`OrderMaterialItem`) para autorizar.
+- Lo "nuestro" ligado a inventario queda **apartado** (disponible =
+  existencia − apartado). Si no alcanza, se guarda con aviso.
+- Al marcar la tarea del área como **terminado** se descuenta (SALIDA ligada a
+  pedido + tarea + usuario) en la misma transacción del cambio de estado; es
+  idempotente. El inventario no admite stock negativo: si no alcanza, la tarea
+  no se puede terminar hasta registrar la entrada. Si la tarea **regresa** de
+  terminado, se devuelve con una ENTRADA.
+- Lo del cliente nunca toca inventario.
+- API: `PATCH .../approve` con `supplies[]`; `GET`/`PUT /orders/:id/area-supplies`.
+
 ### Notificaciones
 
 - Una notificación **por tarea de área**, dirigida **solo al área que le toca**.

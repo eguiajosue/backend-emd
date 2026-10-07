@@ -1,15 +1,31 @@
+import { BRANCH_BADGE_SELECT } from 'src/branch/branch-access';
 import {
   BadRequestException,
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
 } from '@nestjs/common';
-import { AreaTaskStatus, Prisma } from '@prisma/client';
+import { AreaTaskStatus, Prisma, SupplySource } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { Role } from 'src/common/enums/roles.enum';
 import { PRODUCTION_AREAS } from './dto/create-order.dto';
+import { AreaSupplyDto } from './dto/order-area-supply.dto';
+import {
+  SUPPLY_TX_OPTIONS,
+  SupplyInventoryResult,
+  TASK_SUPPLY_SELECT,
+  applySupplyInventoryForStatusTx,
+  discountPendingSupplyTx,
+  lockTaskStatusTx,
+  reservedByItem,
+  saveSuppliesTx,
+  serializeSupply,
+} from './order-area-supply';
+import { isBranchOnlyUser } from 'src/branch/branch-access';
+import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
 import type { RequestingUser } from './order.service';
 import {
   StatusIdResolver,
@@ -65,6 +81,8 @@ export interface MyTaskItem {
     username: string;
   } | null;
   startedAt: Date | null;
+  /** Origen de insumos del área (hoja de materiales); null si no hay. */
+  supply?: unknown;
   order: {
     id: number;
     description: string;
@@ -75,6 +93,7 @@ export interface MyTaskItem {
     designStartedAt: Date | null;
     designStartedByName: string | null;
     client: { first_name: string; last_name: string | null } | null;
+    branch: { id: number; name: string } | null;
     status: { id: number; name: string };
   };
 }
@@ -99,6 +118,7 @@ const TASK_MANAGER_ROLES: string[] = [
  */
 @Injectable()
 export class OrderAreaTaskService {
+  private readonly logger = new Logger(OrderAreaTaskService.name);
   /** Resolución cacheada de ids de Status por nombre. */
   private readonly statusIds: StatusIdResolver;
 
@@ -130,7 +150,36 @@ export class OrderAreaTaskService {
           isSharedAccount: true,
         },
       },
+      // Origen de insumos del área ("del cliente — 12 playeras negras").
+      supply: TASK_SUPPLY_SELECT,
     } satisfies Prisma.OrderAreaTaskSelect;
+  }
+
+  /**
+   * Las cuentas de sucursal no ven los insumos de inventario (nombres, códigos
+   * de barras, cantidades): se quita `supply` de lo que se les devuelve.
+   */
+  private stripSupplyForBranch<T extends { supply?: unknown }>(
+    tasks: T[],
+    requestingUser?: RequestingUser,
+  ): T[];
+  private stripSupplyForBranch<T extends { supply?: unknown }>(
+    tasks: T,
+    requestingUser?: RequestingUser,
+  ): T;
+  private stripSupplyForBranch(
+    tasks: { supply?: unknown } | { supply?: unknown }[],
+    requestingUser?: RequestingUser,
+  ) {
+    if (!requestingUser || !isBranchOnlyUser(requestingUser.roles)) {
+      return tasks;
+    }
+    const strip = (task: { supply?: unknown }) => {
+      const rest = { ...task };
+      delete rest.supply;
+      return rest;
+    };
+    return Array.isArray(tasks) ? tasks.map(strip) : strip(tasks);
   }
 
   /**
@@ -138,8 +187,11 @@ export class OrderAreaTaskService {
    * defecto de sus tareas. Si el área no tiene una, la tarea queda sin asignar
    * y la toma quien la trabaje.
    */
-  private async sharedAccountIdForArea(area: string): Promise<number | null> {
-    const shared = await this.prisma.user.findFirst({
+  private async sharedAccountIdForArea(
+    area: string,
+    client: Pick<Prisma.TransactionClient, 'user'> = this.prisma,
+  ): Promise<number | null> {
+    const shared = await client.user.findFirst({
       where: { isSharedAccount: true, roles: { some: { name: area } } },
       select: { id: true },
     });
@@ -166,12 +218,13 @@ export class OrderAreaTaskService {
   async createTasksForAreas(
     orderId: number,
     areas: string[],
-    options?: { notify?: boolean },
+    options?: { notify?: boolean; tx?: Prisma.TransactionClient },
   ) {
+    const client = options?.tx ?? this.prisma;
     const unique = [...new Set(areas)];
     unique.forEach((area) => this.assertProductionArea(area));
 
-    const existing = await this.prisma.orderAreaTask.findMany({
+    const existing = await client.orderAreaTask.findMany({
       where: { orderId },
       select: { area: true },
     });
@@ -181,8 +234,8 @@ export class OrderAreaTaskService {
 
     const created = await Promise.all(
       toCreate.map(async (area) => {
-        const assignedUserId = await this.sharedAccountIdForArea(area);
-        return this.prisma.orderAreaTask.create({
+        const assignedUserId = await this.sharedAccountIdForArea(area, client);
+        return client.orderAreaTask.create({
           data: { orderId, area, assignedUserId },
           select: this.taskSelect(),
         });
@@ -246,7 +299,7 @@ export class OrderAreaTaskService {
     // Lo terminado sólo interesa reciente (columna "Terminado" del Modo TV):
     // así la respuesta no crece sin límite.
     const finishedSince = new Date(Date.now() - FINISHED_TASKS_WINDOW_MS);
-    return this.prisma.orderAreaTask.findMany({
+    const tasks = await this.prisma.orderAreaTask.findMany({
       where: {
         ...(isManager ? {} : { area: { in: ownAreas } }),
         // Los pedidos cerrados no ensucian la bandeja de trabajo, y las tareas
@@ -274,11 +327,14 @@ export class OrderAreaTaskService {
             status: { select: { id: true, name: true } },
             clientNameOverride: true,
             client: { select: { first_name: true, last_name: true } },
+            // Badge "Punto Madero" en el tablero de tareas / TV.
+            branch: BRANCH_BADGE_SELECT,
           },
         },
       },
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
     });
+    return this.stripSupplyForBranch(tasks, requestingUser);
   }
 
   /**
@@ -329,7 +385,13 @@ export class OrderAreaTaskService {
       designStartedAt: true,
       designStartedByName: true,
       client: { select: { first_name: true, last_name: true } },
+      branch: BRANCH_BADGE_SELECT,
       status: { select: { id: true, name: true } },
+      // Líneas con su desglose de tallas: Tareas/TV muestran el resumen
+      // ("General: 5 S · 2 M — 7 pzas") para que producción sepa qué cortar.
+      orderProducts: {
+        select: { customName: true, quantity: true, sizes: true },
+      },
     } satisfies Prisma.OrderSelect;
 
     const assigneeSelect = {
@@ -391,6 +453,7 @@ export class OrderAreaTaskService {
           assignedUserId: true,
           startedAt: true,
           assignedUser: assigneeSelect,
+          supply: TASK_SUPPLY_SELECT,
           order: { select: orderSelect },
         },
       });
@@ -405,6 +468,7 @@ export class OrderAreaTaskService {
           mine: isMine(task.assignedUserId),
           assignee: isFree(task.assignedUserId) ? null : task.assignedUser,
           startedAt: task.startedAt,
+          supply: serializeSupply(task.supply),
           order: task.order,
         });
       }
@@ -413,13 +477,240 @@ export class OrderAreaTaskService {
     return items;
   }
 
+  /**
+   * GET /orders/:id/area-supplies — hoja de materiales por área: origen,
+   * líneas con su estado (apartado / descontado), existencia y apartado
+   * total de cada artículo, y los movimientos de inventario que generó.
+   *
+   * Visibilidad: las cuentas de sucursal no la ven (403); un usuario de área
+   * sólo recibe las hojas (y existencias y movimientos) de SUS áreas;
+   * Recepción/admin ven todas.
+   *
+   * Una línea "nuestra" ligada a inventario de una tarea ya `terminado` que
+   * sigue sin descontar trae `pendingDiscount: true` y `shortfall` (cuánto
+   * falta de existencia; 0 si ya hay y sólo falta reintentar). Cada área
+   * trae `pendingDiscount` si alguna de sus líneas está así.
+   */
+  async getSupplySheet(orderId: number, requestingUser?: RequestingUser) {
+    let visibleAreas: string[] | null = null;
+    if (requestingUser) {
+      if (isBranchOnlyUser(requestingUser.roles)) {
+        throw new HttpException(
+          'Sin acceso a los insumos del pedido',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      if (!isFullVisibilityRole(requestingUser.roles)) {
+        visibleAreas = operationalRolesOf(requestingUser.roles);
+      }
+    }
+    const tasks = await this.prisma.orderAreaTask.findMany({
+      where: {
+        orderId,
+        ...(visibleAreas !== null && { area: { in: visibleAreas } }),
+      },
+      select: {
+        id: true,
+        area: true,
+        status: true,
+        supply: TASK_SUPPLY_SELECT,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const itemIds = [
+      ...new Set(
+        tasks.flatMap(
+          (t) =>
+            t.supply?.lines
+              .map((l) => l.inventoryItemId)
+              .filter((id): id is number => id !== null) ?? [],
+        ),
+      ),
+    ];
+    const taskIds = tasks.map((t) => t.id);
+    const [items, reserved, movements] = await Promise.all([
+      itemIds.length
+        ? this.prisma.inventoryItem.findMany({
+            where: { id: { in: itemIds } },
+            select: { id: true, quantity: true },
+          })
+        : Promise.resolve([]),
+      reservedByItem(this.prisma, itemIds),
+      taskIds.length
+        ? this.prisma.inventoryMovement.findMany({
+            where: { orderId, areaTaskId: { in: taskIds } },
+            select: {
+              id: true,
+              itemId: true,
+              type: true,
+              delta: true,
+              balanceAfter: true,
+              note: true,
+              areaTaskId: true,
+              createdAt: true,
+              item: { select: { id: true, name: true, unit: true } },
+              createdBy: {
+                select: { id: true, firstName: true, lastName: true },
+              },
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          })
+        : Promise.resolve([]),
+    ]);
+    const stock = new Map(items.map((i) => [i.id, Number(i.quantity)]));
+    return {
+      areas: tasks.map((task) => {
+        const supply = serializeSupply(task.supply);
+        const finished = task.status === AreaTaskStatus.terminado;
+        let areaPending = false;
+        const result = {
+          taskId: task.id,
+          area: task.area,
+          status: task.status,
+          supply:
+            supply &&
+            ({
+              ...supply,
+              lines: supply.lines.map((line) => {
+                const id = line.inventoryItemId;
+                if (id === null) return { ...line, stock: null };
+                const quantity = stock.get(id) ?? 0;
+                const held = reserved.get(id) ?? 0;
+                const pendingDiscount =
+                  finished &&
+                  !line.discountedAt &&
+                  supply.source === SupplySource.nosotros;
+                if (pendingDiscount) areaPending = true;
+                return {
+                  ...line,
+                  state: line.discountedAt ? 'descontado' : 'apartado',
+                  pendingDiscount,
+                  shortfall: pendingDiscount
+                    ? Math.max(0, Number(line.quantity) - quantity)
+                    : 0,
+                  stock: {
+                    quantity,
+                    reserved: held,
+                    available: quantity - held,
+                  },
+                };
+              }),
+            } as typeof supply),
+          pendingDiscount: false,
+        };
+        result.pendingDiscount = areaPending;
+        return result;
+      }),
+      movements: movements.map((m) => ({
+        ...m,
+        delta: Number(m.delta),
+        balanceAfter: Number(m.balanceAfter),
+      })),
+    };
+  }
+
+  /**
+   * PUT /orders/:id/area-supplies — corrige la hoja de materiales después de
+   * autorizar (Recepción/admin). Devuelve la hoja y los avisos de stock.
+   * 409 si la tarea ya está terminada y la hoja cambiaría.
+   */
+  async saveSupplies(
+    orderId: number,
+    supplies: AreaSupplyDto[],
+    requestingUser: RequestingUser,
+  ) {
+    const warnings = await this.prisma.$transaction(
+      (tx) => saveSuppliesTx(tx, orderId, supplies, requestingUser.userId),
+      SUPPLY_TX_OPTIONS,
+    );
+    return {
+      ...(await this.getSupplySheet(orderId, requestingUser)),
+      warnings,
+    };
+  }
+
+  /**
+   * POST /orders/:id/area-supplies/:area/discount-pending — reintenta el
+   * descuento de las líneas que quedaron sin descontar al terminar la tarea
+   * por falta de existencia (Recepción/admin, tras dar entrada al inventario).
+   * Idempotente: sólo mueve las líneas que sigan sin descontar y alcancen.
+   */
+  async discountPending(
+    orderId: number,
+    area: string,
+    requestingUser: RequestingUser,
+  ) {
+    const task = await this.prisma.orderAreaTask.findFirst({
+      where: { orderId, area },
+      select: { id: true, orderId: true, area: true },
+    });
+    if (!task) {
+      throw new HttpException(
+        `El pedido no tiene tarea de ${area}`,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const supplyResult = await this.prisma.$transaction(
+      (tx) => discountPendingSupplyTx(tx, task, requestingUser.userId),
+      SUPPLY_TX_OPTIONS,
+    );
+    await this.notifySupplyResult(task, supplyResult);
+    return this.getSupplySheet(orderId, requestingUser);
+  }
+
+  /**
+   * Avisos tras mover inventario por la hoja de materiales (fuera de la
+   * transacción y sin fallar la operación si el aviso falla): a Recepción y
+   * admin, líneas que no se pudieron descontar y artículos que cruzaron su
+   * punto de reorden.
+   */
+  private async notifySupplyResult(
+    task: { orderId: number; area: string },
+    result: SupplyInventoryResult,
+  ) {
+    if (result.pending.length === 0 && result.lowStock.length === 0) return;
+    try {
+      const audiences = await Promise.all(
+        [Role.RECEPCION, Role.ADMIN].map((role) =>
+          this.notificationService.userIdsForArea(role),
+        ),
+      );
+      const recipients = [...new Set(audiences.flat())];
+      for (const line of result.pending) {
+        await this.notificationService.createNotificationForUsers(recipients, {
+          type: 'inventory_pending_discount',
+          title: `Descuento pendiente: ${line.itemName}`,
+          body: `No se descontó ${line.itemName} del pedido #${task.orderId}: faltan ${line.missing} ${line.unit}`,
+          orderId: task.orderId,
+        });
+      }
+      for (const item of result.lowStock) {
+        await this.notificationService.createNotificationForUsers(recipients, {
+          type: 'inventory_low_stock',
+          title:
+            item.after <= 0
+              ? `Agotado: ${item.name}`
+              : `Stock bajo: ${item.name}`,
+          body: `Quedan ${item.after} ${item.unit}${
+            item.minStock !== null ? ` · mínimo ${item.minStock}` : ''
+          }`,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo avisar el descuento de insumos: ${(error as Error)?.message}`,
+      );
+    }
+  }
+
   /** Tareas de un pedido, en orden de creación. */
-  async findByOrder(orderId: number) {
-    return this.prisma.orderAreaTask.findMany({
+  async findByOrder(orderId: number, requestingUser?: RequestingUser) {
+    const tasks = await this.prisma.orderAreaTask.findMany({
       where: { orderId },
       select: this.taskSelect(),
       orderBy: { createdAt: 'asc' },
     });
+    return this.stripSupplyForBranch(tasks, requestingUser);
   }
 
   /**
@@ -462,16 +753,57 @@ export class OrderAreaTaskService {
       (await this.isUnclaimed(task.area, task.assignedUserId));
 
     const now = new Date();
-    const updated = await this.prisma.orderAreaTask.update({
-      where: { id: taskId },
-      data: {
-        status,
-        ...(shouldClaim && { assignedUserId: requestingUser.userId }),
-        ...(status === AreaTaskStatus.en_proceso && { startedAt: now }),
-        ...(status === AreaTaskStatus.terminado && { completedAt: now }),
+    // Cambio de estado + descuento/devolución de insumos "nuestros" en UNA
+    // transacción. Primero se toma el candado de la fila de la tarea y se
+    // vuelve a leer el estado: el de arriba pudo cambiar mientras tanto (dos
+    // "terminado" simultáneos), y sólo el primero debe mover el inventario.
+    // Si no alcanza el stock de alguna línea la tarea SÍ queda terminada: esa
+    // línea queda apartada (descuento pendiente) y se avisa a Recepción.
+    const { updated, supplyResult, raced } = await this.prisma.$transaction(
+      async (tx) => {
+        const current = await lockTaskStatusTx(tx, taskId);
+        if (current === null) {
+          throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
+        }
+        this.assertValidTransition(current, status);
+        if (current === status && task.status !== status) {
+          // Otra petición simultánea ya hizo este mismo cambio mientras
+          // esperábamos el candado: no se repite nada (ni inventario ni avisos).
+          return {
+            updated: await tx.orderAreaTask.findUniqueOrThrow({
+              where: { id: taskId },
+              select: this.taskSelect(),
+            }),
+            supplyResult: {
+              pending: [],
+              lowStock: [],
+            } as SupplyInventoryResult,
+            raced: true,
+          };
+        }
+        const supplyResult = await applySupplyInventoryForStatusTx(
+          tx,
+          task,
+          current,
+          status,
+          requestingUser.userId,
+        );
+        const updated = await tx.orderAreaTask.update({
+          where: { id: taskId },
+          data: {
+            status,
+            ...(shouldClaim && { assignedUserId: requestingUser.userId }),
+            ...(status === AreaTaskStatus.en_proceso && { startedAt: now }),
+            ...(status === AreaTaskStatus.terminado && { completedAt: now }),
+          },
+          select: this.taskSelect(),
+        });
+        return { updated, supplyResult, raced: false };
       },
-      select: this.taskSelect(),
-    });
+      SUPPLY_TX_OPTIONS,
+    );
+    if (raced) return this.stripSupplyForBranch(updated, requestingUser);
+    await this.notifySupplyResult(task, supplyResult);
 
     await this.syncOrderStatusFromTasks(task.orderId, requestingUser.userId);
     if (status === AreaTaskStatus.terminado) {
@@ -481,7 +813,7 @@ export class OrderAreaTaskService {
         requestingUser.userId,
       );
     }
-    return updated;
+    return this.stripSupplyForBranch(updated, requestingUser);
   }
 
   /**
@@ -533,11 +865,12 @@ export class OrderAreaTaskService {
       }
     }
 
-    return this.prisma.orderAreaTask.update({
+    const updated = await this.prisma.orderAreaTask.update({
       where: { id: taskId },
       data: { assignedUserId },
       select: this.taskSelect(),
     });
+    return this.stripSupplyForBranch(updated, requestingUser);
   }
 
   /** Quita un área del pedido (sólo Recepción/admin). */

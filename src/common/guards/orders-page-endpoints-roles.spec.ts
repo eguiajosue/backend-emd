@@ -55,25 +55,25 @@ describe('Endpoints consultados por la pantalla de Pedidos: paridad de roles', (
 
   it('GET /orders acepta todos los roles que pueden ver pedidos', () => {
     expect(rolesFor(OrderController, 'findAll')).toEqual(
-      ALL_ORDER_VIEWING_ROLES,
+      [...ALL_ORDER_VIEWING_ROLES, Role.SUCURSAL].sort(),
     );
   });
 
   it('GET /orders/:id acepta todos los roles que pueden ver pedidos', () => {
     expect(rolesFor(OrderController, 'findOne')).toEqual(
-      ALL_ORDER_VIEWING_ROLES,
+      [...ALL_ORDER_VIEWING_ROLES, Role.SUCURSAL].sort(),
     );
   });
 
   it('GET /users (usado por el filtro "Asignado a") acepta todos los roles que pueden ver pedidos', () => {
     expect(rolesFor(UserController, 'findAll')).toEqual(
-      ALL_ORDER_VIEWING_ROLES,
+      [...ALL_ORDER_VIEWING_ROLES, Role.SUCURSAL].sort(),
     );
   });
 
   it('GET /clients (usado por el filtro de cliente) acepta todos los roles que pueden ver pedidos', () => {
     expect(rolesFor(ClientController, 'findAll')).toEqual(
-      ALL_ORDER_VIEWING_ROLES,
+      [...ALL_ORDER_VIEWING_ROLES, Role.SUCURSAL].sort(),
     );
   });
 
@@ -98,10 +98,27 @@ describe('Endpoints consultados por la pantalla de Pedidos: paridad de roles', (
     ['GET /notifications/unread-count', NotificationController, 'unreadCount'],
   ];
 
+  // Endpoints que la cuenta de sucursal también consulta (sus pedidos, alta
+  // de pedido, catálogos y avisos).
+  const BRANCH_ENDPOINTS = new Set([
+    'GET /orders',
+    'GET /orders/:id',
+    'GET /users',
+    'GET /clients',
+    'GET /clients/:id',
+    'GET /order-product-presets',
+    'GET /status',
+    'GET /notifications',
+    'GET /notifications/unread-count',
+  ]);
+
   it.each(READ_ENDPOINTS)(
     '%s acepta todos los roles que pueden ver pedidos',
-    (_name, controller, method) => {
-      expect(rolesFor(controller, method)).toEqual(ALL_ORDER_VIEWING_ROLES);
+    (name, controller, method) => {
+      const expected = BRANCH_ENDPOINTS.has(name)
+        ? [...ALL_ORDER_VIEWING_ROLES, Role.SUCURSAL].sort()
+        : ALL_ORDER_VIEWING_ROLES;
+      expect(rolesFor(controller, method)).toEqual(expected);
     },
   );
 });

@@ -182,7 +182,7 @@ describe('OrderMockupService', () => {
       expect(prisma.orderMockup.create).not.toHaveBeenCalled();
     });
 
-    it.each(['hoodie', 'dress-shirt'])(
+    it.each(['hoodie', 'dress-shirt', 'termo', 'taza'])(
       'acepta %s (misma lista de prendas que las plantillas, decisión R11)',
       async (garment) => {
         await service.create(
@@ -367,7 +367,14 @@ describe('OrderMockupService', () => {
       const args = prisma.orderMockup.findMany.mock.calls[0][0];
       expect(args.where).toEqual({ orderId: 10 });
       expect(Object.keys(args.select).sort()).toEqual(
-        ['createdAt', 'createdBy', 'garment', 'id', 'orderId'].sort(),
+        [
+          'branchEmployee',
+          'createdAt',
+          'createdBy',
+          'garment',
+          'id',
+          'orderId',
+        ].sort(),
       );
       expect(args.select).not.toHaveProperty('imageData');
       expect(args.select).not.toHaveProperty('config');

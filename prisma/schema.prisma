@@ -51,9 +51,11 @@ model User {
   username        String    @unique // Nombre de usuario único para iniciar sesión.
   password        String // Contraseña del usuario.
   isSharedAccount Boolean   @default(false) // Cuenta compartida por varias personas de un área (ej. "Taller"), en vez de una persona.
+  branchId        Int? // Sucursal a la que pertenece la cuenta (sólo rol 'sucursal'; ej. "Punto Madero"). Null = usuario de la matriz.
   lastSeenAt      DateTime? // Última vez que se desconectó el último socket vivo de este usuario (ver NotificationsGateway.handleDisconnect). Null si nunca se conectó por WebSocket.
 
   roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
+  branch                  Branch?                  @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de la cuenta (ver Branch).
   orders                  Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
   assignedOrders          Order[]                  @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
   attendedOrders          Order[]                  @relation("AttendedOrders") // Pedidos de Recepción que esta persona está atendiendo (los tomó de otra recepcionista).
@@ -76,6 +78,8 @@ model User {
   calendarTasks           CalendarTask[]           @relation("CalendarTaskCreatedBy") // Tareas pendientes (sin fecha) del calendario de equipo creadas por este usuario.
   orderMaterialItems      OrderMaterialItem[]      @relation("OrderMaterialItemCreatedBy") // Líneas de hoja de materiales cargadas por este usuario.
   inventoryMovements      InventoryMovement[]      @relation("InventoryMovementCreatedBy") // Entradas/salidas/ajustes de inventario registrados por este usuario.
+  restockRequests         RestockRequest[]         @relation("RestockRequestRequestedBy") // Avisos de reabasto que levantó.
+  restockRequestsHandled  RestockRequest[]         @relation("RestockRequestHandledBy") // Avisos de reabasto que atendió (Recepción/admin).
   orderMockupsCreated     OrderMockup[]            @relation("OrderMockupCreatedBy") // Mockups 3D (playera/gorra) que este usuario adjuntó a un pedido.
   mockupTemplatesCreated  MockupTemplate[]         @relation("MockupTemplateCreatedBy") // Plantillas de mockup (compartidas por la empresa) que guardó este usuario.
   mockupLogosCreated      MockupLogo[]             @relation("MockupLogoCreatedBy") // Logos de la biblioteca de mockups (compartida por la empresa) que subió este usuario.
@@ -129,6 +133,9 @@ model Order {
   designStartedByName   String? // Quién lo empezó, tal cual se muestra. Con la cuenta compartida del área es el nombre que escribe la persona; si no, el nombre del usuario.
   designStartedByUserId Int? // Usuario (cuenta) desde el que se empezó; sin relación, sólo para auditoría.
 
+  branchId         Int? // Sucursal desde la que se levantó el pedido (ej. "Punto Madero"). Null = pedido de la matriz.
+  branchEmployeeId Int? // Empleado de la sucursal que levantó el pedido (obligatorio al crear desde la cuenta de sucursal).
+
   materialsPriority Int? // Orden de prioridad de compra elegido a mano (drag & drop) en "Hoja de Materiales". null = todavía no se reordenó (va al final, por id). Se reasigna 0..n-1 sobre TODOS los pedidos activos cada vez que se reordena.
 
   // Recursos que manda el CLIENTE para poder hacer el diseño (logo,
@@ -159,6 +166,8 @@ model Order {
   inventoryMovements InventoryMovement[] // Consumos de inventario imputados a este pedido (opcional).
   mockups            OrderMockup[] // Mockups 3D (playera/gorra con los diseños del cliente) adjuntados al pedido.
   quote              Quote? // Cotización aceptada que se convirtió en este pedido (si vino de una).
+  branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de origen (si vino de una).
+  branchEmployee     BranchEmployee?     @relation(fields: [branchEmployeeId], references: [id], onDelete: SetNull) // Empleado de la sucursal que lo levantó.
 
   @@index([statusId])
   @@index([clientId])
@@ -169,6 +178,7 @@ model Order {
   @@index([creationDate])
   @@index([area])
   @@index([materialsPriority])
+  @@index([branchId])
 }
 
 model DesignRevision {
@@ -305,8 +315,9 @@ model OrderAreaTask {
   startedAt      DateTime? // Cuándo pasó a en_proceso.
   completedAt    DateTime? // Cuándo pasó a terminado.
 
-  order        Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  assignedUser User? @relation("AssignedAreaTasks", fields: [assignedUserId], references: [id])
+  order        Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  assignedUser User?            @relation("AssignedAreaTasks", fields: [assignedUserId], references: [id])
+  supply       OrderAreaSupply? // Hoja de materiales del área: de dónde salen los insumos (ver WORKFLOW.md §3).
 
   // Un área no puede aparecer dos veces en el mismo pedido.
   @@unique([orderId, area])
@@ -329,6 +340,7 @@ model OrderProduct {
   orderId    Int // Clave foránea que referencia a Order.
   customName String // Nombre del producto, escrito a mano o elegido de OrderProductPreset.
   quantity   Int // Cantidad del producto en la orden.
+  sizes      Json? // Desglose de tallas de prendas: { general?: {S:5,…}, mujer?: {…}, youth?: {…} } (src/common/garment-sizes.ts). null = sin tallas. Si existe, su total = quantity.
 
   order Order @relation(fields: [orderId], references: [id]) // Relación con Order.
 
@@ -737,9 +749,11 @@ model InventoryItem {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  material  Material?           @relation(fields: [materialId], references: [id], onDelete: SetNull)
-  supplier  Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  movements InventoryMovement[]
+  material        Material?             @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  supplier        Supplier?             @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  movements       InventoryMovement[]
+  supplyLines     OrderAreaSupplyLine[] // Líneas de hojas de materiales que apartan este artículo.
+  restockRequests RestockRequest[]
 
   @@unique([area, sku])
   @@index([area])
@@ -748,16 +762,21 @@ model InventoryItem {
 }
 
 model InventoryMovement {
-  id           Int                   @id @default(autoincrement())
-  itemId       Int
-  type         InventoryMovementType
-  delta        Decimal               @db.Decimal(12, 3) // Cambio con signo aplicado al stock (+ entrada, - salida, ± ajuste).
-  balanceAfter Decimal               @db.Decimal(12, 3) // Stock resultante, para leer el kardex sin recalcular.
-  unitCost     Decimal?              @db.Decimal(10, 2) // Costo unitario de esta entrada (si se informó).
-  note         String?
-  orderId      Int? // Pedido al que se imputa el consumo (opcional).
-  createdById  Int
-  createdAt    DateTime              @default(now())
+  id            Int                   @id @default(autoincrement())
+  itemId        Int
+  type          InventoryMovementType
+  delta         Decimal               @db.Decimal(12, 3) // Cambio con signo aplicado al stock (+ entrada, - salida, ± ajuste).
+  balanceAfter  Decimal               @db.Decimal(12, 3) // Stock resultante, para leer el kardex sin recalcular.
+  unitCost      Decimal?              @db.Decimal(10, 2) // Costo unitario de esta entrada (si se informó).
+  note          String?
+  orderId       Int? // Pedido al que se imputa el consumo (opcional).
+  areaTaskId    Int? // Tarea de área cuyo "terminado" generó el movimiento (descuento automático de la hoja de materiales).
+  createdById   Int // Quién registró el movimiento (bitácora).
+  balanceBefore Decimal?              @db.Decimal(12, 3) // Stock antes del movimiento (bitácora: antes/después). Null en movimientos previos a la bitácora.
+  area          String? // Departamento del artículo al momento del movimiento (la bitácora no cambia si luego se reasigna).
+  reason        String? // Motivo capturado ("Se trajo directo al área", "Consumo pedido 123"...).
+  source        String? // Origen: "recepcion" (gestión), "area" (usuario de producción), "scan" (escáner), "inicial" (stock inicial).
+  createdAt     DateTime              @default(now())
 
   item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   order     Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
@@ -765,7 +784,91 @@ model InventoryMovement {
 
   @@index([itemId, createdAt])
   @@index([orderId])
+  @@index([areaTaskId])
   @@index([createdAt])
+  @@index([area, createdAt])
+  @@index([createdById, createdAt])
+}
+
+enum RestockRequestStatus {
+  PENDIENTE // Recién avisada por el área; Recepción no la ha atendido.
+  EN_CAMINO // Recepción ya pidió el insumo y viene en camino.
+  COMPRADO // Ya se compró; falta entregarlo/darle entrada.
+  RESUELTO // Entregado o descartado: cierra la solicitud.
+}
+
+enum RestockRequestUrgency {
+  NORMAL
+  URGENTE
+}
+
+// Aviso de "se acabó / requiere reabasto" que un área de producción levanta
+// para Recepción. Puede apuntar a un artículo del inventario del área o ser
+// texto libre (insumo que todavía no está dado de alta).
+model RestockRequest {
+  id            Int                   @id @default(autoincrement())
+  area          String // Departamento que pide (uno de INVENTORY_AREAS).
+  itemId        Int? // Artículo del inventario, si se eligió uno.
+  itemName      String // Nombre del insumo (copia del artículo o texto libre).
+  quantity      Decimal?              @db.Decimal(12, 3) // Cantidad sugerida (opcional).
+  unit          String?
+  comment       String?
+  urgency       RestockRequestUrgency @default(NORMAL)
+  status        RestockRequestStatus  @default(PENDIENTE)
+  statusNote    String? // Nota de Recepción al cambiar el estado ("Llega el jueves").
+  requestedById Int
+  handledById   Int? // Último usuario de Recepción/admin que cambió el estado.
+  resolvedAt    DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  item        InventoryItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  requestedBy User           @relation("RestockRequestRequestedBy", fields: [requestedById], references: [id])
+  handledBy   User?          @relation("RestockRequestHandledBy", fields: [handledById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([area, createdAt])
+  @@index([itemId])
+}
+
+// ─── Hoja de materiales por área (origen de insumos) ───────────────────────
+//
+// Se captura cuando Recepción marca que el cliente autorizó el montaje: por
+// cada tarea de área del pedido se indica si los insumos los trae el cliente
+// o los ponemos nosotros. Los "nuestros" ligados a inventario quedan
+// APARTADOS al guardar y se DESCUENTAN (SALIDA) cuando el área marca su tarea
+// como terminada; si la tarea regresa de terminado se devuelven (ENTRADA).
+
+enum SupplySource {
+  cliente // Lo trae el cliente: nunca toca inventario.
+  nosotros // Lo ponemos nosotros: sale del inventario del taller.
+}
+
+model OrderAreaSupply {
+  id          Int          @id @default(autoincrement())
+  areaTaskId  Int          @unique
+  source      SupplySource
+  createdById Int
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  areaTask OrderAreaTask         @relation(fields: [areaTaskId], references: [id], onDelete: Cascade)
+  lines    OrderAreaSupplyLine[]
+}
+
+model OrderAreaSupplyLine {
+  id              Int       @id @default(autoincrement())
+  supplyId        Int
+  inventoryItemId Int? // Sólo en origen "nosotros"; null = línea de texto libre (no está en inventario).
+  description     String // "12 playeras negras del cliente", "Film DTF".
+  quantity        Decimal   @db.Decimal(12, 3)
+  discountedAt    DateTime? // Cuándo se descontó del stock (null = apartado / sin descontar).
+
+  supply        OrderAreaSupply @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem?  @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([supplyId])
+  @@index([inventoryItemId])
 }
 
 // ─── Plantillas de pedido por cliente ──────────────────────────────────────
@@ -864,18 +967,20 @@ model ClientInsight {
 // `imageData`/`config` (cada fila puede pesar varios MB).
 
 model OrderMockup {
-  id          Int      @id @default(autoincrement()) // Identificador único del mockup.
-  orderId     Int // Clave foránea que referencia al Order al que se adjuntó.
-  garment     String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
-  imageData   String? // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada. Legacy: null si está en el almacenamiento de objetos.
-  imageKey    String? // Clave del objeto (R2/S3) de la lámina. Si está, manda sobre imageData.
-  imageMime   String // Mime type de la lámina: image/png | image/jpeg.
-  config      Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) para volver a editarlo.
-  createdById Int? // Clave foránea que referencia al User que lo adjuntó (null si ese usuario se borró).
-  createdAt   DateTime @default(now()) // Fecha en que se adjuntó el mockup.
+  id               Int      @id @default(autoincrement()) // Identificador único del mockup.
+  orderId          Int // Clave foránea que referencia al Order al que se adjuntó.
+  garment          String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' | 'termo' | 'taza' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
+  imageData        String? // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada. Legacy: null si está en el almacenamiento de objetos.
+  imageKey         String? // Clave del objeto (R2/S3) de la lámina. Si está, manda sobre imageData.
+  imageMime        String // Mime type de la lámina: image/png | image/jpeg.
+  config           Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) para volver a editarlo.
+  createdById      Int? // Clave foránea que referencia al User que lo adjuntó (null si ese usuario se borró).
+  branchEmployeeId Int? // Empleado de la sucursal que lo armó (opcional; sólo desde la cuenta de sucursal).
+  createdAt        DateTime @default(now()) // Fecha en que se adjuntó el mockup.
 
-  order     Order @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order: se borra junto con el pedido.
-  createdBy User? @relation("OrderMockupCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que lo adjuntó.
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order: se borra junto con el pedido.
+  createdBy      User?           @relation("OrderMockupCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que lo adjuntó.
+  branchEmployee BranchEmployee? @relation(fields: [branchEmployeeId], references: [id], onDelete: SetNull) // Empleado de la sucursal que lo armó.
 
   @@index([orderId])
 }
@@ -892,7 +997,7 @@ model OrderMockup {
 model MockupTemplate {
   id            Int      @id @default(autoincrement()) // Identificador único de la plantilla.
   name          String // Nombre que le puso el usuario (máx. 80 caracteres).
-  garment       String // Prenda de la plantilla: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
+  garment       String // Prenda de la plantilla: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' | 'termo' | 'taza' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
   config        Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) que se aplica al elegirla. Máx. 8MB.
   thumbnailData String? // Miniatura en base64 (sin prefijo data:), PNG o JPEG, máx. 96KB decodificada. Se lista junto con la plantilla. Legacy: null si está en el almacenamiento de objetos.
   thumbnailKey  String? // Clave del objeto (R2/S3) de la miniatura. Si está, manda sobre thumbnailData.
@@ -957,4 +1062,39 @@ model Quote {
   @@index([priorityDate]) // Prioridad vencida/hoy/mañana primero.
   @@index([updatedAt]) // Luego, lo último que se movió.
   @@index([clientId]) // Cotizaciones de un cliente (y el SET NULL al borrarlo).
+}
+
+// ─── Sucursales ────────────────────────────────────────────────────────────
+//
+// Una sucursal (ej. "Punto Madero") es una extensión de la matriz, no otra
+// empresa: entra con UNA cuenta compartida (rol 'sucursal', User.branchId) que
+// sólo puede levantar pedidos, usar Mockups y ver sus propios pedidos. Quién
+// levantó cada pedido se elige de la lista de empleados de la sucursal, que
+// administra admin desde Usuarios. Ver BranchService.
+
+model Branch {
+  id        Int      @id @default(autoincrement()) // Identificador único de la sucursal.
+  name      String   @unique // Nombre visible (ej. "Punto Madero"); se muestra como badge en pedidos.
+  active    Boolean  @default(true) // Sucursal inactiva: su cuenta no puede levantar pedidos.
+  createdAt DateTime @default(now()) // Fecha de alta.
+
+  users     User[] // Cuentas de la sucursal (normalmente una compartida).
+  employees BranchEmployee[] // Empleados que levantan pedidos desde la cuenta compartida.
+  orders    Order[] // Pedidos levantados desde la sucursal.
+}
+
+model BranchEmployee {
+  id        Int      @id @default(autoincrement()) // Identificador único del empleado.
+  branchId  Int // Clave foránea que referencia a Branch.
+  name      String // Nombre visible (ej. "Ana López"), máx. 80 caracteres.
+  active    Boolean  @default(true) // Inactivo = ya no aparece para elegir al crear pedidos (los pedidos viejos lo siguen mostrando).
+  createdAt DateTime @default(now()) // Fecha de alta.
+  updatedAt DateTime @updatedAt // Última modificación (renombrar / activar).
+
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade) // Sucursal a la que pertenece.
+  orders       Order[] // Pedidos que levantó.
+  orderMockups OrderMockup[] // Mockups que armó.
+
+  @@unique([branchId, name])
+  @@index([branchId])
 }

@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { normalizeSizeBreakdown } from './garment-sizes';
 
 /**
  * Validaciones compartidas por los módulos de mockups (`order-mockup`,
@@ -127,6 +128,11 @@ export function assertMockupConfigShape(
     ) {
       throw invalid(`Cada diseño ${of} debe ser una imagen PNG`);
     }
+  }
+  // Tallas opcionales (panel "Tallas" del estudio). Mockups viejos no las
+  // traen; si vienen, mismas reglas que en las líneas del pedido.
+  if (config.sizes !== undefined) {
+    normalizeSizeBreakdown(config.sizes, `Las tallas ${of}`);
   }
 }
 

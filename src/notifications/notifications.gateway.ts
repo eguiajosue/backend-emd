@@ -23,6 +23,8 @@ interface OrderNotificationPayload {
   clientName?: string;
   createdBy?: string;
   status?: string;
+  /** Pedido levantado desde una sucursal (ej. "Punto Madero"). */
+  branchName?: string;
 }
 
 /** Payload de las notificaciones dirigidas (por usuario o por área) de un pedido nuevo. */
@@ -226,6 +228,10 @@ export class NotificationsGateway
 
     if (order && order.id && order.clientName && order.createdBy) {
       this.server.to('admin').emit('newOrderNotification', order);
+      // Los pedidos de sucursal los recibe Recepción de la matriz.
+      if (order.branchName) {
+        this.server.to('recepcion').emit('newOrderNotification', order);
+      }
       this.logger.log(`Notification sent to admin: Order ID ${order.id}`);
     } else {
       this.logger.warn('Invalid order data received for notification', order);

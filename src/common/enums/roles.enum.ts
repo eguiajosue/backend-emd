@@ -8,4 +8,9 @@ export enum Role {
   DISENO = 'diseno',
   LASER = 'laser',
   IMPRESIONES = 'impresiones',
+  /**
+   * Cuenta compartida de una sucursal (ej. "Punto Madero", ver Branch). Sólo
+   * levanta pedidos, usa Mockups y ve SUS pedidos (filtrados por sucursal).
+   */
+  SUCURSAL = 'sucursal',
 }

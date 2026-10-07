@@ -482,33 +482,140 @@ describe('OrderService - flujo de diseño', () => {
   });
 
   describe('approveDesignRevision', () => {
+    /** Cliente de la transacción interactiva de la autorización. */
+    let tx: Record<string, Record<string, jest.Mock>>;
+    const clienteBordado = {
+      supplies: [
+        {
+          area: 'bordado' as const,
+          source: 'cliente' as const,
+          lines: [
+            { description: '12 playeras negras del cliente', quantity: 12 },
+          ],
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      tx = {
+        designRevision: { update: jest.fn().mockResolvedValue({ id: 100 }) },
+        order: { update: prisma.order.update },
+        orderAuditLog: { create: jest.fn() },
+        orderAreaTask: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([
+              { id: 70, area: 'bordado', status: 'pendiente', supply: null },
+            ]),
+        },
+        // Candado de las tareas al guardar la hoja.
+        $queryRaw: jest.fn().mockResolvedValue([]) as unknown as Record<
+          string,
+          jest.Mock
+        >,
+        inventoryItem: { findMany: jest.fn().mockResolvedValue([]) },
+        orderAreaSupply: { create: jest.fn(), update: jest.fn() },
+        orderAreaSupplyLine: {
+          findMany: jest.fn().mockResolvedValue([]),
+          deleteMany: jest.fn(),
+        },
+      };
+      prisma.$transaction.mockImplementation((fn: (t: unknown) => unknown) =>
+        fn(tx),
+      );
+    });
+
     it('archiva el pedido (archivedAt) al autorizar', async () => {
-      await orderService.approveDesignRevision(1, 100, {}, receptionist);
+      await orderService.approveDesignRevision(
+        1,
+        100,
+        clienteBordado,
+        receptionist,
+      );
 
       const orderUpdate = prisma.order.update.mock.calls.at(-1)?.[0];
       expect(orderUpdate.data.archivedAt).toBeInstanceOf(Date);
     });
 
-    it('rechaza autorizar sin ninguna línea cargada en la hoja de materiales', async () => {
+    it('ya no exige líneas de compra: basta la hoja de origen de insumos', async () => {
       prisma.orderMaterialItem.count.mockResolvedValue(0);
 
+      await expect(
+        orderService.approveDesignRevision(
+          1,
+          100,
+          clienteBordado,
+          receptionist,
+        ),
+      ).resolves.toMatchObject({ supplyWarnings: [] });
+    });
+
+    it('rechaza autorizar sin la hoja de materiales de cada área', async () => {
       await expect(
         orderService.approveDesignRevision(1, 100, {}, receptionist),
       ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('con al menos un material cargado, autoriza sin problema', async () => {
-      prisma.orderMaterialItem.count.mockResolvedValue(3);
+    it('rechaza origen "nosotros" sin insumos', async () => {
+      await expect(
+        orderService.approveDesignRevision(
+          1,
+          100,
+          { supplies: [{ area: 'bordado', source: 'nosotros', lines: [] }] },
+          receptionist,
+        ),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('crea la hoja en la misma transacción que la autorización', async () => {
+      await orderService.approveDesignRevision(
+        1,
+        100,
+        clienteBordado,
+        receptionist,
+      );
+
+      expect(tx.designRevision.update).toHaveBeenCalled();
+      expect(tx.orderAreaSupply.create).toHaveBeenCalledWith({
+        data: {
+          areaTaskId: 70,
+          source: 'cliente',
+          createdById: receptionist.userId,
+          lines: {
+            create: [
+              expect.objectContaining({
+                inventoryItemId: null,
+                description: '12 playeras negras del cliente',
+              }),
+            ],
+          },
+        },
+      });
+    });
+
+    it('si la hoja falla, la autorización no se completa (sin avisos)', async () => {
+      tx.orderAreaTask.findMany.mockResolvedValue([]);
 
       await expect(
-        orderService.approveDesignRevision(1, 100, {}, receptionist),
-      ).resolves.toBeDefined();
+        orderService.approveDesignRevision(
+          1,
+          100,
+          clienteBordado,
+          receptionist,
+        ),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+      expect(notificationService.createNotification).not.toHaveBeenCalled();
     });
-    it('avisa al diseñador que armó la ronda que el cliente autorizó', async () => {
-      prisma.orderMaterialItem.count.mockResolvedValue(1);
 
-      await orderService.approveDesignRevision(1, 100, {}, receptionist);
+    it('avisa al diseñador que armó la ronda que el cliente autorizó', async () => {
+      await orderService.approveDesignRevision(
+        1,
+        100,
+        clienteBordado,
+        receptionist,
+      );
 
       expect(notificationService.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 5, type: 'design_approved' }),
