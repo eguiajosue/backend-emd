@@ -69,6 +69,45 @@ describe('assertMockupConfigShape con tallas', () => {
   });
 });
 
+describe('assertMockupConfigShape con vehiclePart (rotulaciones)', () => {
+  const trailer = { garment: 'trailer', colors: {}, layers: [] };
+  it('acepta un tráiler sin vehiclePart (mockups viejos)', () => {
+    expect(() =>
+      assertMockupConfigShape(trailer, 'trailer', 'del mockup'),
+    ).not.toThrow();
+  });
+  it.each(['full', 'cab', 'box'])(
+    'acepta vehiclePart %s en el tráiler',
+    (p) => {
+      expect(() =>
+        assertMockupConfigShape(
+          { ...trailer, vehiclePart: p },
+          'trailer',
+          'del mockup',
+        ),
+      ).not.toThrow();
+    },
+  );
+  it.each(['completo', '', null, 3])('rechaza vehiclePart %p', (p) => {
+    expect(() =>
+      assertMockupConfigShape(
+        { ...trailer, vehiclePart: p },
+        'trailer',
+        'del mockup',
+      ),
+    ).toThrow(/tráiler debe ser completo/);
+  });
+  it('rechaza vehiclePart en un vehículo que no es tráiler', () => {
+    expect(() =>
+      assertMockupConfigShape(
+        { garment: 'car', colors: {}, layers: [], vehiclePart: 'cab' },
+        'car',
+        'de la plantilla',
+      ),
+    ).toThrow(/sólo aplica al tráiler/);
+  });
+});
+
 describe('OrderService - líneas con tallas', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { OrderService } = require('src/order/order.service');
