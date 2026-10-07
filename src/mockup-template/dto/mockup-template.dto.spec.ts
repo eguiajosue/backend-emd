@@ -35,14 +35,23 @@ describe('CreateMockupTemplateDto', () => {
     ).toEqual([]);
   });
 
-  it.each(['tshirt', 'cap', 'hoodie', 'dress-shirt', 'termo', 'taza'])(
-    'acepta la prenda %s',
-    async (garment) => {
-      expect(
-        await errorsFor(CreateMockupTemplateDto, { ...valid, garment }),
-      ).toEqual([]);
-    },
-  );
+  it.each([
+    'tshirt',
+    'cap',
+    'hoodie',
+    'dress-shirt',
+    'termo',
+    'taza',
+    'car',
+    'minivan',
+    'pickup',
+    'trailer',
+    'bicycle',
+  ])('acepta la prenda %s', async (garment) => {
+    expect(
+      await errorsFor(CreateMockupTemplateDto, { ...valid, garment }),
+    ).toEqual([]);
+  });
 
   it('rechaza prenda desconocida, nombre vacío o largo, config array y sin miniatura', async () => {
     expect(

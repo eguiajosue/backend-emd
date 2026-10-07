@@ -179,22 +179,30 @@ describe('MockupTemplateService', () => {
       expect(result).toEqual(SUMMARY);
     });
 
-    it.each(['cap', 'hoodie', 'dress-shirt', 'termo', 'taza'])(
-      'acepta la prenda %s con miniatura JPEG',
-      async (garment) => {
-        await service.create(
-          dto({
-            garment,
-            config: config({ garment }),
-            thumbnailDataUrl: `data:image/jpeg;base64,${MINIMAL_JPEG_BASE64}`,
-          }),
-          7,
-        );
-        const { data } = prisma.mockupTemplate.create.mock.calls[0][0];
-        expect(data.garment).toBe(garment);
-        expect(data.thumbnailMime).toBe('image/jpeg');
-      },
-    );
+    it.each([
+      'cap',
+      'hoodie',
+      'dress-shirt',
+      'termo',
+      'taza',
+      'car',
+      'minivan',
+      'pickup',
+      'trailer',
+      'bicycle',
+    ])('acepta la prenda %s con miniatura JPEG', async (garment) => {
+      await service.create(
+        dto({
+          garment,
+          config: config({ garment }),
+          thumbnailDataUrl: `data:image/jpeg;base64,${MINIMAL_JPEG_BASE64}`,
+        }),
+        7,
+      );
+      const { data } = prisma.mockupTemplate.create.mock.calls[0][0];
+      expect(data.garment).toBe(garment);
+      expect(data.thumbnailMime).toBe('image/jpeg');
+    });
 
     it.each<[string, Partial<Record<keyof CreateMockupTemplateDto, unknown>>]>([
       ['nombre vacío', { name: '   ' }],

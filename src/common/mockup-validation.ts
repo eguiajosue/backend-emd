@@ -1,5 +1,9 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { normalizeSizeBreakdown } from './garment-sizes';
+import {
+  isMockupVehiclePart,
+  MOCKUP_VEHICLE_PART_MESSAGE,
+} from './mockup-garments';
 
 /**
  * Validaciones compartidas por los módulos de mockups (`order-mockup`,
@@ -133,6 +137,18 @@ export function assertMockupConfigShape(
   // traen; si vienen, mismas reglas que en las líneas del pedido.
   if (config.sizes !== undefined) {
     normalizeSizeBreakdown(config.sizes, `Las tallas ${of}`);
+  }
+  // Parte del tráiler que se rotula (Rotulaciones). Opcional; sólo el tráiler
+  // la usa ('full' | 'cab' | 'box'). Los demás mockups no la traen.
+  if (config.vehiclePart !== undefined) {
+    if (garment !== 'trailer') {
+      throw invalid(
+        `La parte del vehículo sólo aplica al tráiler (configuración ${of})`,
+      );
+    }
+    if (!isMockupVehiclePart(config.vehiclePart)) {
+      throw invalid(MOCKUP_VEHICLE_PART_MESSAGE);
+    }
   }
 }
 
