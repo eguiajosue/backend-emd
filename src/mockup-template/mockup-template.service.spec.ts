@@ -179,7 +179,7 @@ describe('MockupTemplateService', () => {
       expect(result).toEqual(SUMMARY);
     });
 
-    it.each(['cap', 'hoodie', 'dress-shirt'])(
+    it.each(['cap', 'hoodie', 'dress-shirt', 'termo', 'taza'])(
       'acepta la prenda %s con miniatura JPEG',
       async (garment) => {
         await service.create(
