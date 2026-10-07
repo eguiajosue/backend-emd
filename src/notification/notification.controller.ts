@@ -29,12 +29,12 @@ export class NotificationController {
     @Query() query: PaginationQueryDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.notificationService.findAllForUser(user.sub, query);
+    return this.notificationService.findAllForUser(user.sub, query, user.roles);
   }
 
   @Get('unread-count')
   unreadCount(@ActiveUser() user: AccessTokenPayload) {
-    return this.notificationService.unreadCount(user.sub);
+    return this.notificationService.unreadCount(user.sub, user.roles);
   }
 
   @Patch(':id/read')

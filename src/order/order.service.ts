@@ -1068,7 +1068,7 @@ export class OrderService {
       const visibilityWhere = this.orderVisibilityWhere(requestingUser);
       // Filtros opcionales (q, statusId, from, to) SIEMPRE en AND con la
       // visibilidad del rol: nunca amplían lo que el usuario puede ver.
-      const filters = this.listFiltersWhere(query);
+      const filters = this.listFiltersWhere(query, requestingUser);
       const where: Prisma.OrderWhereInput | null =
         visibilityWhere === null
           ? null
@@ -1186,10 +1186,27 @@ export class OrderService {
    * empresa), estado y rango de fecha de creación. `to` sólo con fecha
    * (YYYY-MM-DD) incluye todo ese día.
    */
-  private listFiltersWhere(query?: OrderListQueryDto): Prisma.OrderWhereInput {
+  private listFiltersWhere(
+    query?: OrderListQueryDto,
+    requestingUser?: RequestingUser,
+  ): Prisma.OrderWhereInput {
     if (!query) return {};
     const q = query.q?.trim();
     const { statusId, from, to } = query;
+    // Origen (`origin`) y sucursal (`branchId`): SÓLO para quien no es cuenta
+    // de sucursal. A la sucursal se le ignoran por completo (su visibilidad ya
+    // la fuerza `orderVisibilityWhere` a su propia sucursal). Van en AND entre
+    // sí y con la visibilidad, así que nunca amplían nada.
+    const originFilters: Prisma.OrderWhereInput[] =
+      requestingUser && isBranchOnlyUser(requestingUser.roles)
+        ? []
+        : [
+            ...(query.origin === 'matriz' ? [{ branchId: null }] : []),
+            ...(query.origin === 'sucursal'
+              ? [{ branchId: { not: null } }]
+              : []),
+            ...(query.branchId ? [{ branchId: query.branchId }] : []),
+          ];
     const idMatch =
       q && /^#?\d{1,9}$/.test(q) ? Number(q.replace('#', '')) : null;
     const toDate = to
@@ -1197,6 +1214,7 @@ export class OrderService {
       : undefined;
     const text = { contains: q, mode: 'insensitive' as const };
     return {
+      ...(originFilters.length > 0 && { AND: originFilters }),
       ...(q && {
         OR: [
           ...(idMatch !== null ? [{ id: idMatch }] : []),
@@ -1608,6 +1626,8 @@ export class OrderService {
           id: updatedOrder.id,
           status: updatedOrder.status.name,
           previousStatus: existingOrder.status.name,
+          // Sólo para enrutar el aviso: la sucursal dueña lo recibe, las demás no.
+          branchId: updatedOrder.branchId,
         };
         this.notificationsGateway.notifyOrderStatusChange(
           orderStatusChangeData,

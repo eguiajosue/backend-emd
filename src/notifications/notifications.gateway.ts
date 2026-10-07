@@ -17,6 +17,18 @@ import {
   parseAllowedOrigins,
 } from '../common/cors-origin';
 import { PrismaService } from '../prisma/prisma.service';
+import { isBranchOnlyUser } from '../branch/branch-access';
+
+/**
+ * Room de las cuentas que SÓLO son de sucursal. Los avisos de pedidos que no
+ * van dirigidos a un room concreto (broadcast) salen con `except` de este
+ * room, para que una sucursal no se entere de pedidos de la matriz ni de otra
+ * sucursal.
+ */
+export const BRANCH_ONLY_ROOM = 'branch-only';
+
+/** Room de las cuentas de UNA sucursal (para avisos de sus propios pedidos). */
+export const branchRoom = (branchId: number) => `branch:${branchId}`;
 
 interface OrderNotificationPayload {
   id: number | string;
@@ -25,6 +37,8 @@ interface OrderNotificationPayload {
   status?: string;
   /** Pedido levantado desde una sucursal (ej. "Punto Madero"). */
   branchName?: string;
+  /** Sucursal dueña del pedido (null/ausente = matriz). Sólo enruta el aviso. */
+  branchId?: number | null;
 }
 
 /** Payload de las notificaciones dirigidas (por usuario o por área) de un pedido nuevo. */
@@ -162,6 +176,13 @@ export class NotificationsGateway
 
       const roles = decoded.roles ?? [];
       roles.forEach((role) => client.join(role));
+      // Cuenta sólo-sucursal: se marca para excluirla de los broadcasts de
+      // pedidos y se une al room de SU sucursal (avisos de sus pedidos).
+      if (isBranchOnlyUser(roles)) {
+        client.join(BRANCH_ONLY_ROOM);
+        const branchId = await this.branchIdOfUser(decoded.sub);
+        if (branchId != null) client.join(branchRoom(branchId));
+      }
       // Room individual por usuario, para notificaciones dirigidas
       // (ej. pedido asignado directamente a él).
       if (decoded.sub != null) {
@@ -186,6 +207,22 @@ export class NotificationsGateway
       this.logger.error(`Client disconnected: Invalid token`, error.message);
       client.disconnect();
       return;
+    }
+  }
+
+  private async branchIdOfUser(userId: number): Promise<number | null> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { branchId: true },
+      });
+      return user?.branchId ?? null;
+    } catch (error) {
+      this.logger.error(
+        `No se pudo leer la sucursal del usuario ${userId}`,
+        error.message,
+      );
+      return null;
     }
   }
 
@@ -286,7 +323,18 @@ export class NotificationsGateway
    */
   notifyOrderStatusChange(order: OrderNotificationPayload) {
     if (order && order.id && order.status) {
-      this.server.emit('orderStatusChangeNotification', order);
+      // Antes era un broadcast a TODOS los sockets: una cuenta de sucursal
+      // recibía el estado de pedidos de la matriz y de otras sucursales. Ahora
+      // sale a todos menos a las cuentas sólo-sucursal, y a la sucursal dueña
+      // del pedido (si la tiene) por su room.
+      this.server
+        .except(BRANCH_ONLY_ROOM)
+        .emit('orderStatusChangeNotification', order);
+      if (order.branchId != null) {
+        this.server
+          .to(branchRoom(order.branchId))
+          .emit('orderStatusChangeNotification', order);
+      }
       this.logger.log(
         `Order status change notification sent: Order ID ${order.id}, Status ${order.status}`,
       );
