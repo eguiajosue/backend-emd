@@ -329,6 +329,7 @@ model OrderProduct {
   orderId    Int // Clave foránea que referencia a Order.
   customName String // Nombre del producto, escrito a mano o elegido de OrderProductPreset.
   quantity   Int // Cantidad del producto en la orden.
+  sizes      Json? // Desglose de tallas de prendas: { general?: {S:5,…}, mujer?: {…}, youth?: {…} } (src/common/garment-sizes.ts). null = sin tallas. Si existe, su total = quantity.
 
   order Order @relation(fields: [orderId], references: [id]) // Relación con Order.
 
