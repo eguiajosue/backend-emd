@@ -330,6 +330,11 @@ export class OrderAreaTaskService {
       designStartedByName: true,
       client: { select: { first_name: true, last_name: true } },
       status: { select: { id: true, name: true } },
+      // Líneas con su desglose de tallas: Tareas/TV muestran el resumen
+      // ("General: 5 S · 2 M — 7 pzas") para que producción sepa qué cortar.
+      orderProducts: {
+        select: { customName: true, quantity: true, sizes: true },
+      },
     } satisfies Prisma.OrderSelect;
 
     const assigneeSelect = {
