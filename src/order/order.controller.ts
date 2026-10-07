@@ -45,6 +45,7 @@ import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { toCsv } from 'src/common/utils/csv';
+import { ORDER_VIEWING_ROLES_WITH_BRANCH } from 'src/common/constants/order-viewing-roles';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -59,7 +60,8 @@ export class OrderController {
   // escritura "cara" (valida cliente/productos, puede incluir el archivo de
   // recursos que mandó el cliente) y no debería dispararse en ráfaga.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @Auth(Role.RECEPCION)
+  // La sucursal también levanta pedidos (con el empleado obligatorio).
+  @Auth(Role.RECEPCION, Role.SUCURSAL)
   @Post()
   create(
     @Body() createOrderDto: CreateOrderDto,
@@ -68,20 +70,13 @@ export class OrderController {
     // userId (creador del pedido) lo determina el servidor a partir del
     // token, nunca el cliente -- evita depender de que el frontend arme
     // ese valor correctamente y evita que se pueda falsear.
-    return this.orderService.create({ ...createOrderDto, userId: user.sub });
+    return this.orderService.create(
+      { ...createOrderDto, userId: user.sub },
+      { userId: user.sub, roles: user.roles, username: user.username },
+    );
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(...ORDER_VIEWING_ROLES_WITH_BRANCH)
   @Get()
   findAll(
     @Query() query: PaginationQueryDto,
@@ -249,17 +244,7 @@ export class OrderController {
     return this.orderService.reorderMaterialsPriority(dto.orderIds);
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(...ORDER_VIEWING_ROLES_WITH_BRANCH)
   @Get(':id')
   findOne(@Param('id') id: string, @ActiveUser() user: AccessTokenPayload) {
     return this.orderService.findOne(+id, {
@@ -440,17 +425,7 @@ export class OrderController {
   }
 
   /** Cualquiera con acceso al pedido puede ver el historial de rondas. */
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(...ORDER_VIEWING_ROLES_WITH_BRANCH)
   @Get(':id/design-revisions')
   getDesignRevisions(
     @Param('id') id: string,
@@ -462,17 +437,7 @@ export class OrderController {
     });
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(...ORDER_VIEWING_ROLES_WITH_BRANCH)
   @Get(':id/design-revisions/:revisionId/montage')
   getDesignRevisionMontage(
     @Param('id') id: string,
@@ -485,17 +450,7 @@ export class OrderController {
     });
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(...ORDER_VIEWING_ROLES_WITH_BRANCH)
   @Get(':id/design-revisions/:revisionId/feedback-file')
   getDesignRevisionFeedbackFile(
     @Param('id') id: string,
@@ -513,17 +468,7 @@ export class OrderController {
    * imágenes o un PDF (WORKFLOW.md §2); los endpoints `/montage` y
    * `/feedback-file` siguen devolviendo el primero de cada tipo.
    */
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(...ORDER_VIEWING_ROLES_WITH_BRANCH)
   @Get(':id/design-revisions/:revisionId/files/:fileId')
   getDesignRevisionFile(
     @Param('id') id: string,
@@ -577,17 +522,7 @@ export class OrderController {
   // --- Tareas de área (producción multi-área en paralelo, WORKFLOW.md §3) ---
 
   /** Áreas que trabajan el pedido, cada una con su estado y responsable. */
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.DISENO,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(...ORDER_VIEWING_ROLES_WITH_BRANCH)
   @Get(':id/area-tasks')
   async getAreaTasks(
     @Param('id') id: string,

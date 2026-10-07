@@ -367,7 +367,14 @@ describe('OrderMockupService', () => {
       const args = prisma.orderMockup.findMany.mock.calls[0][0];
       expect(args.where).toEqual({ orderId: 10 });
       expect(Object.keys(args.select).sort()).toEqual(
-        ['createdAt', 'createdBy', 'garment', 'id', 'orderId'].sort(),
+        [
+          'branchEmployee',
+          'createdAt',
+          'createdBy',
+          'garment',
+          'id',
+          'orderId',
+        ].sort(),
       );
       expect(args.select).not.toHaveProperty('imageData');
       expect(args.select).not.toHaveProperty('config');

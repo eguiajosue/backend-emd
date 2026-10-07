@@ -23,6 +23,8 @@ describe('OrderMockupController: roles y contrato de rutas', () => {
     return [...roles].sort();
   };
 
+  // La cuenta de sucursal también lee el detalle de SUS pedidos (el service
+  // la limita a su sucursal).
   const ORDER_DETAIL_ROLES = [
     Role.RECEPCION,
     Role.ADMIN,
@@ -33,6 +35,7 @@ describe('OrderMockupController: roles y contrato de rutas', () => {
     Role.DISENO,
     Role.LASER,
     Role.IMPRESIONES,
+    Role.SUCURSAL,
   ].sort();
 
   const WRITE_ROLES = [Role.RECEPCION, Role.ADMIN, Role.SUPERUSER].sort();
@@ -47,11 +50,14 @@ describe('OrderMockupController: roles y contrato de rutas', () => {
     expect(rolesFor(OrderMockupController, method)).toEqual(ORDER_DETAIL_ROLES);
   });
 
-  it.each([
-    ['POST /orders/:id/mockups', 'create'],
-    ['DELETE /orders/:id/mockups/:mockupId', 'remove'],
-  ])('%s sólo acepta recepcion, admin y superuser', (_name, method) => {
-    expect(rolesFor(OrderMockupController, method)).toEqual(WRITE_ROLES);
+  it('POST /orders/:id/mockups acepta recepcion, admin, superuser y sucursal', () => {
+    expect(rolesFor(OrderMockupController, 'create')).toEqual(
+      [...WRITE_ROLES, Role.SUCURSAL].sort(),
+    );
+  });
+
+  it('DELETE /orders/:id/mockups/:mockupId sólo acepta recepcion, admin y superuser', () => {
+    expect(rolesFor(OrderMockupController, 'remove')).toEqual(WRITE_ROLES);
   });
 
   it('cuelga de orders/:id/mockups (contrato con el frontend)', () => {

@@ -27,7 +27,8 @@ export class ClientController {
     private readonly orderService: OrderService,
   ) {}
 
-  @Auth(Role.RECEPCION)
+  // La sucursal también registra clientes nuevos al levantar un pedido.
+  @Auth(Role.RECEPCION, Role.SUCURSAL)
   @Post()
   create(@Body() createClientDto: CreateClientDto) {
     return this.clientService.create(createClientDto);
@@ -46,6 +47,8 @@ export class ClientController {
     Role.DISENO,
     Role.LASER,
     Role.IMPRESIONES,
+    // Alta de pedidos desde la sucursal: elige cliente.
+    Role.SUCURSAL,
   )
   @Get()
   findAll(@Query() query: PaginationQueryDto) {
@@ -62,6 +65,8 @@ export class ClientController {
     Role.DISENO,
     Role.LASER,
     Role.IMPRESIONES,
+    // Alta de pedidos desde la sucursal: elige cliente.
+    Role.SUCURSAL,
   )
   @Get(':id')
   findOne(@Param('id') id: string) {

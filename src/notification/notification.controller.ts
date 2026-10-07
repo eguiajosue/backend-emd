@@ -17,6 +17,7 @@ import { AccessTokenPayload } from 'src/auth/auth.service';
   Role.DISENO,
   Role.LASER,
   Role.IMPRESIONES,
+  Role.SUCURSAL,
 )
 @ApiTags('notifications')
 @Controller('notifications')

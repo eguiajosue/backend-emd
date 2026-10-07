@@ -51,9 +51,11 @@ model User {
   username        String    @unique // Nombre de usuario único para iniciar sesión.
   password        String // Contraseña del usuario.
   isSharedAccount Boolean   @default(false) // Cuenta compartida por varias personas de un área (ej. "Taller"), en vez de una persona.
+  branchId        Int? // Sucursal a la que pertenece la cuenta (sólo rol 'sucursal'; ej. "Punto Madero"). Null = usuario de la matriz.
   lastSeenAt      DateTime? // Última vez que se desconectó el último socket vivo de este usuario (ver NotificationsGateway.handleDisconnect). Null si nunca se conectó por WebSocket.
 
   roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
+  branch                  Branch?                  @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de la cuenta (ver Branch).
   orders                  Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
   assignedOrders          Order[]                  @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
   attendedOrders          Order[]                  @relation("AttendedOrders") // Pedidos de Recepción que esta persona está atendiendo (los tomó de otra recepcionista).
@@ -129,6 +131,9 @@ model Order {
   designStartedByName   String? // Quién lo empezó, tal cual se muestra. Con la cuenta compartida del área es el nombre que escribe la persona; si no, el nombre del usuario.
   designStartedByUserId Int? // Usuario (cuenta) desde el que se empezó; sin relación, sólo para auditoría.
 
+  branchId         Int? // Sucursal desde la que se levantó el pedido (ej. "Punto Madero"). Null = pedido de la matriz.
+  branchEmployeeId Int? // Empleado de la sucursal que levantó el pedido (obligatorio al crear desde la cuenta de sucursal).
+
   materialsPriority Int? // Orden de prioridad de compra elegido a mano (drag & drop) en "Hoja de Materiales". null = todavía no se reordenó (va al final, por id). Se reasigna 0..n-1 sobre TODOS los pedidos activos cada vez que se reordena.
 
   // Recursos que manda el CLIENTE para poder hacer el diseño (logo,
@@ -159,6 +164,8 @@ model Order {
   inventoryMovements InventoryMovement[] // Consumos de inventario imputados a este pedido (opcional).
   mockups            OrderMockup[] // Mockups 3D (playera/gorra con los diseños del cliente) adjuntados al pedido.
   quote              Quote? // Cotización aceptada que se convirtió en este pedido (si vino de una).
+  branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de origen (si vino de una).
+  branchEmployee     BranchEmployee?     @relation(fields: [branchEmployeeId], references: [id], onDelete: SetNull) // Empleado de la sucursal que lo levantó.
 
   @@index([statusId])
   @@index([clientId])
@@ -169,6 +176,7 @@ model Order {
   @@index([creationDate])
   @@index([area])
   @@index([materialsPriority])
+  @@index([branchId])
 }
 
 model DesignRevision {
@@ -864,18 +872,20 @@ model ClientInsight {
 // `imageData`/`config` (cada fila puede pesar varios MB).
 
 model OrderMockup {
-  id          Int      @id @default(autoincrement()) // Identificador único del mockup.
-  orderId     Int // Clave foránea que referencia al Order al que se adjuntó.
-  garment     String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
-  imageData   String? // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada. Legacy: null si está en el almacenamiento de objetos.
-  imageKey    String? // Clave del objeto (R2/S3) de la lámina. Si está, manda sobre imageData.
-  imageMime   String // Mime type de la lámina: image/png | image/jpeg.
-  config      Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) para volver a editarlo.
-  createdById Int? // Clave foránea que referencia al User que lo adjuntó (null si ese usuario se borró).
-  createdAt   DateTime @default(now()) // Fecha en que se adjuntó el mockup.
+  id               Int      @id @default(autoincrement()) // Identificador único del mockup.
+  orderId          Int // Clave foránea que referencia al Order al que se adjuntó.
+  garment          String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
+  imageData        String? // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada. Legacy: null si está en el almacenamiento de objetos.
+  imageKey         String? // Clave del objeto (R2/S3) de la lámina. Si está, manda sobre imageData.
+  imageMime        String // Mime type de la lámina: image/png | image/jpeg.
+  config           Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) para volver a editarlo.
+  createdById      Int? // Clave foránea que referencia al User que lo adjuntó (null si ese usuario se borró).
+  branchEmployeeId Int? // Empleado de la sucursal que lo armó (opcional; sólo desde la cuenta de sucursal).
+  createdAt        DateTime @default(now()) // Fecha en que se adjuntó el mockup.
 
-  order     Order @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order: se borra junto con el pedido.
-  createdBy User? @relation("OrderMockupCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que lo adjuntó.
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order: se borra junto con el pedido.
+  createdBy      User?           @relation("OrderMockupCreatedBy", fields: [createdById], references: [id], onDelete: SetNull) // Relación con el User que lo adjuntó.
+  branchEmployee BranchEmployee? @relation(fields: [branchEmployeeId], references: [id], onDelete: SetNull) // Empleado de la sucursal que lo armó.
 
   @@index([orderId])
 }
@@ -957,4 +967,39 @@ model Quote {
   @@index([priorityDate]) // Prioridad vencida/hoy/mañana primero.
   @@index([updatedAt]) // Luego, lo último que se movió.
   @@index([clientId]) // Cotizaciones de un cliente (y el SET NULL al borrarlo).
+}
+
+// ─── Sucursales ────────────────────────────────────────────────────────────
+//
+// Una sucursal (ej. "Punto Madero") es una extensión de la matriz, no otra
+// empresa: entra con UNA cuenta compartida (rol 'sucursal', User.branchId) que
+// sólo puede levantar pedidos, usar Mockups y ver sus propios pedidos. Quién
+// levantó cada pedido se elige de la lista de empleados de la sucursal, que
+// administra admin desde Usuarios. Ver BranchService.
+
+model Branch {
+  id        Int      @id @default(autoincrement()) // Identificador único de la sucursal.
+  name      String   @unique // Nombre visible (ej. "Punto Madero"); se muestra como badge en pedidos.
+  active    Boolean  @default(true) // Sucursal inactiva: su cuenta no puede levantar pedidos.
+  createdAt DateTime @default(now()) // Fecha de alta.
+
+  users     User[] // Cuentas de la sucursal (normalmente una compartida).
+  employees BranchEmployee[] // Empleados que levantan pedidos desde la cuenta compartida.
+  orders    Order[] // Pedidos levantados desde la sucursal.
+}
+
+model BranchEmployee {
+  id        Int      @id @default(autoincrement()) // Identificador único del empleado.
+  branchId  Int // Clave foránea que referencia a Branch.
+  name      String // Nombre visible (ej. "Ana López"), máx. 80 caracteres.
+  active    Boolean  @default(true) // Inactivo = ya no aparece para elegir al crear pedidos (los pedidos viejos lo siguen mostrando).
+  createdAt DateTime @default(now()) // Fecha de alta.
+  updatedAt DateTime @updatedAt // Última modificación (renombrar / activar).
+
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade) // Sucursal a la que pertenece.
+  orders       Order[] // Pedidos que levantó.
+  orderMockups OrderMockup[] // Mockups que armó.
+
+  @@unique([branchId, name])
+  @@index([branchId])
 }

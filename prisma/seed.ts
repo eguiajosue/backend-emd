@@ -15,6 +15,7 @@ const ROLE_NAMES = [
   'diseno',
   'laser',
   'impresiones',
+  'sucursal',
 ];
 
 // Roles operativos que participan del flujo de producción de pedidos
@@ -127,6 +128,11 @@ const DEMO_CLIENTS = [
 
 // Productos frecuentes iniciales (ver src/order-product-preset). La lista
 // crece sola cuando recepción escribe un customName nuevo al crear un pedido.
+// Sucursales (extensión de la matriz). Sólo se crea la sucursal: la cuenta
+// compartida con su contraseña la da de alta admin desde Usuarios (rol
+// "Sucursal" + sucursal), nunca con una contraseña fija en el seed.
+const BRANCH_NAMES = ['Punto Madero'];
+
 const ORDER_PRODUCT_PRESET_NAMES = ['Lona', 'X-Banner', 'Playera', 'Gorra'];
 
 // Punto de partida del catálogo de materiales: crece solo cuando se escribe
@@ -290,6 +296,16 @@ async function main() {
     console.log(
       `  area visibility for "${role}" ready (generalViewEnabled=${setting.generalViewEnabled})`,
     );
+  }
+
+  console.log('Seeding branches...');
+  for (const name of BRANCH_NAMES) {
+    const branch = await prisma.branch.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+    console.log(`  branch "${name}" ready (id=${branch.id})`);
   }
 
   console.log('Seeding order product presets...');

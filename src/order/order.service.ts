@@ -42,6 +42,13 @@ import {
   StoredBlob,
 } from 'src/storage/storage.service';
 import { collectOrderObjectKeys } from 'src/storage/order-object-keys';
+import {
+  assertActiveBranchEmployee,
+  BRANCH_BADGE_SELECT,
+  branchOfUser,
+  branchOrdersWhere,
+  isBranchOnlyUser,
+} from 'src/branch/branch-access';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -170,6 +177,9 @@ const ORDER_WRITE_INCLUDE = {
   attendedBy: ATTENDED_BY_USER_SELECT,
   status: true,
   orderProducts: true,
+  // Sucursal de origen y quién la levantó ("Creado por Punto Madero · Ana").
+  branch: BRANCH_BADGE_SELECT,
+  branchEmployee: BRANCH_BADGE_SELECT,
 } satisfies Prisma.OrderInclude;
 
 @Injectable()
@@ -346,6 +356,10 @@ export class OrderService {
       return {};
     }
     const { roles } = requestingUser;
+    // Cuenta de sucursal: sólo los pedidos levantados desde SU sucursal.
+    if (isBranchOnlyUser(roles)) {
+      return branchOrdersWhere(requestingUser.userId);
+    }
     if (isFullVisibilityRole(roles)) {
       return {};
     }
@@ -390,6 +404,18 @@ export class OrderService {
     });
     if (!order) {
       throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
+    }
+    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) {
+      const own = await this.prisma.order.count({
+        where: { id: orderId, ...branchOrdersWhere(requestingUser.userId) },
+      });
+      if (own === 0) {
+        throw new HttpException(
+          'Sin acceso a este pedido',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      return order;
     }
     const visible = await this.filterOrdersForUser([order], requestingUser);
     if (visible.length === 0) {
@@ -525,9 +551,35 @@ export class OrderService {
     }
   }
 
-  async create(createOrderDto: CreateOrderDto) {
+  /**
+   * Alta desde la cuenta de una sucursal: el empleado que lo levanta es
+   * obligatorio y tiene que ser de ESA sucursal y estar activo. Devuelve
+   * null para los usuarios de la matriz (el empleado se ignora).
+   */
+  private async resolveBranchOrigin(
+    branchEmployeeId: number | undefined,
+    requestingUser?: RequestingUser,
+  ) {
+    if (!requestingUser?.roles?.includes(Role.SUCURSAL)) return null;
+    const branch = await branchOfUser(this.prisma, requestingUser.userId);
+    if (!branchEmployeeId) {
+      throw new HttpException(
+        'Elige qué empleado de la sucursal levanta el pedido',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const employee = await assertActiveBranchEmployee(
+      this.prisma,
+      branch.id,
+      branchEmployeeId,
+    );
+    return { branch, employee };
+  }
+
+  async create(createOrderDto: CreateOrderDto, requestingUser?: RequestingUser) {
     try {
       const {
+        branchEmployeeId,
         clientId,
         clientNameOverride,
         userId,
@@ -565,6 +617,11 @@ export class OrderService {
           HttpStatus.BAD_REQUEST,
         );
       }
+
+      const branchOrigin = await this.resolveBranchOrigin(
+        branchEmployeeId,
+        requestingUser,
+      );
 
       const trimmedClientNameOverride = clientNameOverride?.trim();
       if (!clientId && !trimmedClientNameOverride) {
@@ -629,6 +686,10 @@ export class OrderService {
         user: {
           connect: { id: userId },
         },
+        ...(branchOrigin && {
+          branch: { connect: { id: branchOrigin.branch.id } },
+          branchEmployee: { connect: { id: branchOrigin.employee.id } },
+        }),
         ...(assignedUserId && {
           assignedUser: {
             connect: { id: assignedUserId },
@@ -695,16 +756,37 @@ export class OrderService {
         order.user &&
         order.user.username
       ) {
+        // Pedido de sucursal: "Punto Madero · Ana López" en vez del usuario
+        // compartido, y también le llega a Recepción, que es quien lo recibe.
+        const createdBy = branchOrigin
+          ? `${branchOrigin.branch.name} · ${branchOrigin.employee.name}`
+          : order.user.username;
         const adminNotificationData = {
           id: order.id,
           description: order.description,
           clientName: clientNameForNotification,
-          createdBy: order.user.username,
+          createdBy,
           creationDate: order.creationDate,
           deliveryDate: order.deliveryDate,
+          ...(branchOrigin && { branchName: branchOrigin.branch.name }),
         };
 
         this.notificationsGateway.notifyNewOrderToAdmin(adminNotificationData);
+
+        if (branchOrigin) {
+          const receptionIds = await this.notificationService.userIdsForArea(
+            Role.RECEPCION,
+          );
+          await this.notificationService.createNotificationForUsers(
+            receptionIds,
+            {
+              type: 'order_assigned',
+              title: `Nuevo pedido de ${branchOrigin.branch.name}`,
+              body: `Pedido #${order.id} de ${clientNameForNotification}, levantado por ${createdBy}`,
+              orderId: order.id,
+            },
+          );
+        }
 
         // "Cualquier diseñador" (o cualquiera del área) se guarda como la
         // cuenta COMPARTIDA del área: avisarle sólo a esa cuenta dejaba sin
@@ -814,6 +896,11 @@ export class OrderService {
       designStartedAt: true,
       designStartedByName: true,
       materialsPriority: true,
+      // Sucursal de origen: badge "Punto Madero" en listas, TV y filtros.
+      branchId: true,
+      branchEmployeeId: true,
+      branch: BRANCH_BADGE_SELECT,
+      branchEmployee: BRANCH_BADGE_SELECT,
       description: true,
       creationDate: true,
       deliveryDate: true,
