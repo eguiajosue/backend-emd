@@ -26,6 +26,12 @@ describe('OrderService - sucursal', () => {
         findUnique: jest.fn().mockResolvedValue({
           branch: { id: 1, name: 'Punto Madero', active: true },
         }),
+        // Cuenta compartida de Diseño ("Cualquier diseñador").
+        findFirst: jest.fn().mockResolvedValue({ id: 40 }),
+      },
+      status: {
+        findUnique: jest.fn().mockResolvedValue({ id: 21 }),
+        findFirst: jest.fn().mockResolvedValue({ id: 21 }),
       },
       branchEmployee: {
         findUnique: jest.fn().mockResolvedValue({
@@ -117,6 +123,29 @@ describe('OrderService - sucursal', () => {
       [3],
       expect.objectContaining({ title: 'Nuevo pedido de Punto Madero' }),
     );
+  });
+
+  it('la sucursal no controla estado, diseño, área ni a nombre de quién queda', async () => {
+    await service.create(
+      {
+        ...dto,
+        branchEmployeeId: 5,
+        statusId: 9,
+        requiresDesign: false,
+        area: 'bordado',
+        userId: 99,
+        assignedUserId: 55,
+      },
+      branchUser,
+    );
+    const data = prisma.order.create.mock.calls[0][0].data;
+    // Alta estándar: pasa por Diseño, en "en diseño", a nombre de la cuenta.
+    expect(data.requiresDesign).toBe(true);
+    expect(data.area).toBe('diseno');
+    expect(data.status).toEqual({ connect: { id: 21 } });
+    expect(data.user).toEqual({ connect: { id: 7 } });
+    // El responsable es la cuenta compartida de Diseño, no el que mandó.
+    expect(data.assignedUser).toEqual({ connect: { id: 40 } });
   });
 
   it('Recepción no necesita empleado y el pedido queda sin sucursal', async () => {

@@ -303,23 +303,49 @@ export class UserService {
 
   async remove(id: number) {
     try {
-      // Primero, elimina las órdenes asociadas al usuario. Las claves de sus
-      // archivos en el bucket se juntan antes (la cascada de la DB no lo toca)
-      // y se borran en cuanto se borran los pedidos.
+      // Las cuentas de sucursal son COMPARTIDAS: `Order.userId` de todos los
+      // pedidos de la sucursal es esa cuenta, así que borrarla se llevaría el
+      // historial completo de la sucursal. Se rechaza (hay que renombrarla o
+      // cambiarle la contraseña) en vez de borrar pedidos ajenos.
+      const target = await this.prisma.user.findUnique({
+        where: { id },
+        select: { branchId: true, roles: { select: { name: true } } },
+      });
+      if (!target) {
+        throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
+      }
+      const branchOrders = target.branchId
+        ? 0
+        : await this.prisma.order.count({
+            where: { userId: id, branchId: { not: null } },
+          });
+      if (
+        target.branchId !== null ||
+        target.roles.some((r) => r.name === BRANCH_ROLE_NAME) ||
+        branchOrders > 0
+      ) {
+        throw new HttpException(
+          'No se puede eliminar una cuenta de sucursal: es una cuenta compartida y borrarla eliminaría todos los pedidos de la sucursal. Cambia su nombre de usuario o su contraseña, o desactiva la sucursal.',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      // Las claves de sus archivos en el bucket se juntan antes (la cascada de
+      // la DB no lo toca) y se borran SÓLO si la transacción se confirma.
       const objectKeys = await collectOrderObjectKeys(this.prisma, {
         userId: id,
       });
-      await this.prisma.order.deleteMany({
-        where: { userId: id },
-      });
-      // Los pedidos ya no existen: sus archivos se borran aunque el borrado
-      // del usuario falle después (si no, quedarían huérfanos en el bucket).
+      // Pedidos + usuario en UNA transacción: si falla el borrado del
+      // usuario, los pedidos no quedan borrados a medias.
+      await this.prisma.$transaction(
+        async (tx) => {
+          await tx.order.deleteMany({ where: { userId: id } });
+          await tx.user.delete({ where: { id } });
+        },
+        { timeout: 20000, maxWait: 10000 },
+      );
+      // Los pedidos ya no existen: sus archivos se borran del bucket.
       await this.storage.deleteQuietly(objectKeys);
-
-      // Luego, elimina el usuario
-      await this.prisma.user.delete({
-        where: { id },
-      });
 
       return { message: 'Usuario eliminado correctamente' };
     } catch (error) {

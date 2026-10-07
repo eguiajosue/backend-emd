@@ -196,6 +196,35 @@ describe('Inventario por área', () => {
   });
 
   describe('movimientos del área y bitácora', () => {
+    it('un área que imputa a un pedido NO recibe su descripción (sólo el id); Recepción sí', async () => {
+      prisma.inventoryMovement.create.mockImplementation(
+        (args: { data: Record<string, unknown> }) => ({
+          id: 1,
+          ...args.data,
+          unitCost: null,
+          order: { id: 99, description: 'Uniformes de OTRO cliente' },
+        }),
+      );
+      const area = await service.registerMovement(
+        7,
+        { type: 'SALIDA', quantity: 1, orderId: 99 },
+        bordado,
+      );
+      expect(area.movement.order).toEqual({ id: 99 });
+      expect(prisma.order.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ select: { id: true } }),
+      );
+      const manager = await service.registerMovement(
+        7,
+        { type: 'SALIDA', quantity: 1, orderId: 99 },
+        recepcion,
+      );
+      expect(manager.movement.order).toEqual({
+        id: 99,
+        description: 'Uniformes de OTRO cliente',
+      });
+    });
+
     it('registrar consumo descuenta y guarda quién, antes/después, motivo, área y origen', async () => {
       await service.registerMovement(
         7,

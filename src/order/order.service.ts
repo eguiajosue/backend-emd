@@ -47,6 +47,7 @@ import {
 } from 'src/storage/storage.service';
 import { collectOrderObjectKeys } from 'src/storage/order-object-keys';
 import {
+  SUPPLY_TX_OPTIONS,
   TASK_SUPPLY_SELECT,
   saveSuppliesTx,
   validateSupplies,
@@ -610,24 +611,46 @@ export class OrderService {
     requestingUser?: RequestingUser,
   ) {
     try {
+      // Una cuenta de sucursal sólo levanta pedidos nuevos "normales": no
+      // decide estado, si pasa por Diseño, el área inicial ni a nombre de quién
+      // queda. Se ignora lo que mande y se fuerza el alta estándar (con
+      // montaje, igual que un pedido de Recepción que requiere diseño).
+      const branchAccount =
+        !!requestingUser && isBranchOnlyUser(requestingUser.roles);
       const {
         branchEmployeeId,
         clientId,
         clientNameOverride,
-        userId,
-        assignedUserId,
-        // Default de alta: "pendiente". Vive aquí y no en el DTO (ver
-        // CreateOrderDto.statusId).
-        statusId = 1,
-        area,
         productionArea,
         productionAreas,
-        requiresDesign,
         description,
         deliveryDate,
         orderProducts,
         clientResourceFile,
       } = createOrderDto;
+      // Default de alta: "pendiente". Vive aquí y no en el DTO (ver
+      // CreateOrderDto.statusId).
+      const statusId = branchAccount ? 1 : (createOrderDto.statusId ?? 1);
+      const area = branchAccount ? undefined : createOrderDto.area;
+      const requiresDesign = branchAccount
+        ? true
+        : createOrderDto.requiresDesign;
+      const userId = branchAccount
+        ? requestingUser.userId
+        : createOrderDto.userId;
+      // La sucursal no elige responsable: el pedido cae en la cuenta compartida
+      // de Diseño ("Cualquier diseñador"), o sin responsable si no existe.
+      const assignedUserId = branchAccount
+        ? ((
+            await this.prisma.user.findFirst({
+              where: {
+                isSharedAccount: true,
+                roles: { some: { name: Role.DISENO } },
+              },
+              select: { id: true },
+            })
+          )?.id ?? undefined)
+        : createOrderDto.assignedUserId;
 
       // Default true: si no viene explícito, el pedido pasa por Diseño
       // (comportamiento nuevo). Recepción puede desmarcarlo para ir directo
@@ -674,7 +697,10 @@ export class OrderService {
       // diseñador concreto, o la cuenta compartida del área ("Cualquier
       // diseñador"). Ver WORKFLOW.md §1.a.
       if (needsDesign) {
-        await this.assertUserBelongsToArea(assignedUserId, Role.DISENO);
+        // (La cuenta de sucursal ya recibe la compartida de Diseño: sin recheck.)
+        if (!branchAccount) {
+          await this.assertUserBelongsToArea(assignedUserId, Role.DISENO);
+        }
       } else if (assignedUserId !== undefined && area) {
         // Sin montaje, si se nomina a alguien debe ser del área destino.
         await this.assertUserBelongsToArea(assignedUserId, area);
@@ -902,8 +928,8 @@ export class OrderService {
    * expone un booleano `hasClientResourceFile` calculado.
    */
   /** Select común para listados: incluye `histories` liviano para calcular `deliveredAt`. */
-  private orderListSelect() {
-    return {
+  private orderListSelect(requestingUser?: RequestingUser) {
+    const select = {
       id: true,
       clientId: true,
       clientNameOverride: true,
@@ -966,6 +992,19 @@ export class OrderService {
       orderProducts: true,
       histories: HISTORY_SELECT_FOR_DELIVERED_AT,
     } satisfies Prisma.OrderSelect;
+    // Las cuentas de sucursal no ven los insumos de inventario (nombres,
+    // códigos de barras, cantidades) de las tareas de área.
+    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) {
+      const taskSelect: Record<string, unknown> = {
+        ...select.areaTasks.select,
+      };
+      delete taskSelect.supply;
+      return {
+        ...select,
+        areaTasks: { select: taskSelect },
+      } as unknown as typeof select;
+    }
+    return select;
   }
 
   /**
@@ -1008,7 +1047,7 @@ export class OrderService {
 
   async findAll(query?: PaginationQueryDto, requestingUser?: RequestingUser) {
     try {
-      const select = this.orderListSelect();
+      const select = this.orderListSelect(requestingUser);
       const { enabled, page, limit, skip } = resolvePagination(query);
       const where = this.orderVisibilityWhere(requestingUser);
 
@@ -1064,7 +1103,7 @@ export class OrderService {
     requestingUser?: RequestingUser,
   ) {
     try {
-      const select = this.orderListSelect();
+      const select = this.orderListSelect(requestingUser);
       // Paginación siempre activa para /orders/history (a diferencia de
       // `findAll`, que es opt-in): evita traer todo el histórico sin límite.
       const { page, limit, skip } = resolvePagination(query ?? {});
@@ -2724,6 +2763,8 @@ export class OrderService {
         );
         return { revision: approvedRevision, supplyWarnings: warnings };
       },
+      // Crea tareas + hoja de materiales (varias escrituras y candados).
+      SUPPLY_TX_OPTIONS,
     );
 
     // Recién ahora hay trabajo real para producción: se avisa a cada área
@@ -2873,7 +2914,7 @@ export class OrderService {
     query?: PaginationQueryDto,
     requestingUser?: RequestingUser,
   ) {
-    const select = this.orderListSelect();
+    const select = this.orderListSelect(requestingUser);
     const { enabled, page, limit, skip } = resolvePagination(query);
     const visibilityWhere = this.orderVisibilityWhere(requestingUser);
 

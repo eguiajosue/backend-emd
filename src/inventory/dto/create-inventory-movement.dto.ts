@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -32,11 +33,14 @@ export class CreateInventoryMovementDto {
 
   @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
+  // Evita desbordar el Decimal(12,3) de la columna (500).
+  @Max(999999)
   quantity: number;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(99999999)
   unitCost?: number;
 
   @TrimString()

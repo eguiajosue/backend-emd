@@ -321,6 +321,10 @@ describe('OrderAreaTaskService: destinatario efectivo de los avisos a Recepción
       },
       user: { findFirst: jest.fn().mockResolvedValue(null) },
       orderAreaSupplyLine: { findMany: jest.fn().mockResolvedValue([]) },
+      // Candado de la fila de la tarea: devuelve su estado actual.
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValue([{ status: AreaTaskStatus.en_proceso }]),
       $transaction: jest.fn(async (arg: unknown) =>
         typeof arg === 'function'
           ? (arg as (tx: unknown) => unknown)(prisma)

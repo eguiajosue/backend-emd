@@ -508,6 +508,11 @@ describe('OrderService - flujo de diseño', () => {
               { id: 70, area: 'bordado', status: 'pendiente', supply: null },
             ]),
         },
+        // Candado de las tareas al guardar la hoja.
+        $queryRaw: jest.fn().mockResolvedValue([]) as unknown as Record<
+          string,
+          jest.Mock
+        >,
         inventoryItem: { findMany: jest.fn().mockResolvedValue([]) },
         orderAreaSupply: { create: jest.fn(), update: jest.fn() },
         orderAreaSupplyLine: {

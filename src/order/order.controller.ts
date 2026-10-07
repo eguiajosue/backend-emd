@@ -536,7 +536,10 @@ export class OrderController {
       userId: user.sub,
       roles: user.roles,
     });
-    return this.orderAreaTaskService.findByOrder(+id);
+    return this.orderAreaTaskService.findByOrder(+id, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
   /** Suma áreas al pedido. Recepción al crear, Diseño al autorizar. */
@@ -634,11 +637,27 @@ export class OrderController {
     @Param('id') id: string,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    await this.orderService.assertOrderAccess(+id, {
-      userId: user.sub,
-      roles: user.roles,
-    });
-    return this.orderAreaTaskService.getSupplySheet(+id);
+    const requestingUser = { userId: user.sub, roles: user.roles };
+    // Sucursal: 403 (sin insumos); áreas: sólo sus hojas (ver `getSupplySheet`).
+    await this.orderService.assertOrderAccess(+id, requestingUser);
+    return this.orderAreaTaskService.getSupplySheet(+id, requestingUser);
+  }
+
+  /**
+   * Reintenta el descuento de inventario de una tarea ya terminada cuyos
+   * insumos no se descontaron por falta de existencia (ver `pendingDiscount`
+   * en GET area-supplies). Idempotente; devuelve la hoja actualizada.
+   */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Post(':id/area-supplies/:area/discount-pending')
+  async discountPendingAreaSupplies(
+    @Param('id') id: string,
+    @Param('area') area: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    const requestingUser = { userId: user.sub, roles: user.roles };
+    await this.orderService.assertOrderAccess(+id, requestingUser);
+    return this.orderAreaTaskService.discountPending(+id, area, requestingUser);
   }
 
   /** Corrige la hoja de materiales después de autorizar. */

@@ -43,6 +43,8 @@ export class CreateRestockRequestDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 3 })
   @IsPositive()
+  // Evita desbordar el Decimal(12,3) de la columna (500).
+  @Max(999999)
   quantity?: number;
 
   @TrimString()

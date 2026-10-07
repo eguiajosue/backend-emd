@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Max,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -15,6 +16,9 @@ import { Type } from 'class-transformer';
 import { SupplySource } from '@prisma/client';
 import { PRODUCTION_AREAS } from './create-order.dto';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
+
+/** Cantidad máxima por línea de insumo / movimiento de inventario. */
+export const MAX_SUPPLY_QUANTITY = 999999;
 
 /** Máximo de líneas por área en la hoja de materiales. */
 export const MAX_SUPPLY_LINES = 50;
@@ -37,6 +41,9 @@ export class AreaSupplyLineDto {
 
   @IsNumber({ maxDecimalPlaces: 3 })
   @IsPositive()
+  // Tope por debajo del Decimal(12,3) de la columna: sin él un valor enorme
+  // desbordaba la columna y respondía 500.
+  @Max(MAX_SUPPLY_QUANTITY)
   quantity: number;
 }
 

@@ -38,7 +38,13 @@ import {
 } from './dto/restock-request.dto';
 
 /** Origen de un movimiento en la bitácora. */
-export type InventoryMovementSource = 'recepcion' | 'area' | 'scan' | 'inicial';
+export type InventoryMovementSource =
+  | 'recepcion'
+  | 'area'
+  | 'scan'
+  | 'inicial'
+  // Descuento/devolución automático de la hoja de materiales de un pedido.
+  | 'orden';
 
 /** Filtros de la bitácora de movimientos. */
 export interface InventoryMovementsFilter {
@@ -648,8 +654,16 @@ export class InventoryService {
       );
     }
 
+    // Las áreas pueden imputar el consumo a cualquier pedido por id, pero no
+    // deben leer su descripción (datos de otros clientes): sólo el id.
+    const visibleMovement =
+      manager || !movement.order
+        ? movement
+        : { ...movement, order: { id: movement.order.id } };
     return {
-      movement: this.serializeMovement(movement),
+      movement: this.serializeMovement(
+        visibleMovement as unknown as MovementRow,
+      ),
       item: this.serializeItem(
         await this.findRowOrThrow(id),
         await this.reservedOf(id),
