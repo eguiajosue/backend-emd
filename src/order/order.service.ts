@@ -4,7 +4,10 @@ import {
 } from 'src/common/garment-sizes';
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { assertBase64FileValid } from 'src/common/file-validation';
-import { OrderListQueryDto } from './dto/order-list-query.dto';
+import {
+  OrderListQueryDto,
+  type OrderOrigin,
+} from './dto/order-list-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateOrderDto,
@@ -1150,7 +1153,7 @@ export class OrderService {
       // `AND` (no spread): el filtro de área pedido no puede pisar el de
       // visibilidad del rol (ver `exportOrders`).
       const where: Prisma.OrderWhereInput = {
-        AND: [visibilityWhere, this.historyFiltersWhere(query)],
+        AND: [visibilityWhere, this.historyFiltersWhere(query, requestingUser)],
       };
 
       // Filtro por área/rol y paginación resueltos en la base, no trayendo
@@ -1181,6 +1184,26 @@ export class OrderService {
   }
 
   /**
+   * Origen (`origin`) y sucursal (`branchId`): SÓLO para quien no es cuenta de
+   * sucursal. A la sucursal se le ignoran por completo (su visibilidad ya la
+   * fuerza `orderVisibilityWhere` a su propia sucursal). Van en AND entre sí y
+   * con la visibilidad, así que nunca amplían nada. Los comparten `GET /orders`
+   * y `GET /orders/history`.
+   */
+  private originFiltersWhere(
+    query: { origin?: OrderOrigin; branchId?: number } | undefined,
+    requestingUser?: RequestingUser,
+  ): Prisma.OrderWhereInput[] {
+    if (!query) return [];
+    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) return [];
+    return [
+      ...(query.origin === 'matriz' ? [{ branchId: null }] : []),
+      ...(query.origin === 'sucursal' ? [{ branchId: { not: null } }] : []),
+      ...(query.branchId ? [{ branchId: query.branchId }] : []),
+    ];
+  }
+
+  /**
    * Filtros opcionales de `GET /orders`: búsqueda `q` (id exacto, descripción,
    * nombre libre del cliente, nombre/apellido del cliente registrado o su
    * empresa), estado y rango de fecha de creación. `to` sólo con fecha
@@ -1193,20 +1216,7 @@ export class OrderService {
     if (!query) return {};
     const q = query.q?.trim();
     const { statusId, from, to } = query;
-    // Origen (`origin`) y sucursal (`branchId`): SÓLO para quien no es cuenta
-    // de sucursal. A la sucursal se le ignoran por completo (su visibilidad ya
-    // la fuerza `orderVisibilityWhere` a su propia sucursal). Van en AND entre
-    // sí y con la visibilidad, así que nunca amplían nada.
-    const originFilters: Prisma.OrderWhereInput[] =
-      requestingUser && isBranchOnlyUser(requestingUser.roles)
-        ? []
-        : [
-            ...(query.origin === 'matriz' ? [{ branchId: null }] : []),
-            ...(query.origin === 'sucursal'
-              ? [{ branchId: { not: null } }]
-              : []),
-            ...(query.branchId ? [{ branchId: query.branchId }] : []),
-          ];
+    const originFilters = this.originFiltersWhere(query, requestingUser);
     const idMatch =
       q && /^#?\d{1,9}$/.test(q) ? Number(q.replace('#', '')) : null;
     const toDate = to
@@ -1244,10 +1254,13 @@ export class OrderService {
   /** Filtros opcionales del historial: cliente, área y rango de entrega. */
   private historyFiltersWhere(
     query?: OrderHistoryQueryDto,
+    requestingUser?: RequestingUser,
   ): Prisma.OrderWhereInput {
     if (!query) return {};
     const { clientId, area, deliveryFrom, deliveryTo } = query;
+    const originFilters = this.originFiltersWhere(query, requestingUser);
     return {
+      ...(originFilters.length > 0 && { AND: originFilters }),
       ...(clientId && { clientId }),
       // Un pedido "es" de un área si está ahí ahora o si esa área tiene
       // (o tuvo) una tarea en él: el historial guarda los ya entregados.
