@@ -44,7 +44,8 @@ export function branchOrdersWhere(userId: number): Prisma.OrderWhereInput {
 export async function branchOfUser(prisma: PrismaLike, userId: number) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { branch: true },
+    // Sólo lo liviano: NUNCA las columnas de los logos (hasta 400 KB cada una).
+    select: { branch: { select: { id: true, name: true, active: true } } },
   });
   if (!user?.branch) {
     throw new HttpException(
