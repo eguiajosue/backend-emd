@@ -1,12 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
-  Min,
   MaxLength,
 } from 'class-validator';
 import { EmptyToUndefined } from 'src/common/transformers/empty-to-undefined';
@@ -56,11 +55,15 @@ export class OrderListQueryDto extends PaginationQueryDto {
     description:
       'Sólo pedidos de esa sucursal. Lo aplica únicamente la matriz; la cuenta de sucursal lo ignora (siempre ve sólo la suya).',
   })
-  @EmptyToUndefined()
+  // Vacío = ausente (el Type de class-transformer lo volvería 0); un valor no
+  // numérico queda NaN y `@IsInt` lo rechaza con 400.
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === ''
+      ? undefined
+      : Number(value),
+  )
   @IsOptional()
-  @Type(() => Number)
   @IsInt()
-  @Min(1)
   branchId?: number;
 
   @ApiPropertyOptional({
