@@ -2,6 +2,7 @@
 
 exports[`Rol sucursal: superficie completa de la API lista cerrada de rutas abiertas a sucursal 1`] = `
 [
+  "BranchController.findLogos",
   "BranchController.findMine",
   "ClientController.create",
   "ClientController.findAll",
