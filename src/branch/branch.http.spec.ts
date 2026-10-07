@@ -22,7 +22,7 @@ describe('HTTP: logos de sucursal y filtros de pedidos', () => {
   let app: INestApplication;
   let jwt: JwtService;
   let rows: Record<string, any>[];
-  let orderService: { findAll: jest.Mock };
+  let orderService: { findAll: jest.Mock; findHistory: jest.Mock };
 
   const token = (roles: string[], sub = 1) =>
     jwt.sign({ sub, username: 'u', roles });
@@ -57,7 +57,10 @@ describe('HTTP: logos de sucursal y filtros de pedidos', () => {
         }),
       },
     };
-    orderService = { findAll: jest.fn().mockResolvedValue([]) };
+    orderService = {
+      findAll: jest.fn().mockResolvedValue([]),
+      findHistory: jest.fn().mockResolvedValue({ data: [], meta: {} }),
+    };
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -302,6 +305,44 @@ describe('HTTP: logos de sucursal y filtros de pedidos', () => {
         .set(as(['recepcion']))
         .expect(200);
       const [query] = orderService.findAll.mock.calls.at(-1)!;
+      expect(query.branchId).toBeUndefined();
+      expect(query.origin).toBeUndefined();
+    });
+  });
+
+  describe('GET /orders/history: branchId y origin', () => {
+    it('los acepta (antes el ValidationPipe los rechazaba con 400) y los pasa tipados', async () => {
+      await request(app.getHttpServer())
+        .get('/orders/history?origin=sucursal&branchId=3&clientId=7&page=2')
+        .set(as(['recepcion']))
+        .expect(200);
+      const [query, user] = orderService.findHistory.mock.calls.at(-1)!;
+      expect(query).toMatchObject({
+        origin: 'sucursal',
+        branchId: 3,
+        clientId: 7,
+        page: 2,
+      });
+      expect(user).toMatchObject({ roles: ['recepcion'] });
+    });
+
+    it('400 con branchId no numérico u origin desconocido', async () => {
+      await request(app.getHttpServer())
+        .get('/orders/history?branchId=abc')
+        .set(as(['admin']))
+        .expect(400);
+      await request(app.getHttpServer())
+        .get('/orders/history?origin=todas')
+        .set(as(['admin']))
+        .expect(400);
+    });
+
+    it('vacíos se tratan como ausentes', async () => {
+      await request(app.getHttpServer())
+        .get('/orders/history?branchId=&origin=')
+        .set(as(['recepcion']))
+        .expect(200);
+      const [query] = orderService.findHistory.mock.calls.at(-1)!;
       expect(query.branchId).toBeUndefined();
       expect(query.origin).toBeUndefined();
     });

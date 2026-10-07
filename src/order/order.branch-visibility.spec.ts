@@ -10,6 +10,7 @@ import {
   BRANCH_ONLY_ROOM,
   NotificationsGateway,
 } from 'src/notifications/notifications.gateway';
+import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
 import { OrderService } from './order.service';
 
@@ -192,6 +193,77 @@ describe('Visibilidad de sucursales: where de GET /orders', () => {
       run({ origin: 'sucursal' }, { userId: 3, roles: [] }),
     ).resolves.toEqual([]);
     expect(prisma.order.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('Visibilidad de sucursales: where de GET /orders/history', () => {
+  let prisma: any;
+  let service: OrderService;
+  const run = (query: Partial<OrderHistoryQueryDto>, user: any) =>
+    service.findHistory(Object.assign(new OrderHistoryQueryDto(), query), user);
+  const lastWhere = () => prisma.order.findMany.mock.calls.at(-1)[0].where;
+
+  beforeEach(() => {
+    prisma = {
+      order: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn() },
+      $transaction: jest
+        .fn()
+        .mockImplementation((ops: unknown[]) =>
+          Promise.all(ops).then(() => [[], 0]),
+        ),
+    };
+    prisma.order.count.mockResolvedValue(0);
+    service = new OrderService(
+      prisma,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+  });
+
+  it('cuenta de sucursal: origin y branchId se IGNORAN; sigue limitada a su sucursal', async () => {
+    const user = { userId: 7, roles: ['sucursal'] };
+    for (const q of [
+      { branchId: 99 },
+      { origin: 'matriz' as const },
+      { origin: 'sucursal' as const, branchId: 3 },
+    ]) {
+      await run(q, user);
+      expect(lastWhere()).toEqual({ AND: [branchOrdersWhere(7), {}] });
+    }
+  });
+
+  it.each(['recepcion', 'admin', 'superuser'])(
+    '%s: origin y branchId se traducen a branchId null / not null / N',
+    async (role) => {
+      const user = { userId: 1, roles: [role] };
+      await run({ origin: 'matriz' }, user);
+      expect(lastWhere()).toEqual({
+        AND: [{}, { AND: [{ branchId: null }] }],
+      });
+      await run({ origin: 'sucursal' }, user);
+      expect(lastWhere()).toEqual({
+        AND: [{}, { AND: [{ branchId: { not: null } }] }],
+      });
+      await run({ branchId: 5 }, user);
+      expect(lastWhere()).toEqual({ AND: [{}, { AND: [{ branchId: 5 }] }] });
+      await run({}, user);
+      expect(lastWhere()).toEqual({ AND: [{}, {}] });
+    },
+  );
+
+  it('se combina en AND con los filtros propios del historial (cliente)', async () => {
+    await run(
+      { origin: 'matriz', clientId: 4 },
+      { userId: 1, roles: ['recepcion'] },
+    );
+    expect(lastWhere()).toEqual({
+      AND: [{}, { AND: [{ branchId: null }], clientId: 4 }],
+    });
   });
 });
 
