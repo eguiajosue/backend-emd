@@ -182,7 +182,7 @@ describe('OrderMockupService', () => {
       expect(prisma.orderMockup.create).not.toHaveBeenCalled();
     });
 
-    it.each(['hoodie', 'dress-shirt'])(
+    it.each(['hoodie', 'dress-shirt', 'termo', 'taza'])(
       'acepta %s (misma lista de prendas que las plantillas, decisión R11)',
       async (garment) => {
         await service.create(

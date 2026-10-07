@@ -34,7 +34,7 @@ describe('CreateOrderMockupDto', () => {
     ]);
   });
 
-  it.each(['tshirt', 'cap', 'hoodie', 'dress-shirt'])(
+  it.each(['tshirt', 'cap', 'hoodie', 'dress-shirt', 'termo', 'taza'])(
     'acepta la prenda %s (misma lista que las plantillas)',
     async (garment) => {
       expect(

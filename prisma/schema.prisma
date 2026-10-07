@@ -866,7 +866,7 @@ model ClientInsight {
 model OrderMockup {
   id          Int      @id @default(autoincrement()) // Identificador único del mockup.
   orderId     Int // Clave foránea que referencia al Order al que se adjuntó.
-  garment     String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
+  garment     String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' | 'termo' | 'taza' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
   imageData   String? // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada. Legacy: null si está en el almacenamiento de objetos.
   imageKey    String? // Clave del objeto (R2/S3) de la lámina. Si está, manda sobre imageData.
   imageMime   String // Mime type de la lámina: image/png | image/jpeg.
@@ -892,7 +892,7 @@ model OrderMockup {
 model MockupTemplate {
   id            Int      @id @default(autoincrement()) // Identificador único de la plantilla.
   name          String // Nombre que le puso el usuario (máx. 80 caracteres).
-  garment       String // Prenda de la plantilla: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
+  garment       String // Prenda de la plantilla: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' | 'termo' | 'taza' (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
   config        Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) que se aplica al elegirla. Máx. 8MB.
   thumbnailData String? // Miniatura en base64 (sin prefijo data:), PNG o JPEG, máx. 96KB decodificada. Se lista junto con la plantilla. Legacy: null si está en el almacenamiento de objetos.
   thumbnailKey  String? // Clave del objeto (R2/S3) de la miniatura. Si está, manda sobre thumbnailData.

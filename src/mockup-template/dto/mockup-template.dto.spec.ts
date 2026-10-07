@@ -35,7 +35,7 @@ describe('CreateMockupTemplateDto', () => {
     ).toEqual([]);
   });
 
-  it.each(['tshirt', 'cap', 'hoodie', 'dress-shirt'])(
+  it.each(['tshirt', 'cap', 'hoodie', 'dress-shirt', 'termo', 'taza'])(
     'acepta la prenda %s',
     async (garment) => {
       expect(
