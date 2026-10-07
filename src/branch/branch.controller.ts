@@ -31,7 +31,9 @@ import {
 /**
  * Sucursales y sus empleados. Administrar = admin/superuser (Usuarios).
  * Recepción lee el listado para el filtro "Sucursal" de Pedidos. La cuenta
- * de sucursal sólo lee lo suyo (`GET /branches/me`).
+ * de sucursal sólo lee lo suyo (`GET /branches/me`). Los logos de cada
+ * sucursal (variantes `onLight`/`onDark`) los sube admin/superuser y los lee
+ * cualquier usuario autenticado (`GET /branches/logos`).
  */
 @ApiTags('branches')
 @Controller('branches')
