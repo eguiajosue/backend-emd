@@ -107,6 +107,8 @@ describe('Inventario por área', () => {
           .mockResolvedValue({ firstName: 'Ana', lastName: 'Bordado' }),
       },
       order: { findUnique: jest.fn().mockResolvedValue({ id: 1 }) },
+      // Insumos apartados por hojas de materiales (no hay ninguno en estas pruebas).
+      orderAreaSupplyLine: { findMany: jest.fn().mockResolvedValue([]) },
       $queryRaw: jest
         .fn()
         .mockResolvedValue([{ quantity: new Prisma.Decimal(10) }]),
