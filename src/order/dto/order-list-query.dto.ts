@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -9,6 +10,10 @@ import {
 } from 'class-validator';
 import { EmptyToUndefined } from 'src/common/transformers/empty-to-undefined';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
+
+/** Origen del pedido: de la matriz (sin sucursal) o de alguna sucursal. */
+export const ORDER_ORIGINS = ['matriz', 'sucursal'] as const;
+export type OrderOrigin = (typeof ORDER_ORIGINS)[number];
 
 /**
  * Filtros opcionales de `GET /orders` (además de la paginación opt-in). Se
@@ -45,4 +50,29 @@ export class OrderListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsDateString()
   to?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Sólo pedidos de esa sucursal. Lo aplica únicamente la matriz; la cuenta de sucursal lo ignora (siempre ve sólo la suya).',
+  })
+  // Vacío = ausente (el Type de class-transformer lo volvería 0); un valor no
+  // numérico queda NaN y `@IsInt` lo rechaza con 400.
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === ''
+      ? undefined
+      : Number(value),
+  )
+  @IsOptional()
+  @IsInt()
+  branchId?: number;
+
+  @ApiPropertyOptional({
+    enum: ORDER_ORIGINS,
+    description:
+      '"matriz" = pedidos sin sucursal; "sucursal" = pedidos de cualquier sucursal. Lo aplica únicamente la matriz; la cuenta de sucursal lo ignora.',
+  })
+  @EmptyToUndefined()
+  @IsOptional()
+  @IsIn(ORDER_ORIGINS)
+  origin?: OrderOrigin;
 }

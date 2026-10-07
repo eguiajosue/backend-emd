@@ -38,6 +38,7 @@ export const STORAGE_FOLDERS = {
   mockupTemplateThumbnail: 'mockup-templates/thumbnails',
   mockupLogoImage: 'mockup-logos/images',
   mockupLogoThumbnail: 'mockup-logos/thumbnails',
+  branchLogo: 'branches/logos',
 } as const;
 
 /** Lecturas en paralelo como máximo al armar un listado (chat, plantillas). */

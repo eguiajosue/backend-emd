@@ -50,6 +50,7 @@ describe('Rol sucursal: rutas permitidas y prohibidas', () => {
     ['GET /order-product-presets', OrderProductPresetController, 'findAll'],
     ['GET /notifications', NotificationController, 'findAll'],
     ['GET /branches/me', BranchController, 'findMine'],
+    ['GET /branches/logos', BranchController, 'findLogos'],
   ])('permite %s', (_n, c, m) => {
     expect(allowed(c, m)).toBe(true);
   });
@@ -76,12 +77,16 @@ describe('Rol sucursal: rutas permitidas y prohibidas', () => {
     ['GET /branches/:id/employees', BranchController, 'findEmployees'],
     ['POST /branches/:id/employees', BranchController, 'createEmployee'],
     ['PATCH employee', BranchController, 'updateEmployee'],
+    ['PUT /branches/:id/logo/:variant', BranchController, 'setLogo'],
+    ['DELETE /branches/:id/logo/:variant', BranchController, 'removeLogo'],
   ])('prohíbe %s', (_n, c, m) => {
     expect(allowed(c, m)).toBe(false);
   });
 
   it('administrar sucursales y empleados es sólo de admin/superuser', () => {
     for (const m of [
+      'setLogo',
+      'removeLogo',
       'create',
       'update',
       'findEmployees',
@@ -94,6 +99,50 @@ describe('Rol sucursal: rutas permitidas y prohibidas', () => {
           BranchController.prototype[m as 'create'],
         ) ?? [];
       expect([...roles].sort()).toEqual([Role.ADMIN, Role.SUPERUSER].sort());
+    }
+  });
+
+  it('subir y quitar logos: sólo admin y superuser (Recepción y áreas no)', () => {
+    for (const m of ['setLogo', 'removeLogo'] as const) {
+      const roles =
+        reflector.get<Role[]>(ROLES_KEY, BranchController.prototype[m]) ?? [];
+      expect([...roles].sort()).toEqual([Role.ADMIN, Role.SUPERUSER].sort());
+      for (const denied of [
+        Role.RECEPCION,
+        Role.DISENO,
+        Role.TALLER,
+        Role.SUCURSAL,
+      ]) {
+        expect(roles).not.toContain(denied);
+      }
+    }
+  });
+
+  it('GET /branches/logos lo lee TODO rol (producción, TV y sucursal)', () => {
+    const roles =
+      reflector.get<Role[]>(ROLES_KEY, BranchController.prototype.findLogos) ??
+      [];
+    expect([...roles].sort()).toEqual(Object.values(Role).sort());
+  });
+
+  it('PUT del logo tiene throttle estricto (20/min) y el GET de logos cache privada', () => {
+    expect(
+      Reflect.getMetadata(
+        'THROTTLER:LIMITdefault',
+        BranchController.prototype.setLogo,
+      ),
+    ).toBe(20);
+    expect(
+      Reflect.getMetadata('__headers__', BranchController.prototype.findLogos),
+    ).toEqual([{ name: 'Cache-Control', value: 'private, max-age=300' }]);
+  });
+
+  it('"logos" y "me" se declaran antes que las rutas con :id', () => {
+    const names = Object.getOwnPropertyNames(BranchController.prototype);
+    const first = (m: string) => names.indexOf(m);
+    for (const withId of ['update', 'setLogo', 'removeLogo', 'findEmployees']) {
+      expect(first('findLogos')).toBeLessThan(first(withId));
+      expect(first('findMine')).toBeLessThan(first(withId));
     }
   });
 });

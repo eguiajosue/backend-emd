@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   buildPaginatedResult,
@@ -11,6 +12,7 @@ import {
 } from 'src/common/dto/pagination-query.dto';
 import { PushService } from 'src/push/push.service';
 import { ExpoPushService } from 'src/push/expo-push.service';
+import { branchOrdersWhere, isBranchOnlyUser } from 'src/branch/branch-access';
 
 /** Datos necesarios para crear una notificación persistente. */
 export interface CreateNotificationInput {
@@ -104,9 +106,13 @@ export class NotificationService {
     return prefs.notifyCriticalAlerts;
   }
 
-  private async getNotificationPreferences(
-    userId: number,
-  ): Promise<NotificationPreferences | null> {
+  private async getNotificationPreferences(userId: number): Promise<
+    | (NotificationPreferences & {
+        branchId: number | null;
+        roles: { name: string }[];
+      })
+    | null
+  > {
     return this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -114,8 +120,37 @@ export class NotificationService {
         notifyMentionsOnly: true,
         notifyProductionUpdates: true,
         notifyCriticalAlerts: true,
+        branchId: true,
+        roles: { select: { name: true } },
       },
     });
+  }
+
+  /**
+   * Quita de los destinatarios a las cuentas SÓLO-sucursal cuyo `branchId` no
+   * es el de la sucursal dueña del pedido (los pedidos de la matriz no son de
+   * ninguna sucursal). Los demás roles pasan intactos.
+   */
+  private async excludeBranchStrangers<
+    T extends {
+      id: number;
+      branchId: number | null;
+      roles: { name: string }[];
+    },
+  >(users: T[], orderId: number): Promise<T[]> {
+    const branchAccounts = users.filter((u) =>
+      isBranchOnlyUser(u.roles.map((r) => r.name)),
+    );
+    if (branchAccounts.length === 0) return users;
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { branchId: true },
+    });
+    return users.filter(
+      (u) =>
+        !branchAccounts.includes(u) ||
+        (order?.branchId != null && order.branchId === u.branchId),
+    );
   }
 
   /**
@@ -133,6 +168,20 @@ export class NotificationService {
   async createNotification(input: CreateNotificationInput) {
     const prefs = await this.getNotificationPreferences(input.userId);
     if (!this.shouldNotify(prefs, input.type)) {
+      return null;
+    }
+    // Una cuenta de sucursal nunca recibe avisos de pedidos que no son de su
+    // sucursal (aunque hoy ningún flujo se los mande: defensa en profundidad).
+    if (
+      input.orderId != null &&
+      prefs &&
+      (
+        await this.excludeBranchStrangers(
+          [{ ...prefs, id: input.userId }],
+          input.orderId,
+        )
+      ).length === 0
+    ) {
       return null;
     }
 
@@ -179,11 +228,19 @@ export class NotificationService {
         notifyMentionsOnly: true,
         notifyProductionUpdates: true,
         notifyCriticalAlerts: true,
+        branchId: true,
+        roles: { select: { name: true } },
       },
     });
-    const prefsByUserId = new Map(users.map((u) => [u.id, u]));
-    const recipientIds = userIds.filter((userId) =>
-      this.shouldNotify(prefsByUserId.get(userId), input.type),
+    const allowedUsers =
+      input.orderId != null
+        ? await this.excludeBranchStrangers(users, input.orderId)
+        : users;
+    const prefsByUserId = new Map(allowedUsers.map((u) => [u.id, u]));
+    const recipientIds = userIds.filter(
+      (userId) =>
+        (input.orderId == null || prefsByUserId.has(userId)) &&
+        this.shouldNotify(prefsByUserId.get(userId), input.type),
     );
     if (recipientIds.length === 0) {
       return;
@@ -223,10 +280,29 @@ export class NotificationService {
     return users.map((u) => u.id);
   }
 
+  /**
+   * Notificaciones que el usuario puede ver. A una cuenta SÓLO-sucursal se le
+   * ocultan las ligadas a pedidos que no son de su sucursal.
+   */
+  private visibleNotificationsWhere(
+    userId: number,
+    roles?: string[],
+  ): Prisma.NotificationWhereInput {
+    if (!isBranchOnlyUser(roles)) return { userId };
+    return {
+      userId,
+      OR: [{ orderId: null }, { order: branchOrdersWhere(userId) }],
+    };
+  }
+
   /** Notificaciones del usuario autenticado, más recientes primero. */
-  async findAllForUser(userId: number, query?: PaginationQueryDto) {
+  async findAllForUser(
+    userId: number,
+    query?: PaginationQueryDto,
+    roles?: string[],
+  ) {
     const { enabled, page, limit, skip } = resolvePagination(query);
-    const where = { userId };
+    const where = this.visibleNotificationsWhere(userId, roles);
 
     if (!enabled) {
       return this.prisma.notification.findMany({
@@ -249,9 +325,12 @@ export class NotificationService {
   }
 
   /** Cantidad de notificaciones no leídas del usuario, para el badge de la campanita. */
-  async unreadCount(userId: number): Promise<{ unreadCount: number }> {
+  async unreadCount(
+    userId: number,
+    roles?: string[],
+  ): Promise<{ unreadCount: number }> {
     const unreadCount = await this.prisma.notification.count({
-      where: { userId, read: false },
+      where: { ...this.visibleNotificationsWhere(userId, roles), read: false },
     });
     return { unreadCount };
   }

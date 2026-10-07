@@ -1081,6 +1081,15 @@ model Branch {
   active    Boolean  @default(true) // Sucursal inactiva: su cuenta no puede levantar pedidos.
   createdAt DateTime @default(now()) // Fecha de alta.
 
+  // Logo de la sucursal en dos variantes (PNG, JPEG o WebP; máx. 400 KB y 2000×2000 px): `onLight` para fondos claros (logo negro) y `onDark` para fondos oscuros (logo blanco). Cada una vive en la columna base64 (legacy / STORAGE_DRIVER=db) o en el bucket (clave); si hay clave, manda sobre el base64.
+  logoOnLightData String? // Logo para fondos claros en base64 (sin prefijo data:). Null si no hay o si está en el bucket.
+  logoOnLightKey  String? // Clave del objeto (R2/S3) del logo para fondos claros. Si está, manda sobre logoOnLightData.
+  logoOnLightMime String? // Mime del logo para fondos claros: image/png | image/jpeg | image/webp.
+  logoOnDarkData  String? // Logo para fondos oscuros en base64 (sin prefijo data:). Null si no hay o si está en el bucket.
+  logoOnDarkKey   String? // Clave del objeto (R2/S3) del logo para fondos oscuros. Si está, manda sobre logoOnDarkData.
+  logoOnDarkMime  String? // Mime del logo para fondos oscuros: image/png | image/jpeg | image/webp.
+  logoUpdatedAt   DateTime? // Última vez que se subió o quitó un logo (sirve para invalidar cachés del cliente). Null si nunca tuvo.
+
   users     User[] // Cuentas de la sucursal (normalmente una compartida).
   employees BranchEmployee[] // Empleados que levantan pedidos desde la cuenta compartida.
   orders    Order[] // Pedidos levantados desde la sucursal.

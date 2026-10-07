@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsNotEmpty,
@@ -47,4 +48,19 @@ export class UpdateBranchEmployeeDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+}
+
+/**
+ * Body de `PUT /branches/:id/logo/:variant`. El data URL se valida a fondo en
+ * `BranchService.setLogo` (base64 estricto, firma real PNG/JPEG/WebP, 400 KB,
+ * 2000×2000 px).
+ */
+export class SetBranchLogoDto {
+  @ApiProperty({
+    description:
+      'data:image/(png|jpeg|webp);base64,... (máx. 400 KB y 2000×2000 px).',
+  })
+  @IsString({ message: 'La imagen del logo es obligatoria' })
+  @IsNotEmpty({ message: 'La imagen del logo es obligatoria' })
+  imageDataUrl: string;
 }
