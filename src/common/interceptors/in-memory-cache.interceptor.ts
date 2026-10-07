@@ -26,6 +26,16 @@ interface CacheEntry {
  */
 const cacheStore = new Map<string, CacheEntry>();
 
+/**
+ * Invalida activamente las entradas cacheadas de una clase de controlador
+ * (p. ej. al crear un elemento que debe verse de inmediato en su GET).
+ */
+export function invalidateControllerCache(controllerName: string): void {
+  for (const key of cacheStore.keys()) {
+    if (key.startsWith(`${controllerName}:`)) cacheStore.delete(key);
+  }
+}
+
 export const CACHE_TTL_METADATA = 'cache_ttl_ms';
 
 /** Decorador de método: TTL en milisegundos para cachear la respuesta GET. */

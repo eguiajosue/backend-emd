@@ -16,6 +16,7 @@ import { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
+import { OrderListQueryDto } from './dto/order-list-query.dto';
 import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -81,7 +82,7 @@ export class OrderController {
   @Auth(...ORDER_VIEWING_ROLES_WITH_BRANCH)
   @Get()
   findAll(
-    @Query() query: PaginationQueryDto,
+    @Query() query: OrderListQueryDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
     return this.orderService.findAll(query, {

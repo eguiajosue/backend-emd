@@ -39,6 +39,40 @@ export class OrderProductPresetService {
   }
 
   /**
+   * Find-or-create por nombre (`POST /order-product-presets`), idempotente e
+   * insensible a mayúsculas/acentos/espacios: "gorra", "Gorra " y "GORRA" son
+   * el mismo preset y devuelve el existente tal cual (no lo renombra).
+   * Devuelve `{ id, name, uses }` como el listado.
+   */
+  async findOrCreate(name: string) {
+    const trimmed = name.trim().replace(/\s+/g, ' ');
+    const key = normalizeKey(trimmed);
+    let preset = (await this.prisma.orderProductPreset.findMany()).find(
+      (p) => normalizeKey(p.name) === key,
+    );
+    if (!preset) {
+      try {
+        preset = await this.prisma.orderProductPreset.create({
+          data: { name: trimmed },
+        });
+      } catch (error) {
+        // Carrera: otra petición lo creó entre el find y el create.
+        if ((error as { code?: string }).code !== 'P2002') throw error;
+        preset = await this.prisma.orderProductPreset.findUnique({
+          where: { name: trimmed },
+        });
+        if (!preset) throw error;
+      }
+    }
+    const found = (await this.findAll()).find((p) => p.id === preset.id);
+    return {
+      id: preset.id,
+      name: preset.name,
+      uses: found?.uses ?? 0,
+    };
+  }
+
+  /**
    * Crea el preset si no existe todavía (alta automática cuando recepción
    * escribe un nombre de producto nuevo al crear un pedido). No expuesto
    * como endpoint propio.

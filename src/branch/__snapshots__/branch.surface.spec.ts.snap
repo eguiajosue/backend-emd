@@ -1,0 +1,38 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`Rol sucursal: superficie completa de la API lista cerrada de rutas abiertas a sucursal 1`] = `
+[
+  "BranchController.findMine",
+  "ClientController.create",
+  "ClientController.findAll",
+  "ClientController.findOne",
+  "ClientController.update",
+  "MockupLogoController.create",
+  "MockupLogoController.findAll",
+  "MockupLogoController.findImage",
+  "MockupLogoController.findThumbnail",
+  "MockupLogoController.markUsed",
+  "MockupTemplateController.create",
+  "MockupTemplateController.findAll",
+  "MockupTemplateController.findOne",
+  "NotificationController.findAll",
+  "NotificationController.markAllAsRead",
+  "NotificationController.markAsRead",
+  "NotificationController.unreadCount",
+  "OrderController.create",
+  "OrderController.findAll",
+  "OrderController.findOne",
+  "OrderController.getAreaTasks",
+  "OrderController.getDesignRevisionFeedbackFile",
+  "OrderController.getDesignRevisionFile",
+  "OrderController.getDesignRevisionMontage",
+  "OrderController.getDesignRevisions",
+  "OrderMockupController.create",
+  "OrderMockupController.findAll",
+  "OrderMockupController.findOne",
+  "OrderProductPresetController.create",
+  "OrderProductPresetController.findAll",
+  "StatusController.findAll",
+  "UserController.findAll",
+]
+`;
