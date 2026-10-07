@@ -22,7 +22,12 @@ describe('MockupLogoController: roles y contrato de rutas', () => {
     return [...roles].sort();
   };
 
-  const ROLES = [Role.RECEPCION, Role.ADMIN, Role.SUPERUSER].sort();
+  const ROLES = [
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.DISENO,
+  ].sort();
 
   // La cuenta de sucursal usa Mockups: lee, guarda y usa; renombrar y borrar
   // quedan para la matriz.

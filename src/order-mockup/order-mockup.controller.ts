@@ -23,8 +23,9 @@ import { OrderMockupService } from './order-mockup.service';
  * Mockups 3D de un pedido. Leerlos puede cualquiera que vea el detalle del
  * pedido (mismos roles que `GET /orders/:id`, más la visibilidad por área
  * de `assertOrderAccess` en el service). Adjuntarlos y borrarlos, sólo quien
- * arma el pedido con el cliente: Recepción, admin y superuser (y la
- * sucursal, sólo para adjuntar a sus propios pedidos).
+ * arma el pedido con el cliente o diseña el montaje: Recepción, admin,
+ * superuser y Diseño (y la sucursal, sólo para adjuntar a sus propios
+ * pedidos).
  */
 @ApiTags('order-mockups')
 @Controller('orders/:id/mockups')
@@ -60,7 +61,7 @@ export class OrderMockupController {
   // global, igual que las demás subidas de archivos del pedido.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   // La sucursal adjunta mockups a SUS pedidos (assertOrderAccess).
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.SUCURSAL)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO, Role.SUCURSAL)
   @Post()
   create(
     @Param('id', ParseIntPipe) orderId: number,
@@ -73,7 +74,7 @@ export class OrderMockupController {
     });
   }
 
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':mockupId')
   remove(

@@ -9,7 +9,7 @@ import { OrderMockupController } from './order-mockup.controller';
 /**
  * Roles de `/orders/:id/mockups` vía metadata de Nest (mismo criterio que
  * RolesGuard: handler y, si no hay, clase). Leer = quien ve el detalle del
- * pedido; adjuntar/borrar = sólo Recepción, admin y superuser.
+ * pedido; adjuntar/borrar = Recepción, admin, superuser y Diseño.
  */
 describe('OrderMockupController: roles y contrato de rutas', () => {
   const reflector = new Reflector();
@@ -38,7 +38,12 @@ describe('OrderMockupController: roles y contrato de rutas', () => {
     Role.SUCURSAL,
   ].sort();
 
-  const WRITE_ROLES = [Role.RECEPCION, Role.ADMIN, Role.SUPERUSER].sort();
+  const WRITE_ROLES = [
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.DISENO,
+  ].sort();
 
   it.each([
     ['GET /orders/:id/mockups', 'findAll'],
@@ -50,13 +55,13 @@ describe('OrderMockupController: roles y contrato de rutas', () => {
     expect(rolesFor(OrderMockupController, method)).toEqual(ORDER_DETAIL_ROLES);
   });
 
-  it('POST /orders/:id/mockups acepta recepcion, admin, superuser y sucursal', () => {
+  it('POST /orders/:id/mockups acepta recepcion, admin, superuser, diseno y sucursal', () => {
     expect(rolesFor(OrderMockupController, 'create')).toEqual(
       [...WRITE_ROLES, Role.SUCURSAL].sort(),
     );
   });
 
-  it('DELETE /orders/:id/mockups/:mockupId sólo acepta recepcion, admin y superuser', () => {
+  it('DELETE /orders/:id/mockups/:mockupId acepta recepcion, admin, superuser y diseno', () => {
     expect(rolesFor(OrderMockupController, 'remove')).toEqual(WRITE_ROLES);
   });
 

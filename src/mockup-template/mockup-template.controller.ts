@@ -30,7 +30,7 @@ import { MockupTemplateService } from './mockup-template.service';
  */
 @ApiTags('mockup-templates')
 // La sucursal usa Mockups: lee, guarda y usa; renombrar/borrar no.
-@Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.SUCURSAL)
+@Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO, Role.SUCURSAL)
 @Controller('mockup-templates')
 export class MockupTemplateController {
   constructor(private readonly mockupTemplateService: MockupTemplateService) {}
@@ -56,7 +56,7 @@ export class MockupTemplateController {
     return this.mockupTemplateService.create(dto, user.sub);
   }
 
-  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO)
   @Patch(':id')
   rename(
     @Param('id', ParseIntPipe) id: number,
@@ -66,7 +66,7 @@ export class MockupTemplateController {
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO)
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.mockupTemplateService.remove(id);
