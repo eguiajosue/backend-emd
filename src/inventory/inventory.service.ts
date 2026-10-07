@@ -12,6 +12,7 @@ import { NotificationService } from '../notification/notification.service';
 import { AccessTokenPayload } from '../auth/auth.service';
 import { isFullVisibilityRole } from '../order/role-stage-mapping';
 import { toCsv } from '../common/utils/csv';
+import { reservedByItem } from '../order/order-area-supply';
 import {
   BARCODE_MAX_LENGTH,
   BARCODE_MIN_LENGTH,
@@ -181,13 +182,19 @@ export class InventoryService {
     return this.areasFor(actor.roles);
   }
 
-  private serializeItem(item: ItemRow) {
+  /**
+   * `reserved`: lo apartado por hojas de materiales de pedidos (insumos
+   * "nuestros" aún sin descontar). `available` = existencia − apartado.
+   */
+  private serializeItem(item: ItemRow, reserved = 0) {
     const quantity = Number(item.quantity);
     const minStock = toNumber(item.minStock);
     const unitCost = toNumber(item.unitCost);
     return {
       ...item,
       quantity,
+      reserved,
+      available: quantity - reserved,
       minStock,
       unitCost,
       stockStatus: stockStatusOf(quantity, minStock),
@@ -266,13 +273,24 @@ export class InventoryService {
       select: ITEM_SELECT,
       orderBy: [{ area: 'asc' }, { name: 'asc' }],
     });
-    return items.map((item) => this.serializeItem(item));
+    const reserved = await reservedByItem(
+      this.prisma,
+      items.map((i) => i.id),
+    );
+    return items.map((item) =>
+      this.serializeItem(item, reserved.get(item.id) ?? 0),
+    );
+  }
+
+  /** Apartado de un solo artículo (ver `serializeItem`). */
+  private async reservedOf(id: number) {
+    return (await reservedByItem(this.prisma, [id])).get(id) ?? 0;
   }
 
   async findOne(id: number, actor: Actor) {
     const item = await this.findRowOrThrow(id);
     this.assertArea(actor, item.area);
-    return this.serializeItem(item);
+    return this.serializeItem(item, await this.reservedOf(id));
   }
 
   /**
@@ -303,7 +321,7 @@ export class InventoryService {
         `No hay ningún artículo con el código ${code}`,
       );
     }
-    return this.serializeItem(item);
+    return this.serializeItem(item, await this.reservedOf(item.id));
   }
 
   /**
@@ -530,7 +548,10 @@ export class InventoryService {
 
     return {
       movement: this.serializeMovement(movement),
-      item: this.serializeItem(await this.findRowOrThrow(id)),
+      item: this.serializeItem(
+        await this.findRowOrThrow(id),
+        await this.reservedOf(id),
+      ),
     };
   }
 

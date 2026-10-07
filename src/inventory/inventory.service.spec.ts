@@ -158,6 +158,7 @@ describe('InventoryService', () => {
     order: { findUnique: jest.Mock };
     $queryRaw: jest.Mock;
     $transaction: jest.Mock;
+    orderAreaSupplyLine: { findMany: jest.Mock };
   };
   let notifications: {
     userIdsForArea: jest.Mock;
@@ -183,6 +184,7 @@ describe('InventoryService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       order: { findUnique: jest.fn().mockResolvedValue({ id: 99 }) },
+      orderAreaSupplyLine: { findMany: jest.fn().mockResolvedValue([]) },
       $queryRaw: jest
         .fn()
         .mockResolvedValue([{ quantity: new Prisma.Decimal(10) }]),

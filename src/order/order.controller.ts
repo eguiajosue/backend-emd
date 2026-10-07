@@ -4,6 +4,7 @@ import {
   Post,
   Body,
   Patch,
+  Put,
   Param,
   Delete,
   Query,
@@ -40,6 +41,7 @@ import {
   UpdateOrderMaterialItemDto,
 } from './dto/order-material-item.dto';
 import { OrderMaterialItemService } from './order-material-item.service';
+import { SaveAreaSuppliesDto } from './dto/order-area-supply.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
@@ -677,9 +679,54 @@ export class OrderController {
   }
 
   /**
-   * Hoja de materiales del pedido: hace falta al menos una línea para
-   * autorizar el montaje (ver approveDesignRevision). La carga Recepción (o
-   * admin/superuser) para que producción sepa qué se va a usar.
+   * Hoja de materiales por área (origen de insumos): se captura al autorizar
+   * el montaje; aquí se consulta con su estado (apartado/descontado) y los
+   * movimientos de inventario que generó.
+   */
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.DISENO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get(':id/area-supplies')
+  async getAreaSupplies(
+    @Param('id') id: string,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    await this.orderService.assertOrderAccess(+id, {
+      userId: user.sub,
+      roles: user.roles,
+    });
+    return this.orderAreaTaskService.getSupplySheet(+id);
+  }
+
+  /** Corrige la hoja de materiales después de autorizar. */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+  @Put(':id/area-supplies')
+  async saveAreaSupplies(
+    @Param('id') id: string,
+    @Body() dto: SaveAreaSuppliesDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    const requestingUser = { userId: user.sub, roles: user.roles };
+    await this.orderService.assertOrderAccess(+id, requestingUser);
+    return this.orderAreaTaskService.saveSupplies(
+      +id,
+      dto.supplies,
+      requestingUser,
+    );
+  }
+
+  /**
+   * Hoja de materiales de COMPRA del pedido (catálogo de Materiales). Ya no
+   * bloquea autorizar: el origen de insumos por área se captura al autorizar
+   * (ver `area-supplies`). Se conserva para lo que hay que comprar.
    */
   @Auth(
     Role.RECEPCION,

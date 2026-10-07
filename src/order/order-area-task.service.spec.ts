@@ -38,6 +38,7 @@ describe('OrderAreaTaskService', () => {
     orderHistory: { create: jest.Mock };
     status: { findUnique: jest.Mock };
     user: { findFirst: jest.Mock; findUnique: jest.Mock; findMany: jest.Mock };
+    orderAreaSupplyLine: { findMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let notificationService: {
@@ -79,6 +80,8 @@ describe('OrderAreaTaskService', () => {
         findUnique: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
       },
+      // Sin hoja de materiales: el cambio de estado no toca inventario.
+      orderAreaSupplyLine: { findMany: jest.fn().mockResolvedValue([]) },
       // Transacción interactiva: el servicio le pasa un callback que corre
       // contra el mismo cliente mockeado.
       $transaction: jest.fn(async (arg: unknown) =>

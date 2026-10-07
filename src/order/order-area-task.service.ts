@@ -10,6 +10,14 @@ import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { Role } from 'src/common/enums/roles.enum';
 import { PRODUCTION_AREAS } from './dto/create-order.dto';
+import { AreaSupplyDto } from './dto/order-area-supply.dto';
+import {
+  TASK_SUPPLY_SELECT,
+  applySupplyInventoryForStatusTx,
+  reservedByItem,
+  saveSuppliesTx,
+  serializeSupply,
+} from './order-area-supply';
 import type { RequestingUser } from './order.service';
 import {
   StatusIdResolver,
@@ -130,6 +138,8 @@ export class OrderAreaTaskService {
           isSharedAccount: true,
         },
       },
+      // Origen de insumos del área ("del cliente — 12 playeras negras").
+      supply: TASK_SUPPLY_SELECT,
     } satisfies Prisma.OrderAreaTaskSelect;
   }
 
@@ -138,8 +148,11 @@ export class OrderAreaTaskService {
    * defecto de sus tareas. Si el área no tiene una, la tarea queda sin asignar
    * y la toma quien la trabaje.
    */
-  private async sharedAccountIdForArea(area: string): Promise<number | null> {
-    const shared = await this.prisma.user.findFirst({
+  private async sharedAccountIdForArea(
+    area: string,
+    client: Pick<Prisma.TransactionClient, 'user'> = this.prisma,
+  ): Promise<number | null> {
+    const shared = await client.user.findFirst({
       where: { isSharedAccount: true, roles: { some: { name: area } } },
       select: { id: true },
     });
@@ -166,12 +179,13 @@ export class OrderAreaTaskService {
   async createTasksForAreas(
     orderId: number,
     areas: string[],
-    options?: { notify?: boolean },
+    options?: { notify?: boolean; tx?: Prisma.TransactionClient },
   ) {
+    const client = options?.tx ?? this.prisma;
     const unique = [...new Set(areas)];
     unique.forEach((area) => this.assertProductionArea(area));
 
-    const existing = await this.prisma.orderAreaTask.findMany({
+    const existing = await client.orderAreaTask.findMany({
       where: { orderId },
       select: { area: true },
     });
@@ -181,8 +195,8 @@ export class OrderAreaTaskService {
 
     const created = await Promise.all(
       toCreate.map(async (area) => {
-        const assignedUserId = await this.sharedAccountIdForArea(area);
-        return this.prisma.orderAreaTask.create({
+        const assignedUserId = await this.sharedAccountIdForArea(area, client);
+        return client.orderAreaTask.create({
           data: { orderId, area, assignedUserId },
           select: this.taskSelect(),
         });
@@ -413,6 +427,104 @@ export class OrderAreaTaskService {
     return items;
   }
 
+  /**
+   * GET /orders/:id/area-supplies — hoja de materiales por área: origen,
+   * líneas con su estado (apartado / descontado), existencia y apartado
+   * total de cada artículo, y los movimientos de inventario que generó.
+   */
+  async getSupplySheet(orderId: number) {
+    const tasks = await this.prisma.orderAreaTask.findMany({
+      where: { orderId },
+      select: {
+        id: true,
+        area: true,
+        status: true,
+        supply: TASK_SUPPLY_SELECT,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const itemIds = [
+      ...new Set(
+        tasks.flatMap(
+          (t) =>
+            t.supply?.lines
+              .map((l) => l.inventoryItemId)
+              .filter((id): id is number => id !== null) ?? [],
+        ),
+      ),
+    ];
+    const [items, reserved, movements] = await Promise.all([
+      itemIds.length
+        ? this.prisma.inventoryItem.findMany({
+            where: { id: { in: itemIds } },
+            select: { id: true, quantity: true },
+          })
+        : Promise.resolve([]),
+      reservedByItem(this.prisma, itemIds),
+      this.prisma.inventoryMovement.findMany({
+        where: { orderId, areaTaskId: { not: null } },
+        select: {
+          id: true,
+          itemId: true,
+          type: true,
+          delta: true,
+          balanceAfter: true,
+          note: true,
+          areaTaskId: true,
+          createdAt: true,
+          item: { select: { id: true, name: true, unit: true } },
+          createdBy: { select: { id: true, firstName: true, lastName: true } },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }),
+    ]);
+    const stock = new Map(items.map((i) => [i.id, Number(i.quantity)]));
+    return {
+      areas: tasks.map((task) => {
+        const supply = serializeSupply(task.supply);
+        return {
+          taskId: task.id,
+          area: task.area,
+          status: task.status,
+          supply: supply && {
+            ...supply,
+            lines: supply.lines.map((line) => {
+              const id = line.inventoryItemId;
+              if (id === null) return { ...line, stock: null };
+              const quantity = stock.get(id) ?? 0;
+              const held = reserved.get(id) ?? 0;
+              return {
+                ...line,
+                state: line.discountedAt ? 'descontado' : 'apartado',
+                stock: { quantity, reserved: held, available: quantity - held },
+              };
+            }),
+          },
+        };
+      }),
+      movements: movements.map((m) => ({
+        ...m,
+        delta: Number(m.delta),
+        balanceAfter: Number(m.balanceAfter),
+      })),
+    };
+  }
+
+  /**
+   * PUT /orders/:id/area-supplies — corrige la hoja de materiales después de
+   * autorizar (Recepción/admin). Devuelve la hoja y los avisos de stock.
+   */
+  async saveSupplies(
+    orderId: number,
+    supplies: AreaSupplyDto[],
+    requestingUser: RequestingUser,
+  ) {
+    const warnings = await this.prisma.$transaction((tx) =>
+      saveSuppliesTx(tx, orderId, supplies, requestingUser.userId),
+    );
+    return { ...(await this.getSupplySheet(orderId)), warnings };
+  }
+
   /** Tareas de un pedido, en orden de creación. */
   async findByOrder(orderId: number) {
     return this.prisma.orderAreaTask.findMany({
@@ -462,15 +574,26 @@ export class OrderAreaTaskService {
       (await this.isUnclaimed(task.area, task.assignedUserId));
 
     const now = new Date();
-    const updated = await this.prisma.orderAreaTask.update({
-      where: { id: taskId },
-      data: {
+    // Cambio de estado + descuento/devolución de insumos "nuestros" en UNA
+    // transacción: si no alcanza el stock, la tarea no queda terminada.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await applySupplyInventoryForStatusTx(
+        tx,
+        task,
+        task.status,
         status,
-        ...(shouldClaim && { assignedUserId: requestingUser.userId }),
-        ...(status === AreaTaskStatus.en_proceso && { startedAt: now }),
-        ...(status === AreaTaskStatus.terminado && { completedAt: now }),
-      },
-      select: this.taskSelect(),
+        requestingUser.userId,
+      );
+      return tx.orderAreaTask.update({
+        where: { id: taskId },
+        data: {
+          status,
+          ...(shouldClaim && { assignedUserId: requestingUser.userId }),
+          ...(status === AreaTaskStatus.en_proceso && { startedAt: now }),
+          ...(status === AreaTaskStatus.terminado && { completedAt: now }),
+        },
+        select: this.taskSelect(),
+      });
     });
 
     await this.syncOrderStatusFromTasks(task.orderId, requestingUser.userId);

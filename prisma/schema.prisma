@@ -307,6 +307,7 @@ model OrderAreaTask {
 
   order        Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   assignedUser User? @relation("AssignedAreaTasks", fields: [assignedUserId], references: [id])
+  supply       OrderAreaSupply? // Hoja de materiales del área: de dónde salen los insumos (ver WORKFLOW.md §3).
 
   // Un área no puede aparecer dos veces en el mismo pedido.
   @@unique([orderId, area])
@@ -740,6 +741,7 @@ model InventoryItem {
   material  Material?           @relation(fields: [materialId], references: [id], onDelete: SetNull)
   supplier  Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   movements InventoryMovement[]
+  supplyLines OrderAreaSupplyLine[] // Líneas de hojas de materiales que apartan este artículo.
 
   @@unique([area, sku])
   @@index([area])
@@ -756,6 +758,7 @@ model InventoryMovement {
   unitCost     Decimal?              @db.Decimal(10, 2) // Costo unitario de esta entrada (si se informó).
   note         String?
   orderId      Int? // Pedido al que se imputa el consumo (opcional).
+  areaTaskId   Int? // Tarea de área cuyo "terminado" generó el movimiento (descuento automático de la hoja de materiales).
   createdById  Int
   createdAt    DateTime              @default(now())
 
@@ -765,7 +768,48 @@ model InventoryMovement {
 
   @@index([itemId, createdAt])
   @@index([orderId])
+  @@index([areaTaskId])
   @@index([createdAt])
+}
+
+// ─── Hoja de materiales por área (origen de insumos) ───────────────────────
+//
+// Se captura cuando Recepción marca que el cliente autorizó el montaje: por
+// cada tarea de área del pedido se indica si los insumos los trae el cliente
+// o los ponemos nosotros. Los "nuestros" ligados a inventario quedan
+// APARTADOS al guardar y se DESCUENTAN (SALIDA) cuando el área marca su tarea
+// como terminada; si la tarea regresa de terminado se devuelven (ENTRADA).
+
+enum SupplySource {
+  cliente // Lo trae el cliente: nunca toca inventario.
+  nosotros // Lo ponemos nosotros: sale del inventario del taller.
+}
+
+model OrderAreaSupply {
+  id          Int          @id @default(autoincrement())
+  areaTaskId  Int          @unique
+  source      SupplySource
+  createdById Int
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  areaTask OrderAreaTask         @relation(fields: [areaTaskId], references: [id], onDelete: Cascade)
+  lines    OrderAreaSupplyLine[]
+}
+
+model OrderAreaSupplyLine {
+  id              Int       @id @default(autoincrement())
+  supplyId        Int
+  inventoryItemId Int? // Sólo en origen "nosotros"; null = línea de texto libre (no está en inventario).
+  description     String // "12 playeras negras del cliente", "Film DTF".
+  quantity        Decimal   @db.Decimal(12, 3)
+  discountedAt    DateTime? // Cuándo se descontó del stock (null = apartado / sin descontar).
+
+  supply        OrderAreaSupply @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem?  @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([supplyId])
+  @@index([inventoryItemId])
 }
 
 // ─── Plantillas de pedido por cliente ──────────────────────────────────────

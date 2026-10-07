@@ -42,6 +42,11 @@ import {
   StoredBlob,
 } from 'src/storage/storage.service';
 import { collectOrderObjectKeys } from 'src/storage/order-object-keys';
+import {
+  TASK_SUPPLY_SELECT,
+  saveSuppliesTx,
+  validateSupplies,
+} from './order-area-supply';
 
 /** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
@@ -830,6 +835,7 @@ export class OrderService {
           area: true,
           status: true,
           assignedUserId: true,
+          supply: TASK_SUPPLY_SELECT,
         },
       },
       // Hoja de materiales: liviana en el listado (sólo lo que necesita el
@@ -2505,20 +2511,6 @@ export class OrderService {
     await this.assertRevisionAwaitingResponse(orderId, revisionToApprove);
     const order = await this.getOrderOrThrow(orderId);
 
-    // La hoja de materiales se tiene que cargar ANTES de autorizar: producción
-    // necesita saber qué se va a usar desde el momento en que arranca, no
-    // enterarse después. Al menos una línea alcanza — no hace falta que ya
-    // esté todo comprado.
-    const materialCount = await this.prisma.orderMaterialItem.count({
-      where: { orderId },
-    });
-    if (materialCount === 0) {
-      throw new HttpException(
-        'Carga la hoja de materiales del pedido antes de autorizar el diseño',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
     // Áreas que van a producir el pedido. Pueden ser varias y trabajan en
     // paralelo (WORKFLOW.md §3): las define Diseño aquí, o vienen planificadas
     // por Recepción desde el alta como tareas ya creadas.
@@ -2542,57 +2534,87 @@ export class OrderService {
     // toda la lógica existente de visibilidad y listados.
     const productionArea = dto.productionArea ?? resolvedAreas[0];
 
+    // Hoja de materiales al autorizar (WORKFLOW.md §3): por cada área se dice
+    // si los insumos los trae el cliente o los ponemos nosotros. Reemplaza la
+    // vieja regla de "al menos una línea de materiales antes de autorizar".
+    const supplies = dto.supplies ?? [];
+    validateSupplies(supplies);
+    const coveredAreas = new Set(supplies.map((s) => s.area as string));
+    const uncovered = resolvedAreas.filter((area) => !coveredAreas.has(area));
+    if (uncovered.length > 0) {
+      throw new HttpException(
+        `Captura la hoja de materiales (origen de insumos) de: ${uncovered.map(chatAreaLabel).join(', ')}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const extra = supplies.filter((s) => !resolvedAreas.includes(s.area));
+    if (extra.length > 0) {
+      throw new HttpException(
+        `${chatAreaLabel(extra[0].area)} no es un área de este pedido`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     const statusId = await this.resolveStatusIdByName(STATUS_NAME_AUTORIZADO);
 
-    const [revision] = await this.prisma.$transaction([
-      this.prisma.designRevision.update({
-        where: { id: revisionId },
-        data: {
-          approved: true,
-          approvedAt: new Date(),
-          approvedByUser: { connect: { id: requestingUser.userId } },
-        },
-      }),
-      this.prisma.order.update({
-        where: { id: orderId },
-        data: {
-          area: productionArea,
-          productionArea,
-          status: { connect: { id: statusId } },
-          // El diseñador deja de ser el responsable del pedido: a partir de aquí
-          // manda cada tarea de área con su propio asignado (WORKFLOW.md §3).
-          // Queda registrado abajo en la auditoría y en las rondas de montaje.
-          assignedUser: { disconnect: true },
-          // Archivado: sale del tablero ACTIVO de Diseño (ya no es trabajo
-          // pendiente de esa área) pero sigue en el historial. WORKFLOW.md §2.
-          archivedAt: new Date(),
-        },
-      }),
-      this.prisma.orderAuditLog.create({
-        data: {
-          action: 'design_approved',
-          changes: {
-            revisionId,
-            statusId,
+    // Autorización + tareas de área + hoja de materiales en UNA transacción:
+    // el pedido pasa a producción sólo si la hoja quedó guardada.
+    const { revision, supplyWarnings } = await this.prisma.$transaction(
+      async (tx) => {
+        const approvedRevision = await tx.designRevision.update({
+          where: { id: revisionId },
+          data: {
+            approved: true,
+            approvedAt: new Date(),
+            approvedByUser: { connect: { id: requestingUser.userId } },
+          },
+        });
+        await tx.order.update({
+          where: { id: orderId },
+          data: {
+            area: productionArea,
             productionArea,
-            productionAreas: resolvedAreas,
-            // Quién venía trabajando el montaje, para no perder el rastro al
-            // liberar `assignedUserId`.
-            previousAssignedUserId: order.assignedUserId ?? null,
-          } as Prisma.InputJsonValue,
-          order: { connect: { id: orderId } },
-          user: { connect: { id: requestingUser.userId } },
-        },
-      }),
-    ]);
+            status: { connect: { id: statusId } },
+            // El diseñador deja de ser el responsable del pedido: a partir de aquí
+            // manda cada tarea de área con su propio asignado (WORKFLOW.md §3).
+            // Queda registrado abajo en la auditoría y en las rondas de montaje.
+            assignedUser: { disconnect: true },
+            // Archivado: sale del tablero ACTIVO de Diseño (ya no es trabajo
+            // pendiente de esa área) pero sigue en el historial. WORKFLOW.md §2.
+            archivedAt: new Date(),
+          },
+        });
+        await tx.orderAuditLog.create({
+          data: {
+            action: 'design_approved',
+            changes: {
+              revisionId,
+              statusId,
+              productionArea,
+              productionAreas: resolvedAreas,
+              // Quién venía trabajando el montaje, para no perder el rastro al
+              // liberar `assignedUserId`.
+              previousAssignedUserId: order.assignedUserId ?? null,
+            } as Prisma.InputJsonValue,
+            order: { connect: { id: orderId } },
+            user: { connect: { id: requestingUser.userId } },
+          },
+        });
 
-    // Crea las tareas de las áreas que falten (idempotente: las planificadas
-    // desde el alta ya existen y no se duplican).
-    await this.orderAreaTaskService.createTasksForAreas(
-      orderId,
-      resolvedAreas,
-      {
-        notify: false,
+        // Crea las tareas de las áreas que falten (idempotente: las
+        // planificadas desde el alta ya existen y no se duplican).
+        await this.orderAreaTaskService.createTasksForAreas(
+          orderId,
+          resolvedAreas,
+          { notify: false, tx },
+        );
+        const warnings = await saveSuppliesTx(
+          tx,
+          orderId,
+          supplies,
+          requestingUser.userId,
+        );
+        return { revision: approvedRevision, supplyWarnings: warnings };
       },
     );
 
@@ -2631,7 +2653,7 @@ export class OrderService {
       where: { id: revision.id },
       select: this.designRevisionListSelect(),
     });
-    return this.toDesignRevisionListItem(updated);
+    return { ...this.toDesignRevisionListItem(updated), supplyWarnings };
   }
 
   /** GET /orders/:id/design-revisions — rondas ordenadas asc, sin blobs. */

@@ -12,6 +12,7 @@ import {
 import { Type } from 'class-transformer';
 import { OrderFileDto, PRODUCTION_AREAS } from './create-order.dto';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
+import { AreaSupplyDto } from './order-area-supply.dto';
 
 /** Máximo de archivos que admite una ronda, por lado (montaje / feedback). */
 export const MAX_DESIGN_REVISION_FILES = 10;
@@ -71,7 +72,8 @@ export class AddDesignFeedbackDto {
 
 /**
  * Body (opcional) de `PATCH /orders/:id/design-revisions/:revisionId/approve`:
- * permite fijar/corregir el área de producción destino al autorizar.
+ * permite fijar/corregir el área de producción destino al autorizar y trae
+ * la hoja de materiales (origen de insumos por área).
  */
 export class ApproveDesignRevisionDto {
   @IsOptional()
@@ -85,4 +87,14 @@ export class ApproveDesignRevisionDto {
   @ArrayMaxSize(PRODUCTION_AREAS.length)
   @IsIn(PRODUCTION_AREAS, { each: true })
   productionAreas?: (typeof PRODUCTION_AREAS)[number][];
+
+  // Hoja de materiales: origen de los insumos de cada área (cliente o
+  // nosotros). Es obligatoria: el pedido pasa a producción al guardarla, en
+  // la misma transacción que la autorización (WORKFLOW.md §3).
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(PRODUCTION_AREAS.length)
+  @ValidateNested({ each: true })
+  @Type(() => AreaSupplyDto)
+  supplies?: AreaSupplyDto[];
 }

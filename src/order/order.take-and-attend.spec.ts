@@ -320,6 +320,7 @@ describe('OrderAreaTaskService: destinatario efectivo de los avisos a Recepción
         findUnique: jest.fn().mockResolvedValue({ id: 4 }),
       },
       user: { findFirst: jest.fn().mockResolvedValue(null) },
+      orderAreaSupplyLine: { findMany: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn(async (arg: unknown) =>
         typeof arg === 'function'
           ? (arg as (tx: unknown) => unknown)(prisma)
