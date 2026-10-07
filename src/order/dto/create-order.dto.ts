@@ -7,6 +7,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsPositive,
   IsString,
@@ -66,6 +67,13 @@ export class OrderProductDto {
   @IsInt()
   @Min(1, { message: 'La cantidad debe ser al menos 1' })
   quantity: number;
+
+  /** Desglose opcional de tallas (corte → talla → piezas). Si viene, su
+   * total debe coincidir con `quantity`. La forma fina se valida en el
+   * service con `normalizeSizeBreakdown` (src/common/garment-sizes.ts). */
+  @IsOptional()
+  @IsObject()
+  sizes?: Record<string, Record<string, number>> | null;
 }
 
 /** Áreas/departamentos operativos válidos para un pedido. Coincide 1:1 con

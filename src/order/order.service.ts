@@ -1,3 +1,7 @@
+import {
+  normalizeSizeBreakdown,
+  sizeBreakdownTotal,
+} from 'src/common/garment-sizes';
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import { PrismaService } from '../prisma/prisma.service';
@@ -261,7 +265,19 @@ export class OrderService {
     return order.attendedByUserId ?? order.userId;
   }
 
-  /** Valida que cada línea de producto traiga nombre y cantidad. */
+  /** Datos de una línea de producto para Prisma (con tallas normalizadas). */
+  private toOrderProductData(op: OrderProductDto) {
+    return {
+      quantity: op.quantity,
+      customName: op.customName.trim(),
+      sizes: (normalizeSizeBreakdown(op.sizes) ?? Prisma.DbNull) as
+        | Prisma.InputJsonValue
+        | typeof Prisma.DbNull,
+    };
+  }
+
+  /** Valida que cada línea de producto traiga nombre y cantidad, y que el
+   * desglose de tallas (si viene) sea válido y sume la cantidad. */
   private assertOrderProductsValid(orderProducts?: OrderProductDto[]) {
     if (!orderProducts) {
       return;
@@ -270,6 +286,14 @@ export class OrderService {
       if (!op.customName?.trim()) {
         throw new HttpException(
           'Cada producto debe tener un producto registrado o un nombre',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const sizes = normalizeSizeBreakdown(op.sizes);
+      const total = sizeBreakdownTotal(sizes);
+      if (sizes && total !== op.quantity) {
+        throw new HttpException(
+          `La cantidad de "${op.customName.trim()}" (${op.quantity}) no coincide con el total de tallas (${total})`,
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -708,10 +732,7 @@ export class OrderService {
         },
         orderProducts: orderProducts
           ? {
-              create: orderProducts.map((op) => ({
-                quantity: op.quantity,
-                customName: op.customName.trim(),
-              })),
+              create: orderProducts.map((op) => this.toOrderProductData(op)),
             }
           : undefined,
         ...(clientResourceFile && {
@@ -1432,10 +1453,7 @@ export class OrderService {
         ...(orderProducts && {
           orderProducts: {
             deleteMany: {}, // Elimina los productos existentes en la orden
-            create: orderProducts.map((op) => ({
-              quantity: op.quantity,
-              customName: op.customName.trim(),
-            })),
+            create: orderProducts.map((op) => this.toOrderProductData(op)),
           },
         }),
         ...(clientResourceFile && {
