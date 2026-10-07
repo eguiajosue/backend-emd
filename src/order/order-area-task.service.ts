@@ -73,6 +73,8 @@ export interface MyTaskItem {
     username: string;
   } | null;
   startedAt: Date | null;
+  /** Origen de insumos del área (hoja de materiales); null si no hay. */
+  supply?: unknown;
   order: {
     id: number;
     description: string;
@@ -405,6 +407,7 @@ export class OrderAreaTaskService {
           assignedUserId: true,
           startedAt: true,
           assignedUser: assigneeSelect,
+          supply: TASK_SUPPLY_SELECT,
           order: { select: orderSelect },
         },
       });
@@ -419,6 +422,7 @@ export class OrderAreaTaskService {
           mine: isMine(task.assignedUserId),
           assignee: isFree(task.assignedUserId) ? null : task.assignedUser,
           startedAt: task.startedAt,
+          supply: serializeSupply(task.supply),
           order: task.order,
         });
       }
