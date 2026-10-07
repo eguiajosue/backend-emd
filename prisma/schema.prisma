@@ -26,8 +26,10 @@ model Client {
   phone      String? // Número de teléfono del cliente.
   email      String? // Dirección de correo electrónico del cliente.
   address    String? // Dirección física del cliente.
+  branchId   Int? // Sucursal dueña del cliente (cada sucursal tiene los suyos). Null = cliente de la matriz.
 
   company        Company?        @relation(fields: [companyId], references: [id]) // Relación con Company.
+  branch         Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal dueña (ver Branch).
   orders         Order[] // Relación uno a muchos con el modelo Order.
   calendarEvents CalendarEvent[] // Eventos del calendario de Recepción vinculados a este cliente.
   orderTemplates OrderTemplate[] // Plantillas de pedido de este cliente (lo que suele pedir).
@@ -36,6 +38,7 @@ model Client {
 
   @@index([companyId])
   @@index([last_name, first_name])
+  @@index([branchId])
 }
 
 model Role {
@@ -1081,6 +1084,7 @@ model Branch {
   users     User[] // Cuentas de la sucursal (normalmente una compartida).
   employees BranchEmployee[] // Empleados que levantan pedidos desde la cuenta compartida.
   orders    Order[] // Pedidos levantados desde la sucursal.
+  clients   Client[] // Clientes propios de la sucursal (los de la matriz tienen branchId null).
 }
 
 model BranchEmployee {

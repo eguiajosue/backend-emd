@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
+import { ClientListQueryDto } from './dto/client-list-query.dto';
 import { ClientService } from './client.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -30,8 +31,15 @@ export class ClientController {
   // La sucursal también registra clientes nuevos al levantar un pedido.
   @Auth(Role.RECEPCION, Role.SUCURSAL)
   @Post()
-  create(@Body() createClientDto: CreateClientDto) {
-    return this.clientService.create(createClientDto);
+  create(
+    @Body() createClientDto: CreateClientDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    // La sucursal crea clientes SUYOS (branchId lo fija el servidor).
+    return this.clientService.create(createClientDto, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
   // Lectura abierta a todos los roles que pueden ver pedidos: la pantalla de
@@ -51,8 +59,14 @@ export class ClientController {
     Role.SUCURSAL,
   )
   @Get()
-  findAll(@Query() query: PaginationQueryDto) {
-    return this.clientService.findAll(query);
+  findAll(
+    @Query() query: ClientListQueryDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.clientService.findAll(query, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
   @Auth(
@@ -69,16 +83,28 @@ export class ClientController {
     Role.SUCURSAL,
   )
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.clientService.findOne(+id);
+  findOne(@Param('id') id: string, @ActiveUser() user: AccessTokenPayload) {
+    return this.clientService.findOne(+id, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
-  @Auth(Role.RECEPCION)
+  // La sucursal edita sólo SUS clientes (el service responde 403 si es ajeno).
+  @Auth(Role.RECEPCION, Role.SUCURSAL)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateClientDto: UpdateClientDto) {
-    return this.clientService.update(+id, updateClientDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateClientDto: UpdateClientDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.clientService.update(+id, updateClientDto, {
+      userId: user.sub,
+      roles: user.roles,
+    });
   }
 
+  // Borrar clientes es sólo de la matriz (la sucursal no puede: 403).
   @Auth(Role.RECEPCION)
   @Delete(':id')
   remove(@Param('id') id: string) {

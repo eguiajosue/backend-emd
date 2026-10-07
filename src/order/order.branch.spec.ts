@@ -162,6 +162,135 @@ describe('OrderService - sucursal', () => {
     });
   });
 
+  describe('historial propio (GET /orders con filtros)', () => {
+    const branchScope = { branch: { users: { some: { id: 7 } } } };
+
+    beforeEach(() => {
+      prisma.$transaction.mockImplementation((ops: Promise<unknown>[]) =>
+        Promise.all(ops),
+      );
+      prisma.order.count.mockResolvedValue(0);
+    });
+
+    it('sin filtros lista TODOS sus pedidos (sin excluir terminados/entregados), más reciente primero', async () => {
+      await service.findAll(undefined, branchUser);
+      const args = prisma.order.findMany.mock.calls[0][0];
+      expect(JSON.stringify(args.where)).not.toMatch(/statusId|archivedAt/);
+      expect(args.orderBy).toEqual([{ creationDate: 'desc' }, { id: 'desc' }]);
+    });
+
+    it('incluye empleado, cliente, estado y productos', async () => {
+      await service.findAll(undefined, branchUser);
+      const { select } = prisma.order.findMany.mock.calls[0][0];
+      expect(select.branchEmployee).toEqual({
+        select: { id: true, name: true },
+      });
+      expect(select.client).toBe(true);
+      expect(select.status).toBe(true);
+      expect(select.orderProducts).toBe(true);
+    });
+
+    it('statusId y rango from/to se aplican en AND con el alcance de la sucursal', async () => {
+      await service.findAll(
+        { statusId: 4, from: '2026-10-01', to: '2026-10-07' },
+        branchUser,
+      );
+      const { where } = prisma.order.findMany.mock.calls[0][0];
+      expect(where.AND[0]).toEqual(branchScope);
+      expect(where.AND[1]).toEqual({
+        statusId: 4,
+        creationDate: {
+          gte: new Date('2026-10-01'),
+          lte: new Date('2026-10-07T23:59:59.999Z'),
+        },
+      });
+    });
+
+    it('q busca por id, descripción, nombre libre, cliente y empresa', async () => {
+      await service.findAll({ q: ' 42 ' }, branchUser);
+      const { where } = prisma.order.findMany.mock.calls[0][0];
+      const or = where.AND[1].OR;
+      expect(where.AND[0]).toEqual(branchScope);
+      expect(or).toEqual(
+        expect.arrayContaining([
+          { id: 42 },
+          { description: { contains: '42', mode: 'insensitive' } },
+          { clientNameOverride: { contains: '42', mode: 'insensitive' } },
+        ]),
+      );
+      expect(JSON.stringify(or)).toContain('first_name');
+      expect(JSON.stringify(or)).toContain('company');
+    });
+
+    it('un q de texto no genera filtro por id', async () => {
+      await service.findAll({ q: 'gorras' }, branchUser);
+      const or = prisma.order.findMany.mock.calls[0][0].where.AND[1].OR;
+      expect(or.some((c: any) => 'id' in c)).toBe(false);
+    });
+
+    it('paginación: page/limit con total y meta', async () => {
+      prisma.order.count.mockResolvedValue(45);
+      const res: any = await service.findAll(
+        { page: 2, limit: 20 },
+        branchUser,
+      );
+      const args = prisma.order.findMany.mock.calls[0][0];
+      expect(args.skip).toBe(20);
+      expect(args.take).toBe(20);
+      expect(res.meta).toEqual({
+        total: 45,
+        page: 2,
+        limit: 20,
+        totalPages: 3,
+      });
+    });
+
+    it('el orden por id se conserva para la matriz', async () => {
+      await service.findAll(undefined, { userId: 2, roles: ['recepcion'] });
+      expect(prisma.order.findMany.mock.calls[0][0].orderBy).toEqual([
+        { id: 'desc' },
+      ]);
+    });
+  });
+
+  describe('cliente del pedido de sucursal', () => {
+    beforeEach(() => {
+      prisma.client = { findUnique: jest.fn() };
+    });
+
+    it('acepta un cliente de SU sucursal', async () => {
+      prisma.client.findUnique.mockResolvedValue({ branchId: 1 });
+      await service.create(
+        { ...dto, clientId: 10, branchEmployeeId: 5 },
+        branchUser,
+      );
+      expect(prisma.order.create).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['de la matriz', { branchId: null }],
+      ['de otra sucursal', { branchId: 2 }],
+      ['inexistente', null],
+    ])('rechaza (400) un cliente %s', async (_n, client) => {
+      prisma.client.findUnique.mockResolvedValue(client);
+      await expect(
+        service.create(
+          { ...dto, clientId: 10, branchEmployeeId: 5 },
+          branchUser,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(prisma.order.create).not.toHaveBeenCalled();
+    });
+
+    it('Recepción puede usar cualquier cliente (no se valida sucursal)', async () => {
+      await service.create(
+        { ...dto, clientId: 10 },
+        { userId: 2, roles: ['recepcion'] },
+      );
+      expect(prisma.client.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
   it('assertOrderAccess niega un pedido que no es de la sucursal', async () => {
     prisma.order.findUnique.mockResolvedValue({
       id: 1,

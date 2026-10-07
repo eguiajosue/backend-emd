@@ -4,6 +4,7 @@ import {
 } from 'src/common/garment-sizes';
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { assertBase64FileValid } from 'src/common/file-validation';
+import { OrderListQueryDto } from './dto/order-list-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateOrderDto,
@@ -678,6 +679,21 @@ export class OrderService {
         requestingUser,
       );
 
+      // Cada sucursal tiene sus propios clientes: el cliente registrado
+      // tiene que ser de SU sucursal (no de la matriz ni de otra sucursal).
+      if (branchOrigin && clientId) {
+        const client = await this.prisma.client.findUnique({
+          where: { id: clientId },
+          select: { branchId: true },
+        });
+        if (!client || client.branchId !== branchOrigin.branch.id) {
+          throw new HttpException(
+            'El cliente no pertenece a tu sucursal. Elige uno de tus clientes o regístralo primero',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+      }
+
       const trimmedClientNameOverride = clientNameOverride?.trim();
       if (!clientId && !trimmedClientNameOverride) {
         throw new HttpException(
@@ -1045,11 +1061,26 @@ export class OrderService {
     };
   };
 
-  async findAll(query?: PaginationQueryDto, requestingUser?: RequestingUser) {
+  async findAll(query?: OrderListQueryDto, requestingUser?: RequestingUser) {
     try {
       const select = this.orderListSelect(requestingUser);
       const { enabled, page, limit, skip } = resolvePagination(query);
-      const where = this.orderVisibilityWhere(requestingUser);
+      const visibilityWhere = this.orderVisibilityWhere(requestingUser);
+      // Filtros opcionales (q, statusId, from, to) SIEMPRE en AND con la
+      // visibilidad del rol: nunca amplían lo que el usuario puede ver.
+      const filters = this.listFiltersWhere(query);
+      const where: Prisma.OrderWhereInput | null =
+        visibilityWhere === null
+          ? null
+          : Object.keys(filters).length === 0
+            ? visibilityWhere
+            : { AND: [visibilityWhere, filters] };
+      // El historial de la sucursal va de lo más reciente a lo más antiguo
+      // por fecha de creación; el resto de roles conserva el orden por id.
+      const orderBy: Prisma.OrderOrderByWithRelationInput[] =
+        requestingUser && isBranchOnlyUser(requestingUser.roles)
+          ? [{ creationDate: 'desc' }, { id: 'desc' }]
+          : [{ id: 'desc' }];
 
       if (where === null) {
         // Sin ningún rol que le dé acceso: no ve nada. Se corta aquí sin
@@ -1059,7 +1090,11 @@ export class OrderService {
       }
 
       if (!enabled) {
-        const orders = await this.prisma.order.findMany({ where, select });
+        const orders = await this.prisma.order.findMany({
+          where,
+          select,
+          orderBy,
+        });
         return orders.map(this.toListItem);
       }
 
@@ -1070,7 +1105,7 @@ export class OrderService {
         this.prisma.order.findMany({
           where,
           select,
-          orderBy: { id: 'desc' },
+          orderBy,
           skip,
           take: limit,
         }),
@@ -1143,6 +1178,49 @@ export class OrderService {
       // detalles internos (Prisma, stack) al cliente en producción.
       throw error;
     }
+  }
+
+  /**
+   * Filtros opcionales de `GET /orders`: búsqueda `q` (id exacto, descripción,
+   * nombre libre del cliente, nombre/apellido del cliente registrado o su
+   * empresa), estado y rango de fecha de creación. `to` sólo con fecha
+   * (YYYY-MM-DD) incluye todo ese día.
+   */
+  private listFiltersWhere(query?: OrderListQueryDto): Prisma.OrderWhereInput {
+    if (!query) return {};
+    const q = query.q?.trim();
+    const { statusId, from, to } = query;
+    const idMatch =
+      q && /^#?\d{1,9}$/.test(q) ? Number(q.replace('#', '')) : null;
+    const toDate = to
+      ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999Z` : to)
+      : undefined;
+    const text = { contains: q, mode: 'insensitive' as const };
+    return {
+      ...(q && {
+        OR: [
+          ...(idMatch !== null ? [{ id: idMatch }] : []),
+          { description: text },
+          { clientNameOverride: text },
+          {
+            client: {
+              OR: [
+                { first_name: text },
+                { last_name: text },
+                { company: { name: text } },
+              ],
+            },
+          },
+        ],
+      }),
+      ...(statusId && { statusId }),
+      ...((from || toDate) && {
+        creationDate: {
+          ...(from && { gte: new Date(from) }),
+          ...(toDate && { lte: toDate }),
+        },
+      }),
+    };
   }
 
   /** Filtros opcionales del historial: cliente, área y rango de entrega. */

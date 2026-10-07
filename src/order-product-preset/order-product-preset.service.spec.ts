@@ -39,3 +39,57 @@ describe('OrderProductPresetService.findAll', () => {
     );
   });
 });
+
+describe('OrderProductPresetService.findOrCreate', () => {
+  const build = (existing: { id: number; name: string }[]) => {
+    const rows = [...existing];
+    const prisma: any = {
+      orderProductPreset: {
+        findMany: jest.fn().mockImplementation(async () => [...rows]),
+        create: jest.fn().mockImplementation(async ({ data }) => {
+          const row = { id: 99, ...data };
+          rows.push(row);
+          return row;
+        }),
+        findUnique: jest.fn(),
+      },
+      orderProduct: { groupBy: jest.fn().mockResolvedValue([]) },
+    };
+    return {
+      prisma,
+      service: new OrderProductPresetService(prisma as PrismaService),
+    };
+  };
+
+  it('crea el preset nuevo con el nombre sin espacios de más', async () => {
+    const { prisma, service } = build([{ id: 1, name: 'Gorra' }]);
+    const res = await service.findOrCreate('  Termo   grande ');
+    expect(prisma.orderProductPreset.create).toHaveBeenCalledWith({
+      data: { name: 'Termo grande' },
+    });
+    expect(res).toMatchObject({ id: 99, name: 'Termo grande' });
+  });
+
+  it('es idempotente e insensible a mayúsculas y acentos', async () => {
+    const { prisma, service } = build([{ id: 5, name: 'Camión' }]);
+    const res = await service.findOrCreate('  CAMION ');
+    expect(prisma.orderProductPreset.create).not.toHaveBeenCalled();
+    expect(res).toEqual({ id: 5, name: 'Camión', uses: 0 });
+  });
+
+  it('si otra petición lo creó a la vez (P2002) devuelve el existente', async () => {
+    const { prisma, service } = build([]);
+    prisma.orderProductPreset.create.mockRejectedValue({ code: 'P2002' });
+    prisma.orderProductPreset.findUnique.mockResolvedValue({
+      id: 7,
+      name: 'Lona',
+    });
+    prisma.orderProductPreset.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 7, name: 'Lona' }]);
+    await expect(service.findOrCreate('Lona')).resolves.toMatchObject({
+      id: 7,
+      name: 'Lona',
+    });
+  });
+});

@@ -141,3 +141,21 @@ describe('InventoryController: roles y contrato de rutas', () => {
     );
   });
 });
+
+describe('InventoryController: la cuenta de sucursal no entra (403)', () => {
+  const reflector = new Reflector();
+  it('ninguna ruta de /inventory (ni reabasto, bitácora, escáner) incluye sucursal', () => {
+    const methods = Object.getOwnPropertyNames(
+      InventoryController.prototype,
+    ).filter((m) => m !== 'constructor');
+    expect(methods.length).toBeGreaterThan(10);
+    for (const m of methods) {
+      const roles =
+        reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+          (InventoryController.prototype as any)[m],
+          InventoryController,
+        ]) ?? [];
+      expect(roles).not.toContain(Role.SUCURSAL);
+    }
+  });
+});
