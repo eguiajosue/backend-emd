@@ -42,14 +42,15 @@ const OPERATIONAL_ROLE_NAMES = [
  * GenerateUsernameMiddleware para este tipo de cuenta. El nombre visible va
  * sin prefijo: el frontend ya antepone "Área:" al mostrarlas.
  */
-const AREA_ACCOUNT_SEEDS: { role: string; username: string; label: string }[] = [
-  { role: 'diseno', username: 'diseno', label: 'Diseño' },
-  { role: 'taller', username: 'taller', label: 'Taller' },
-  { role: 'dtf', username: 'dtf', label: 'DTF' },
-  { role: 'bordado', username: 'bordado', label: 'Bordado' },
-  { role: 'laser', username: 'laser', label: 'Láser' },
-  { role: 'impresiones', username: 'impresiones', label: 'Impresiones' },
-];
+const AREA_ACCOUNT_SEEDS: { role: string; username: string; label: string }[] =
+  [
+    { role: 'diseno', username: 'diseno', label: 'Diseño' },
+    { role: 'taller', username: 'taller', label: 'Taller' },
+    { role: 'dtf', username: 'dtf', label: 'DTF' },
+    { role: 'bordado', username: 'bordado', label: 'Bordado' },
+    { role: 'laser', username: 'laser', label: 'Láser' },
+    { role: 'impresiones', username: 'impresiones', label: 'Impresiones' },
+  ];
 
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
@@ -119,11 +120,36 @@ const DEMO_COMPANIES = [
 ];
 
 const DEMO_CLIENTS = [
-  { first_name: 'Carlos', last_name: 'Morales', phone: '+502 5123-4567', email: 'carlos.morales@textilesdelvalle.com' },
-  { first_name: 'Ana', last_name: 'Ramírez', phone: '+502 5234-5678', email: 'ana.ramirez@confeccionesandina.com' },
-  { first_name: 'Luis', last_name: 'García', phone: '+502 5345-6789', email: 'luis.garcia@uniformesexpress.com' },
-  { first_name: 'María', last_name: 'López', phone: '+502 5456-7890', email: 'maria.lopez@bordadosreal.com' },
-  { first_name: 'Jorge', last_name: 'Pérez', phone: '+502 5567-8901', email: 'jorge.perez@modacorporativa.com' },
+  {
+    first_name: 'Carlos',
+    last_name: 'Morales',
+    phone: '+502 5123-4567',
+    email: 'carlos.morales@textilesdelvalle.com',
+  },
+  {
+    first_name: 'Ana',
+    last_name: 'Ramírez',
+    phone: '+502 5234-5678',
+    email: 'ana.ramirez@confeccionesandina.com',
+  },
+  {
+    first_name: 'Luis',
+    last_name: 'García',
+    phone: '+502 5345-6789',
+    email: 'luis.garcia@uniformesexpress.com',
+  },
+  {
+    first_name: 'María',
+    last_name: 'López',
+    phone: '+502 5456-7890',
+    email: 'maria.lopez@bordadosreal.com',
+  },
+  {
+    first_name: 'Jorge',
+    last_name: 'Pérez',
+    phone: '+502 5567-8901',
+    email: 'jorge.perez@modacorporativa.com',
+  },
 ];
 
 // Productos frecuentes iniciales (ver src/order-product-preset). La lista
@@ -215,7 +241,9 @@ async function main() {
         roles: { connect: [{ id: roles['admin'].id }] },
       },
     });
-    console.log(`  admin user already existed, password and role reset (id=${existingAdmin.id})`);
+    console.log(
+      `  admin user already existed, password and role reset (id=${existingAdmin.id})`,
+    );
   } else {
     const admin = await prisma.user.create({
       data: {
@@ -367,9 +395,13 @@ async function main() {
             companyId: company.id,
           },
         });
-        console.log(`  client "${clientData.first_name} ${clientData.last_name}" created (id=${client.id})`);
+        console.log(
+          `  client "${clientData.first_name} ${clientData.last_name}" created (id=${client.id})`,
+        );
       } else {
-        console.log(`  client "${clientData.first_name} ${clientData.last_name}" already exists (id=${client.id})`);
+        console.log(
+          `  client "${clientData.first_name} ${clientData.last_name}" already exists (id=${client.id})`,
+        );
       }
       clients.push(client);
     }

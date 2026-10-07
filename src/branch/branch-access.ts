@@ -74,7 +74,10 @@ export async function assertActiveBranchEmployee(
     );
   }
   if (!employee.active) {
-    throw new HttpException('El empleado está inactivo', HttpStatus.BAD_REQUEST);
+    throw new HttpException(
+      'El empleado está inactivo',
+      HttpStatus.BAD_REQUEST,
+    );
   }
   return employee;
 }

@@ -127,7 +127,10 @@ export class UserService {
         );
       }
       if (error.code === 'P2025') {
-        throw new HttpException('Sucursal no encontrada', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'Sucursal no encontrada',
+          HttpStatus.BAD_REQUEST,
+        );
       }
       // Errores desconocidos: los maneja AllExceptionsFilter, que no expone
       // detalles internos (Prisma, stack) al cliente en producción.

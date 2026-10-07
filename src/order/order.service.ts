@@ -576,7 +576,10 @@ export class OrderService {
     return { branch, employee };
   }
 
-  async create(createOrderDto: CreateOrderDto, requestingUser?: RequestingUser) {
+  async create(
+    createOrderDto: CreateOrderDto,
+    requestingUser?: RequestingUser,
+  ) {
     try {
       const {
         branchEmployeeId,

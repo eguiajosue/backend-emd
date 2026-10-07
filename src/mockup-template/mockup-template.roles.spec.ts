@@ -24,10 +24,19 @@ describe('MockupTemplateController: roles y contrato de rutas', () => {
 
   const ROLES = [Role.RECEPCION, Role.ADMIN, Role.SUPERUSER].sort();
 
+  // La cuenta de sucursal usa Mockups: lee, guarda y usa; renombrar y borrar
+  // quedan para la matriz.
   it.each([
     ['GET /mockup-templates', 'findAll'],
     ['GET /mockup-templates/:id', 'findOne'],
     ['POST /mockup-templates', 'create'],
+  ])('%s acepta recepcion, admin, superuser y sucursal', (_name, method) => {
+    expect(rolesFor(MockupTemplateController, method)).toEqual(
+      [...ROLES, Role.SUCURSAL].sort(),
+    );
+  });
+
+  it.each([
     ['PATCH /mockup-templates/:id', 'rename'],
     ['DELETE /mockup-templates/:id', 'remove'],
   ])('%s sólo acepta recepcion, admin y superuser', (_name, method) => {

@@ -56,7 +56,10 @@ export class BranchService {
         data: { branchId, name: dto.name },
       });
     } catch (error) {
-      throw this.mapUnique(error, 'Ya hay un empleado con ese nombre en la sucursal');
+      throw this.mapUnique(
+        error,
+        'Ya hay un empleado con ese nombre en la sucursal',
+      );
     }
   }
 
@@ -77,7 +80,10 @@ export class BranchService {
         data: dto,
       });
     } catch (error) {
-      throw this.mapUnique(error, 'Ya hay un empleado con ese nombre en la sucursal');
+      throw this.mapUnique(
+        error,
+        'Ya hay un empleado con ese nombre en la sucursal',
+      );
     }
   }
 
