@@ -15,6 +15,7 @@ export const REALTIME_MODELS = new Set<string>([
   'OrderHistory',
   'DesignRevision',
   'InventoryItem',
+  'RestockRequest',
   'CalendarEvent',
 ]);
 

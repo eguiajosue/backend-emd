@@ -78,6 +78,8 @@ model User {
   calendarTasks           CalendarTask[]           @relation("CalendarTaskCreatedBy") // Tareas pendientes (sin fecha) del calendario de equipo creadas por este usuario.
   orderMaterialItems      OrderMaterialItem[]      @relation("OrderMaterialItemCreatedBy") // Líneas de hoja de materiales cargadas por este usuario.
   inventoryMovements      InventoryMovement[]      @relation("InventoryMovementCreatedBy") // Entradas/salidas/ajustes de inventario registrados por este usuario.
+  restockRequests         RestockRequest[]         @relation("RestockRequestRequestedBy") // Avisos de reabasto que levantó.
+  restockRequestsHandled  RestockRequest[]         @relation("RestockRequestHandledBy") // Avisos de reabasto que atendió (Recepción/admin).
   orderMockupsCreated     OrderMockup[]            @relation("OrderMockupCreatedBy") // Mockups 3D (playera/gorra) que este usuario adjuntó a un pedido.
   mockupTemplatesCreated  MockupTemplate[]         @relation("MockupTemplateCreatedBy") // Plantillas de mockup (compartidas por la empresa) que guardó este usuario.
   mockupLogosCreated      MockupLogo[]             @relation("MockupLogoCreatedBy") // Logos de la biblioteca de mockups (compartida por la empresa) que subió este usuario.
@@ -747,10 +749,11 @@ model InventoryItem {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  material    Material?             @relation(fields: [materialId], references: [id], onDelete: SetNull)
-  supplier    Supplier?             @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  movements   InventoryMovement[]
-  supplyLines OrderAreaSupplyLine[] // Líneas de hojas de materiales que apartan este artículo.
+  material        Material?             @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  supplier        Supplier?             @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  movements       InventoryMovement[]
+  supplyLines     OrderAreaSupplyLine[] // Líneas de hojas de materiales que apartan este artículo.
+  restockRequests RestockRequest[]
 
   @@unique([area, sku])
   @@index([area])
@@ -759,17 +762,21 @@ model InventoryItem {
 }
 
 model InventoryMovement {
-  id           Int                   @id @default(autoincrement())
-  itemId       Int
-  type         InventoryMovementType
-  delta        Decimal               @db.Decimal(12, 3) // Cambio con signo aplicado al stock (+ entrada, - salida, ± ajuste).
-  balanceAfter Decimal               @db.Decimal(12, 3) // Stock resultante, para leer el kardex sin recalcular.
-  unitCost     Decimal?              @db.Decimal(10, 2) // Costo unitario de esta entrada (si se informó).
-  note         String?
-  orderId      Int? // Pedido al que se imputa el consumo (opcional).
-  areaTaskId   Int? // Tarea de área cuyo "terminado" generó el movimiento (descuento automático de la hoja de materiales).
-  createdById  Int
-  createdAt    DateTime              @default(now())
+  id            Int                   @id @default(autoincrement())
+  itemId        Int
+  type          InventoryMovementType
+  delta         Decimal               @db.Decimal(12, 3) // Cambio con signo aplicado al stock (+ entrada, - salida, ± ajuste).
+  balanceAfter  Decimal               @db.Decimal(12, 3) // Stock resultante, para leer el kardex sin recalcular.
+  unitCost      Decimal?              @db.Decimal(10, 2) // Costo unitario de esta entrada (si se informó).
+  note          String?
+  orderId       Int? // Pedido al que se imputa el consumo (opcional).
+  areaTaskId    Int? // Tarea de área cuyo "terminado" generó el movimiento (descuento automático de la hoja de materiales).
+  createdById   Int // Quién registró el movimiento (bitácora).
+  balanceBefore Decimal?              @db.Decimal(12, 3) // Stock antes del movimiento (bitácora: antes/después). Null en movimientos previos a la bitácora.
+  area          String? // Departamento del artículo al momento del movimiento (la bitácora no cambia si luego se reasigna).
+  reason        String? // Motivo capturado ("Se trajo directo al área", "Consumo pedido 123"...).
+  source        String? // Origen: "recepcion" (gestión), "area" (usuario de producción), "scan" (escáner), "inicial" (stock inicial).
+  createdAt     DateTime              @default(now())
 
   item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   order     Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
@@ -779,6 +786,49 @@ model InventoryMovement {
   @@index([orderId])
   @@index([areaTaskId])
   @@index([createdAt])
+  @@index([area, createdAt])
+  @@index([createdById, createdAt])
+}
+
+enum RestockRequestStatus {
+  PENDIENTE // Recién avisada por el área; Recepción no la ha atendido.
+  EN_CAMINO // Recepción ya pidió el insumo y viene en camino.
+  COMPRADO // Ya se compró; falta entregarlo/darle entrada.
+  RESUELTO // Entregado o descartado: cierra la solicitud.
+}
+
+enum RestockRequestUrgency {
+  NORMAL
+  URGENTE
+}
+
+// Aviso de "se acabó / requiere reabasto" que un área de producción levanta
+// para Recepción. Puede apuntar a un artículo del inventario del área o ser
+// texto libre (insumo que todavía no está dado de alta).
+model RestockRequest {
+  id            Int                   @id @default(autoincrement())
+  area          String // Departamento que pide (uno de INVENTORY_AREAS).
+  itemId        Int? // Artículo del inventario, si se eligió uno.
+  itemName      String // Nombre del insumo (copia del artículo o texto libre).
+  quantity      Decimal?              @db.Decimal(12, 3) // Cantidad sugerida (opcional).
+  unit          String?
+  comment       String?
+  urgency       RestockRequestUrgency @default(NORMAL)
+  status        RestockRequestStatus  @default(PENDIENTE)
+  statusNote    String? // Nota de Recepción al cambiar el estado ("Llega el jueves").
+  requestedById Int
+  handledById   Int? // Último usuario de Recepción/admin que cambió el estado.
+  resolvedAt    DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  item        InventoryItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  requestedBy User           @relation("RestockRequestRequestedBy", fields: [requestedById], references: [id])
+  handledBy   User?          @relation("RestockRequestHandledBy", fields: [handledById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([area, createdAt])
+  @@index([itemId])
 }
 
 // ─── Hoja de materiales por área (origen de insumos) ───────────────────────

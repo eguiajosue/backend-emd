@@ -13,6 +13,7 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { Auth } from 'src/common/decorators/auth.decorator';
+import { Roles } from 'src/common/decorators/roles.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
@@ -24,13 +25,38 @@ import {
   InventoryAreaQueryDto,
   InventoryMovementsQueryDto,
 } from './dto/inventory-query.dto';
+import {
+  CreateRestockRequestDto,
+  RestockRequestsQueryDto,
+  UpdateRestockRequestStatusDto,
+} from './dto/restock-request.dto';
+
+/** Quienes gestionan todo el inventario (altas, ajustes, bitácora, reabasto). */
+export const INVENTORY_MANAGER_ROLES = [
+  Role.RECEPCION,
+  Role.ADMIN,
+  Role.SUPERUSER,
+] as const;
+
+/** Áreas de producción con acceso a SU inventario (Diseño no lleva insumos aquí). */
+export const INVENTORY_AREA_ROLES = [
+  Role.TALLER,
+  Role.DTF,
+  Role.BORDADO,
+  Role.LASER,
+  Role.IMPRESIONES,
+] as const;
 
 /**
- * Inventario por departamento. Sólo lo ven y lo manejan Recepción,
- * admin y superuser; las áreas de producción y Diseño no tienen acceso.
+ * Inventario por departamento. Recepción, admin y superuser lo gestionan
+ * todo. Las áreas de producción entran a SU inventario: ven sus artículos,
+ * registran entradas y consumos y avisan reabasto; el servicio filtra cada
+ * consulta y rechaza artículos de otras áreas (403 por id, 404 por código).
+ * Las rutas marcadas con `@Roles(...INVENTORY_MANAGER_ROLES)` son sólo de
+ * gestión.
  */
 @ApiTags('inventory')
-@Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER)
+@Auth(...INVENTORY_MANAGER_ROLES, ...INVENTORY_AREA_ROLES)
 @Controller('inventory')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
@@ -49,7 +75,8 @@ export class InventoryController {
     return this.inventoryService.findAll(user, query.area);
   }
 
-  /** Últimos movimientos (kardex) de los departamentos visibles. */
+  /** Bitácora global: filtrable por área, usuario, artículo, tipo y fechas. */
+  @Roles(...INVENTORY_MANAGER_ROLES)
   @Get('movements')
   movements(
     @Query() query: InventoryMovementsQueryDto,
@@ -58,6 +85,7 @@ export class InventoryController {
     return this.inventoryService.findMovements(user, query);
   }
 
+  @Roles(...INVENTORY_MANAGER_ROLES)
   @Get('export')
   async export(
     @Query() query: InventoryAreaQueryDto,
@@ -71,6 +99,40 @@ export class InventoryController {
       `attachment; filename="inventario${query.area ? `-${query.area}` : ''}.csv"`,
     );
     res.send(csv);
+  }
+
+  /** Solicitudes de reabasto: Recepción ve todas, cada área las suyas. */
+  @Get('restock-requests')
+  restockRequests(
+    @Query() query: RestockRequestsQueryDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.inventoryService.findRestockRequests(user, query);
+  }
+
+  /** Conteo para el badge de "Solicitudes de reabasto". */
+  @Get('restock-requests/count')
+  restockCount(@ActiveUser() user: AccessTokenPayload) {
+    return this.inventoryService.restockPendingCount(user);
+  }
+
+  /** Avisar que algo se acabó / requiere reabasto (cualquier área con acceso). */
+  @Post('restock-requests')
+  createRestockRequest(
+    @Body() dto: CreateRestockRequestDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.inventoryService.createRestockRequest(dto, user);
+  }
+
+  @Roles(...INVENTORY_MANAGER_ROLES)
+  @Patch('restock-requests/:id')
+  updateRestockStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateRestockRequestStatusDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.inventoryService.updateRestockStatus(id, dto, user);
   }
 
   /**
@@ -107,6 +169,8 @@ export class InventoryController {
     return this.inventoryService.findOne(id, user);
   }
 
+  /** Historial (bitácora) de un artículo. */
+  @Roles(...INVENTORY_MANAGER_ROLES)
   @Get(':id/movements')
   itemMovements(
     @Param('id', ParseIntPipe) id: number,
@@ -118,6 +182,7 @@ export class InventoryController {
     });
   }
 
+  @Roles(...INVENTORY_MANAGER_ROLES)
   @Post()
   create(
     @Body() dto: CreateInventoryItemDto,
@@ -135,6 +200,7 @@ export class InventoryController {
     return this.inventoryService.registerMovement(id, dto, user);
   }
 
+  @Roles(...INVENTORY_MANAGER_ROLES)
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
@@ -144,6 +210,7 @@ export class InventoryController {
     return this.inventoryService.update(id, dto, user);
   }
 
+  @Roles(...INVENTORY_MANAGER_ROLES)
   @Delete(':id')
   remove(
     @Param('id', ParseIntPipe) id: number,
