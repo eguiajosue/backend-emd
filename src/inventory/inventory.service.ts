@@ -273,6 +273,7 @@ export class InventoryService {
       ...movement,
       delta: Number(movement.delta),
       balanceAfter: Number(movement.balanceAfter),
+      balanceBefore: toNumber(movement.balanceBefore),
       unitCost: toNumber(movement.unitCost),
     };
   }
