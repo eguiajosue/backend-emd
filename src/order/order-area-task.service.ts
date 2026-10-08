@@ -47,6 +47,7 @@ import {
   STATUS_NAME_CAMBIOS_SOLICITADOS,
   STATUS_NAME_CANCELADO,
   STATUS_NAME_EN_DISENO,
+  STATUS_NAME_ESPERANDO_AUTORIZACION,
   STATUS_NAME_ENTREGADO,
   STATUS_NAME_TERMINADO,
 } from './status-id-resolver';
@@ -935,6 +936,24 @@ export class OrderAreaTaskService {
     return task;
   }
 
+  /** Las pruebas de bordado empiezan cuando el cliente autoriza el diseño. */
+  private async assertOrderAuthorized(orderId: number) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: { select: { name: true } } },
+    });
+    const name = order?.status?.name?.toLowerCase();
+    if (
+      name === STATUS_NAME_EN_DISENO ||
+      name === STATUS_NAME_ESPERANDO_AUTORIZACION ||
+      name === STATUS_NAME_CAMBIOS_SOLICITADOS
+    ) {
+      throw new BadRequestException(
+        'El pedido sigue en diseño: las pruebas se mandan cuando el cliente lo autorice',
+      );
+    }
+  }
+
   /**
    * Manda la digitalización a pruebas: abre una ronda nueva en el registro y
    * la tarea pasa de `digitalizado` a `en_pruebas`. Se usa tanto la primera vez
@@ -948,6 +967,7 @@ export class OrderAreaTaskService {
     photo?: OrderFileDto,
   ) {
     const task = await this.loadBordadoTask(taskId, requestingUser, orderId);
+    await this.assertOrderAuthorized(task.orderId);
     if (task.prepStage !== EmbroideryPrepStage.digitalizado) {
       throw new BadRequestException(
         task.prepStage === EmbroideryPrepStage.en_pruebas

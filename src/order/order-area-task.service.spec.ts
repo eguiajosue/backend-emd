@@ -261,6 +261,17 @@ describe('OrderAreaTaskService', () => {
       expect(prisma.orderAreaTask.update).toHaveBeenCalled();
     });
 
+    it('no deja mandar a pruebas mientras el pedido sigue en diseño', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.order.findUnique.mockResolvedValue({
+        status: { name: 'Esperando autorización' },
+      });
+      await expect(
+        service.sendToTest(10, undefined, bordador, 5),
+      ).rejects.toThrow(/cuando el cliente lo autorice/);
+      expect(prisma.orderAreaTask.updateMany).not.toHaveBeenCalled();
+    });
+
     it('mandar a pruebas abre la ronda 1 y pasa a en_pruebas', async () => {
       taskAt(EmbroideryPrepStage.digitalizado);
 
