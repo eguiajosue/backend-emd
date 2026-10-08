@@ -990,6 +990,7 @@ export class OrderService {
           id: true,
           area: true,
           status: true,
+          prepStage: true,
           assignedUserId: true,
           supply: TASK_SUPPLY_SELECT,
         },

@@ -1,9 +1,18 @@
-import { AreaTaskStatus } from '@prisma/client';
+import {
+  AreaTaskStatus,
+  EmbroideryPrepStage,
+  SampleTestResult,
+} from '@prisma/client';
 import { BadRequestException, HttpException } from '@nestjs/common';
 import { OrderAreaTaskService } from './order-area-task.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
+
+// PNG mínimo válido: el servicio confirma por contenido que la foto es imagen.
+const MINIMAL_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 /** Estado global "terminado" = listo para entregar (ver WORKFLOW.md §3). */
 const READY_FOR_DELIVERY_STATUS_ID = 4;
@@ -27,7 +36,16 @@ describe('OrderAreaTaskService', () => {
       findUnique: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      updateMany: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
       delete: jest.Mock;
+    };
+    areaTaskSampleTest: {
+      aggregate: jest.Mock;
+      create: jest.Mock;
+      findFirst: jest.Mock;
+      findUnique: jest.Mock;
+      update: jest.Mock;
     };
     order: {
       findUnique: jest.Mock;
@@ -48,6 +66,7 @@ describe('OrderAreaTaskService', () => {
     createNotification: jest.Mock;
   };
   let gateway: { notifyNewOrderToArea: jest.Mock };
+  let auditLog: { record: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -62,7 +81,16 @@ describe('OrderAreaTaskService', () => {
           id: 1,
           ...(args.data as object),
         })),
+        updateMany: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
         delete: jest.fn(),
+      },
+      areaTaskSampleTest: {
+        aggregate: jest.fn(),
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
       },
       order: {
         findUnique: jest.fn(),
@@ -105,11 +133,13 @@ describe('OrderAreaTaskService', () => {
       createNotification: jest.fn().mockResolvedValue(undefined),
     };
     gateway = { notifyNewOrderToArea: jest.fn() };
+    auditLog = { record: jest.fn().mockResolvedValue(undefined) };
 
     service = new OrderAreaTaskService(
       prisma as unknown as PrismaService,
       notificationService as unknown as NotificationService,
       gateway as unknown as NotificationsGateway,
+      auditLog as unknown as AuditLogService,
     );
   });
 
@@ -121,9 +151,21 @@ describe('OrderAreaTaskService', () => {
 
       expect(prisma.orderAreaTask.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { orderId: 1, area: 'bordado', assignedUserId: 42 },
+          data: {
+            orderId: 1,
+            area: 'bordado',
+            assignedUserId: 42,
+            prepStage: EmbroideryPrepStage.digitalizado,
+          },
         }),
       );
+    });
+
+    it('sólo Bordado arranca en digitalización; las demás áreas no', async () => {
+      await service.createTasksForAreas(1, ['dtf']);
+
+      const data = prisma.orderAreaTask.create.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('prepStage');
     });
 
     it('no duplica un área que el pedido ya tiene', async () => {
@@ -162,6 +204,381 @@ describe('OrderAreaTaskService', () => {
       await expect(service.createTasksForAreas(1, ['diseno'])).rejects.toThrow(
         HttpException,
       );
+    });
+  });
+
+  describe('etapas de Bordado: digitalizado → pruebas → producción', () => {
+    const bordador = { userId: 3, roles: ['bordado'] };
+    const dtfUser = { userId: 4, roles: ['dtf'] };
+
+    const taskAt = (
+      prepStage: EmbroideryPrepStage | null,
+      overrides: Record<string, unknown> = {},
+    ) =>
+      prisma.orderAreaTask.findUnique.mockResolvedValue({
+        id: 10,
+        orderId: 5,
+        area: 'bordado',
+        status: AreaTaskStatus.pendiente,
+        prepStage,
+        assignedUserId: null,
+        ...overrides,
+      });
+
+    beforeEach(() => {
+      prisma.orderAreaTask.updateMany.mockResolvedValue({ count: 1 });
+      prisma.orderAreaTask.findUniqueOrThrow.mockResolvedValue({
+        id: 10,
+        sampleTests: [{ round: 1 }],
+      });
+      prisma.areaTaskSampleTest.aggregate.mockResolvedValue({
+        _max: { round: null },
+      });
+      prisma.areaTaskSampleTest.findFirst.mockResolvedValue({
+        id: 77,
+        round: 1,
+      });
+    });
+
+    it('no deja empezar la producción mientras está en digitalización', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      await expect(
+        service.updateStatus(10, AreaTaskStatus.en_proceso, bordador),
+      ).rejects.toThrow(/digitalización/);
+      expect(prisma.orderAreaTask.update).not.toHaveBeenCalled();
+    });
+
+    it('no deja empezar la producción con la prueba pendiente', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      await expect(
+        service.updateStatus(10, AreaTaskStatus.en_proceso, bordador),
+      ).rejects.toThrow(/prueba/);
+    });
+
+    it('con la prueba aprobada (sin etapa) ya puede empezar', async () => {
+      taskAt(null);
+      await service.updateStatus(10, AreaTaskStatus.en_proceso, bordador);
+      expect(prisma.orderAreaTask.update).toHaveBeenCalled();
+    });
+
+    it('mandar a pruebas abre la ronda 1 y pasa a en_pruebas', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+
+      await service.sendToTest(10, '  puntada de relleno  ', bordador, 5);
+
+      expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, prepStage: EmbroideryPrepStage.digitalizado },
+        data: { prepStage: EmbroideryPrepStage.en_pruebas },
+      });
+      expect(prisma.areaTaskSampleTest.create).toHaveBeenCalledWith({
+        data: {
+          areaTaskId: 10,
+          round: 1,
+          sentByUserId: 3,
+          sentNotes: 'puntada de relleno',
+        },
+      });
+      expect(auditLog.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'embroidery_test_sent',
+          entityId: 5,
+        }),
+      );
+    });
+
+    it('mandar a pruebas avisa a la recepcionista que atiende el pedido', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.order.findUnique.mockResolvedValue({
+        attendedByUserId: 21,
+        userId: 20,
+      });
+
+      await service.sendToTest(10, undefined, bordador, 5);
+
+      expect(notificationService.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 21,
+          type: 'embroidery_test_sent',
+          orderId: 5,
+        }),
+      );
+    });
+
+    it('quien manda a pruebas no recibe su propio aviso', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.order.findUnique.mockResolvedValue({
+        attendedByUserId: null,
+        userId: 3,
+      });
+
+      await service.sendToTest(10, undefined, {
+        userId: 3,
+        roles: ['recepcion'],
+      });
+
+      expect(notificationService.createNotification).not.toHaveBeenCalled();
+    });
+
+    it('guarda la foto de la prueba y avisa que va con foto', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.order.findUnique.mockResolvedValue({ userId: 20 });
+
+      await service.sendToTest(10, undefined, bordador, 5, {
+        data: MINIMAL_PNG_BASE64,
+        filename: 'prueba.png',
+        mimeType: 'image/png',
+      });
+
+      expect(prisma.areaTaskSampleTest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          photoData: MINIMAL_PNG_BASE64,
+          photoName: 'prueba.png',
+          photoMime: 'image/png',
+        }),
+      });
+      expect(notificationService.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.stringContaining('con foto'),
+        }),
+      );
+    });
+
+    it('rechaza una foto cuyo contenido no es una imagen', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      await expect(
+        service.sendToTest(10, undefined, bordador, 5, {
+          data: Buffer.from('<html></html>').toString('base64'),
+          filename: 'x.png',
+          mimeType: 'image/png',
+        }),
+      ).rejects.toThrow(/PNG o JPEG/);
+      expect(prisma.orderAreaTask.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('sin foto, la ronda se abre igual', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      await service.sendToTest(10, undefined, bordador, 5);
+      expect(
+        prisma.areaTaskSampleTest.create.mock.calls[0][0].data,
+      ).not.toHaveProperty('photoName');
+    });
+
+    it('devuelve la foto de una prueba como data URL', async () => {
+      prisma.areaTaskSampleTest.findUnique.mockResolvedValue({
+        areaTaskId: 10,
+        photoData: MINIMAL_PNG_BASE64,
+        photoKey: null,
+        photoName: 'prueba.png',
+        photoMime: 'image/png',
+        areaTask: { orderId: 5 },
+      });
+
+      const photo = await service.getSampleTestPhoto(10, 77, 5);
+
+      expect(photo.dataUrl).toBe(`data:image/png;base64,${MINIMAL_PNG_BASE64}`);
+    });
+
+    it('la foto no se entrega por otro pedido ni si la prueba no tiene', async () => {
+      const row = {
+        areaTaskId: 10,
+        photoData: null,
+        photoKey: null,
+        photoName: null,
+        photoMime: null,
+        areaTask: { orderId: 5 },
+      };
+      prisma.areaTaskSampleTest.findUnique.mockResolvedValue(row);
+      await expect(service.getSampleTestPhoto(10, 77, 5)).rejects.toThrow(
+        /no tiene foto/,
+      );
+      prisma.areaTaskSampleTest.findUnique.mockResolvedValue({
+        ...row,
+        photoName: 'a.png',
+        photoMime: 'image/png',
+      });
+      await expect(service.getSampleTestPhoto(10, 77, 99)).rejects.toThrow(
+        HttpException,
+      );
+    });
+
+    it('tras un rechazo, la siguiente prueba es la ronda 2', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.areaTaskSampleTest.aggregate.mockResolvedValue({
+        _max: { round: 1 },
+      });
+
+      await service.sendToTest(10, undefined, bordador);
+
+      expect(prisma.areaTaskSampleTest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ round: 2, sentNotes: null }),
+      });
+    });
+
+    it('no se puede mandar a pruebas si ya está en pruebas o ya la pasó', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      await expect(service.sendToTest(10, undefined, bordador)).rejects.toThrow(
+        BadRequestException,
+      );
+      taskAt(null);
+      await expect(service.sendToTest(10, undefined, bordador)).rejects.toThrow(
+        /ya pasó/,
+      );
+    });
+
+    it('si dos clics compiten, sólo el primero abre la ronda', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.orderAreaTask.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.sendToTest(10, undefined, bordador)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prisma.areaTaskSampleTest.create).not.toHaveBeenCalled();
+    });
+
+    it('aprobar la prueba libera la tarea para producción y deja registro', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+
+      await service.decideTest(
+        10,
+        SampleTestResult.aprobada,
+        'se ve bien',
+        bordador,
+        5,
+      );
+
+      expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, prepStage: EmbroideryPrepStage.en_pruebas },
+        data: { prepStage: null },
+      });
+      expect(prisma.areaTaskSampleTest.update).toHaveBeenCalledWith({
+        where: { id: 77 },
+        data: expect.objectContaining({
+          result: SampleTestResult.aprobada,
+          resultNotes: 'se ve bien',
+          decidedByUserId: 3,
+        }),
+      });
+      expect(auditLog.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'embroidery_test_approved' }),
+      );
+    });
+
+    it('rechazar regresa la tarea a digitalizado', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+
+      await service.decideTest(
+        10,
+        SampleTestResult.rechazada,
+        'hilo muy tenso',
+        bordador,
+      );
+
+      expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, prepStage: EmbroideryPrepStage.en_pruebas },
+        data: { prepStage: EmbroideryPrepStage.digitalizado },
+      });
+      expect(auditLog.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'embroidery_test_rejected' }),
+      );
+    });
+
+    it('rechazar avisa a Bordado (menos a quien rechazó) con las observaciones', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      notificationService.userIdsForArea.mockResolvedValue([3, 8]);
+
+      await service.decideTest(
+        10,
+        SampleTestResult.rechazada,
+        'hilo muy tenso',
+        bordador,
+        5,
+      );
+
+      expect(notificationService.userIdsForArea).toHaveBeenCalledWith(
+        'bordado',
+      );
+      expect(
+        notificationService.createNotificationForUsers,
+      ).toHaveBeenCalledWith(
+        [8],
+        expect.objectContaining({
+          type: 'embroidery_test_rejected',
+          orderId: 5,
+          body: expect.stringContaining('hilo muy tenso'),
+        }),
+      );
+      expect(notificationService.createNotification).not.toHaveBeenCalled();
+    });
+
+    it('aprobar avisa a Bordado y a la recepcionista que atiende el pedido', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      notificationService.userIdsForArea.mockResolvedValue([8]);
+      prisma.order.findUnique.mockResolvedValue({
+        attendedByUserId: 21,
+        userId: 20,
+      });
+
+      await service.decideTest(
+        10,
+        SampleTestResult.aprobada,
+        undefined,
+        bordador,
+        5,
+      );
+
+      expect(
+        notificationService.createNotificationForUsers,
+      ).toHaveBeenCalledWith(
+        [8],
+        expect.objectContaining({ type: 'embroidery_test_approved' }),
+      );
+      expect(notificationService.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 21,
+          type: 'embroidery_test_approved',
+        }),
+      );
+    });
+
+    it('si falla el aviso, el resultado igual queda registrado', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      notificationService.userIdsForArea.mockRejectedValue(new Error('x'));
+
+      await expect(
+        service.decideTest(10, SampleTestResult.aprobada, undefined, bordador),
+      ).resolves.toBeDefined();
+      expect(prisma.areaTaskSampleTest.update).toHaveBeenCalled();
+    });
+
+    it('rechazar exige observaciones', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      await expect(
+        service.decideTest(10, SampleTestResult.rechazada, '  ', bordador),
+      ).rejects.toThrow(/corregir/);
+      expect(prisma.orderAreaTask.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('sólo se registra el resultado si la tarea está en pruebas', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      await expect(
+        service.decideTest(10, SampleTestResult.aprobada, undefined, bordador),
+      ).rejects.toThrow(/no está en pruebas/);
+    });
+
+    it('otra área no puede mover las pruebas de Bordado', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      await expect(service.sendToTest(10, undefined, dtfUser)).rejects.toThrow(
+        HttpException,
+      );
+    });
+
+    it('las pruebas sólo existen en Bordado', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado, { area: 'dtf' });
+      await expect(
+        service.sendToTest(10, undefined, {
+          userId: 1,
+          roles: ['recepcion'],
+        }),
+      ).rejects.toThrow(/Sólo Bordado/);
     });
   });
 

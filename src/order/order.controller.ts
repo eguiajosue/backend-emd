@@ -34,6 +34,8 @@ import { ReorderMaterialsPriorityDto } from './dto/reorder-materials-priority.dt
 import {
   SetOrderAreasDto,
   UpdateAreaTaskStatusDto,
+  SendToTestDto,
+  SampleTestResultDto,
   AssignAreaTaskDto,
 } from './dto/order-area-task.dto';
 import { OrderAreaTaskService } from './order-area-task.service';
@@ -571,6 +573,61 @@ export class OrderController {
     return this.orderAreaTaskService.updateStatus(
       +taskId,
       dto.status,
+      { userId: user.sub, roles: user.roles },
+      +id,
+    );
+  }
+
+  /**
+   * Bordado: manda la digitalización a pruebas (abre una ronda en el registro
+   * de pruebas). WORKFLOW.md §3.1.
+   */
+  // Sube una foto (base64, hasta 5MB): throttle más estricto que el default.
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.BORDADO)
+  @Post(':id/area-tasks/:taskId/send-to-test')
+  sendAreaTaskToTest(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Body() dto: SendToTestDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderAreaTaskService.sendToTest(
+      +taskId,
+      dto.notes,
+      { userId: user.sub, roles: user.roles },
+      +id,
+      dto.photo,
+    );
+  }
+
+  /** Foto de una prueba de bordado (para revisarla y autorizarla). */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.BORDADO)
+  @Get(':id/area-tasks/:taskId/tests/:testId/photo')
+  getAreaTaskTestPhoto(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Param('testId') testId: string,
+  ) {
+    return this.orderAreaTaskService.getSampleTestPhoto(+taskId, +testId, +id);
+  }
+
+  /**
+   * Bordado: registra si la prueba abierta se aprobó (pasa a producción) o se
+   * rechazó (vuelve a digitalizado). WORKFLOW.md §3.1.
+   */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.BORDADO)
+  @Post(':id/area-tasks/:taskId/test-result')
+  decideAreaTaskTest(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Body() dto: SampleTestResultDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderAreaTaskService.decideTest(
+      +taskId,
+      dto.result,
+      dto.notes,
       { userId: user.sub, roles: user.roles },
       +id,
     );

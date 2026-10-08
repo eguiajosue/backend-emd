@@ -8,6 +8,7 @@ import { OrderMockupService } from 'src/order-mockup/order-mockup.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
 import { makePng } from 'src/branch/branch-logo.fixtures';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
 
 /**
  * BARRIDO DE VISIBILIDAD contra Postgres REAL (sin mocks de Prisma): una
@@ -211,7 +212,9 @@ describeDb('Visibilidad de pedidos por sucursal (Postgres real)', () => {
       { notifyUser: jest.fn(), notifyUsers: jest.fn() } as any,
       { notifyUser: jest.fn(), notifyUsers: jest.fn() } as any,
     );
-    tasks = new OrderAreaTaskService(prisma, notifications, gatewayStub);
+    tasks = new OrderAreaTaskService(prisma, notifications, gatewayStub, {
+      record: jest.fn().mockResolvedValue(undefined),
+    } as unknown as AuditLogService);
     orders = new OrderService(
       prisma,
       gatewayStub,

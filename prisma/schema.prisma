@@ -63,6 +63,8 @@ model User {
   assignedOrders          Order[]                  @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
   attendedOrders          Order[]                  @relation("AttendedOrders") // Pedidos de Recepción que esta persona está atendiendo (los tomó de otra recepcionista).
   assignedAreaTasks       OrderAreaTask[]          @relation("AssignedAreaTasks") // Tareas de área de producción asignadas a este usuario (o a su cuenta de área).
+  sampleTestsSent         AreaTaskSampleTest[]     @relation("SampleTestSentBy") // Pruebas de bordado que este usuario mandó a pruebas.
+  sampleTestsDecided      AreaTaskSampleTest[]     @relation("SampleTestDecidedBy") // Pruebas de bordado cuyo resultado registró este usuario.
   logs                    Log[] // Relación uno a muchos con Log.
   orderNotes              OrderNote[] // Notas internas de pedidos escritas por este usuario.
   orderAuditLogs          OrderAuditLog[] // Registros de auditoría de ediciones de pedidos hechas por este usuario.
@@ -301,6 +303,22 @@ enum AreaTaskStatus {
   terminado
 }
 
+/// Etapa previa a producción de una tarea de Bordado (WORKFLOW.md §3.1).
+/// Mientras la tarea tiene una etapa, su `status` sigue en `pendiente` y no se
+/// puede empezar: primero se digitaliza el bordado, luego se hace una prueba y
+/// sólo con la prueba aprobada pasa a producción (`prepStage = null`).
+enum EmbroideryPrepStage {
+  digitalizado
+  en_pruebas
+}
+
+/// Resultado de una prueba de bordado. Una prueba abierta (en curso) no tiene
+/// resultado todavía.
+enum SampleTestResult {
+  aprobada
+  rechazada
+}
+
 /// Trabajo que le toca a UN área dentro de un pedido.
 ///
 /// Un pedido puede necesitar varias áreas (ej. bordado + dtf) y todas trabajan
@@ -309,18 +327,20 @@ enum AreaTaskStatus {
 /// a "listo para entregar"; la entrega la confirma Recepción a mano.
 /// Ver WORKFLOW.md §3.
 model OrderAreaTask {
-  id             Int            @id @default(autoincrement())
+  id             Int                  @id @default(autoincrement())
   orderId        Int // Pedido al que pertenece esta tarea.
   area           String // Área que la trabaja: taller | dtf | bordado | laser | impresiones (nunca 'diseno').
-  status         AreaTaskStatus @default(pendiente) // Avance de esta área en particular.
+  status         AreaTaskStatus       @default(pendiente) // Avance de esta área en particular.
   assignedUserId Int? // Responsable. Por defecto la cuenta compartida del área; alguien del área puede tomarla.
-  createdAt      DateTime       @default(now())
+  createdAt      DateTime             @default(now())
   startedAt      DateTime? // Cuándo pasó a en_proceso.
   completedAt    DateTime? // Cuándo pasó a terminado.
+  prepStage      EmbroideryPrepStage? // Sólo Bordado: etapa previa a producción (digitalizado → en_pruebas). null = ya puede producir (o no aplica al área).
 
-  order        Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  assignedUser User?            @relation("AssignedAreaTasks", fields: [assignedUserId], references: [id])
+  order        Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  assignedUser User?                @relation("AssignedAreaTasks", fields: [assignedUserId], references: [id])
   supply       OrderAreaSupply? // Hoja de materiales del área: de dónde salen los insumos (ver WORKFLOW.md §3).
+  sampleTests  AreaTaskSampleTest[] // Registro de las pruebas de bordado, una por ronda.
 
   // Un área no puede aparecer dos veces en el mismo pedido.
   @@unique([orderId, area])
@@ -328,6 +348,34 @@ model OrderAreaTask {
   @@index([area])
   @@index([assignedUserId])
   @@index([status])
+}
+
+/// Una ronda de prueba de bordado de una tarea de Bordado. Se abre al mandar la
+/// digitalización a pruebas y se cierra con `aprobada` (la tarea pasa a
+/// producción) o `rechazada` (vuelve a digitalizado). Es el registro de lo que
+/// se hizo: nunca se borra una ronda, una prueba rechazada queda en el historial.
+model AreaTaskSampleTest {
+  id              Int               @id @default(autoincrement())
+  areaTaskId      Int // Tarea de Bordado a la que pertenece.
+  round           Int // 1, 2, 3... dentro de la tarea (max(round)+1 al abrirla).
+  sentAt          DateTime          @default(now()) // Cuándo se mandó a pruebas.
+  sentByUserId    Int? // Quién la mandó a pruebas.
+  sentNotes       String? // Comentarios al mandar (qué se corrigió, parámetros de la prueba).
+  photoData       String? // Foto de la prueba (base64 sin prefijo data:). Legacy: null si está en el almacenamiento de objetos (ver photoKey).
+  photoKey        String? // Clave del objeto (R2/S3) de la foto cuando STORAGE_DRIVER=s3. Si está, manda sobre photoData.
+  photoName       String? // Nombre de archivo de la foto; null = la prueba se mandó sin foto.
+  photoMime       String? // Mime type de la foto (image/jpeg | image/png).
+  result          SampleTestResult? // null = prueba en curso.
+  resultNotes     String? // Observaciones del resultado (obligatorias al rechazar).
+  decidedAt       DateTime? // Cuándo se aprobó o rechazó.
+  decidedByUserId Int? // Quién registró el resultado.
+
+  areaTask  OrderAreaTask @relation(fields: [areaTaskId], references: [id], onDelete: Cascade)
+  sentBy    User?         @relation("SampleTestSentBy", fields: [sentByUserId], references: [id])
+  decidedBy User?         @relation("SampleTestDecidedBy", fields: [decidedByUserId], references: [id])
+
+  @@unique([areaTaskId, round])
+  @@index([areaTaskId])
 }
 
 /// El catálogo de productos y el inventario (ProductType, Color, Size, Product,

@@ -14,6 +14,7 @@ import { OrderAreaTaskService } from './order-area-task.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
 
 type Line = {
   id: number;
@@ -665,6 +666,9 @@ describe('Hoja de materiales por área (origen de insumos)', () => {
         prisma as unknown as PrismaService,
         notifications as unknown as NotificationService,
         { notifyNewOrderToArea: jest.fn() } as unknown as NotificationsGateway,
+        {
+          record: jest.fn().mockResolvedValue(undefined),
+        } as unknown as AuditLogService,
       );
       return { state, tx, prisma, service, notifications };
     };

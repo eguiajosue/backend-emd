@@ -137,6 +137,51 @@ paralelo**, no en secuencia.
   entregar", el pedido vuelve a **autorizado**: sin tareas no hay nada
   terminado.
 
+### 3.1 Bordado: digitalizado → pruebas → producción
+
+Las tareas de **Bordado** no arrancan directo en producción: antes pasan por
+dos etapas previas (`OrderAreaTask.prepStage`). Las demás áreas no cambian.
+
+```
+digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en proceso → terminado)
+      ↑             │
+      └─ rechazada ─┘
+```
+
+- Una tarea nueva de Bordado nace en **digitalizado** (`prepStage = digitalizado`)
+  con `status = pendiente`. Mientras tenga una etapa **no se puede empezar ni
+  terminar** (`PATCH .../status` responde 400).
+- **Enviar a pruebas** (`POST /orders/:id/area-tasks/:taskId/send-to-test`,
+  `notes` opcional): abre una **ronda de prueba** y la tarea pasa a **en pruebas**.
+  - Puede llevar una **foto de la prueba hecha** (`photo`, PNG o JPEG, hasta
+    5MB; en el celular se toma con la cámara). Es opcional y queda en la ronda
+    (`AreaTaskSampleTest.photo*`); se consulta con
+    `GET /orders/:id/area-tasks/:taskId/tests/:testId/photo`. El detalle de la
+    tarea sólo trae `photoName`, la imagen se baja al pedir "Ver foto".
+  - **Aviso a Recepción**: al mandar a pruebas le llega a la recepcionista que
+    atiende el pedido (`attendedByUserId ?? userId`, §2) para que la revise y
+    autorice. Nadie recibe el aviso de su propia acción.
+- **Resultado** (`POST /orders/:id/area-tasks/:taskId/test-result`,
+  `{ result: 'aprobada' | 'rechazada', notes }`):
+  - **aprobada**: `prepStage = null`; la tarea queda `pendiente` y el área ya
+    puede empezar la producción.
+  - **rechazada**: las `notes` son **obligatorias** (qué corregir); la tarea
+    **regresa a digitalizado**. Al corregir, se vuelve a enviar a pruebas y se
+    abre la ronda siguiente.
+- **Registro**: cada ronda queda en `AreaTaskSampleTest` (ronda, quién y cuándo
+  la mandó, notas, resultado, quién y cuándo lo registró) y se devuelve en
+  `sampleTests` con la tarea. **Las rondas nunca se borran**: una prueba
+  rechazada se queda en el historial. Además cada acción deja un registro en
+  `AuditLog` (`embroidery_test_sent` / `_approved` / `_rejected`).
+- **Avisos del resultado**: rechazada → a Bordado, con las observaciones;
+  aprobada → a Bordado y a la recepcionista que atiende el pedido. Nadie
+  recibe el aviso de su propia acción.
+- **Permisos**: el área Bordado y Recepción/admin/superuser.
+- Las tareas de Bordado que **ya existían** al desplegar quedan con
+  `prepStage = null`: siguen su curso sin pasar por las etapas nuevas.
+- Para el tablero y los conteos, una tarea en digitalizado/pruebas sigue siendo
+  `pendiente` (todavía no es trabajo en curso del área).
+
 ### Hoja de materiales al autorizar (origen de insumos)
 
 - Cuando Recepción marca que el cliente autorizó, captura en el mismo paso la
@@ -222,6 +267,7 @@ Los pedidos existentes no tienen datos que preservar: la migración a tareas de
 | Pieza | Archivo |
 |---|---|
 | Tareas de área (lógica) | `src/order/order-area-task.service.ts` |
+| Etapas de Bordado y registro de pruebas | `prisma/schema.prisma` → `EmbroideryPrepStage`, `AreaTaskSampleTest`; `OrderAreaTaskService.sendToTest` / `decideTest` |
 | Endpoints de tareas | `src/order/order.controller.ts` (`/orders/:id/area-tasks`, `/orders/my-area-tasks`) |
 | Modelo | `prisma/schema.prisma` → `OrderAreaTask`, enum `AreaTaskStatus` |
 | Validación de asignación por área | `OrderService.assertUserBelongsToArea` |
