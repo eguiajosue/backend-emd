@@ -12,6 +12,7 @@ import {
   STATUS_NAME_TERMINADO,
 } from 'src/order/status-id-resolver';
 import type { ClientPortalRespondDto } from './dto/client-portal.dto';
+import { readyNotifiedAtFor } from './client-ready-notice.service';
 
 /**
  * Portal del cliente (WORKFLOW.md §8): un enlace privado `/p/<token>` para que
@@ -78,11 +79,12 @@ export class ClientPortalService {
   private async assertOrderExists(orderId: number) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true },
+      select: { id: true, status: { select: { name: true } } },
     });
     if (!order) {
       throw new HttpException('Pedido no encontrado', HttpStatus.NOT_FOUND);
     }
+    return order;
   }
 
   /** Estado del enlace y la respuesta del cliente pendiente de confirmar. */
@@ -96,6 +98,8 @@ export class ClientPortalService {
           createdAt: true,
           lastViewedAt: true,
           viewCount: true,
+          readyNotifiedAt: true,
+          _count: { select: { pushSubscriptions: true } },
         },
       }),
       this.prisma.clientDesignResponse.findFirst({
@@ -104,15 +108,26 @@ export class ClientPortalService {
         orderBy: { createdAt: 'desc' },
       }),
     ]);
-    return { link, pendingResponse };
+    if (!link) return { link: null, pendingResponse };
+    const { _count, ...rest } = link;
+    return {
+      link: { ...rest, pushSubscribers: _count.pushSubscriptions },
+      pendingResponse,
+    };
   }
 
   /** Crea el enlace la primera vez; si ya existe lo devuelve tal cual. */
   async ensureLink(orderId: number, userId: number) {
-    await this.assertOrderExists(orderId);
+    const order = await this.assertOrderExists(orderId);
     await this.prisma.orderShareLink.upsert({
       where: { orderId },
-      create: { orderId, token: newToken(), createdById: userId },
+      create: {
+        orderId,
+        token: newToken(),
+        createdById: userId,
+        // Si ya está listo, el cliente lo ve al abrir: no hace falta otro aviso.
+        readyNotifiedAt: readyNotifiedAtFor(order.status.name),
+      },
       update: {},
     });
     return this.getShareState(orderId);
@@ -120,10 +135,19 @@ export class ClientPortalService {
 
   /** Cambia el token: el enlace anterior deja de funcionar. */
   async regenerateLink(orderId: number, userId: number) {
-    await this.assertOrderExists(orderId);
+    const order = await this.assertOrderExists(orderId);
+    // Quien tenía el enlace viejo deja de recibir avisos.
+    await this.prisma.portalPushSubscription.deleteMany({
+      where: { link: { orderId } },
+    });
     await this.prisma.orderShareLink.upsert({
       where: { orderId },
-      create: { orderId, token: newToken(), createdById: userId },
+      create: {
+        orderId,
+        token: newToken(),
+        createdById: userId,
+        readyNotifiedAt: readyNotifiedAtFor(order.status.name),
+      },
       update: {
         token: newToken(),
         createdById: userId,

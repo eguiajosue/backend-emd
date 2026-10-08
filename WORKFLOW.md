@@ -318,3 +318,14 @@ cuenta ni contraseña: el token (32 bytes aleatorios) es la llave.
   De Recepción/admin: `GET|POST|DELETE /orders/:id/share-link`,
   `POST /orders/:id/share-link/regenerate`,
   `POST /orders/:id/client-responses/:responseId/discard`.
+- **Aviso "tu pedido está listo"** (`ClientReadyNoticeService`): cada minuto
+  busca enlaces cuyo pedido ya está `terminado` y sin `readyNotifiedAt`, lo
+  marca (update condicional: un solo aviso aunque haya varias instancias) y
+  avisa al cliente por **Web Push** (los navegadores que tocaron "Avísame
+  cuando esté listo" en el portal: `POST|DELETE /portal/:token/push`) y por
+  **correo** si el cliente tiene email y hay `RESEND_API_KEY` +
+  `CLIENT_EMAIL_FROM`. El enlace del aviso usa `CLIENT_PORTAL_URL` o el primer
+  `FRONTEND_URL`. Un solo aviso por pedido (si regresa a producción no se
+  repite); un enlace creado con el pedido ya listo o entregado nace avisado.
+  Regenerar o desactivar el enlace borra sus suscripciones. Recepción ve en
+  "Compartir" cuántos dispositivos esperan el aviso y si ya se mandó.

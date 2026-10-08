@@ -114,6 +114,8 @@ describe('Visibilidad de sucursales: superficie de rutas', () => {
       'ClientPortalController.get',
       'ClientPortalController.mockup',
       'ClientPortalController.respond',
+      'ClientPortalController.subscribePush',
+      'ClientPortalController.unsubscribePush',
       'HealthController.liveness',
       'HealthController.readiness',
       'PushController.getVapidPublicKey',

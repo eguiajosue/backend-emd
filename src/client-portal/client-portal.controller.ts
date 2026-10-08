@@ -14,7 +14,12 @@ import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 import type { AccessTokenPayload } from 'src/auth/auth.service';
 import { ClientPortalService } from './client-portal.service';
-import { ClientPortalRespondDto } from './dto/client-portal.dto';
+import { ClientReadyNoticeService } from './client-ready-notice.service';
+import {
+  ClientPortalRespondDto,
+  PortalPushSubscribeDto,
+  PortalPushUnsubscribeDto,
+} from './dto/client-portal.dto';
 
 /**
  * Lo que ve el CLIENTE con su enlace privado. Público (sin sesión): el token
@@ -24,7 +29,10 @@ import { ClientPortalRespondDto } from './dto/client-portal.dto';
 @ApiTags('portal')
 @Controller('portal')
 export class ClientPortalController {
-  constructor(private readonly portal: ClientPortalService) {}
+  constructor(
+    private readonly portal: ClientPortalService,
+    private readonly readyNotice: ClientReadyNoticeService,
+  ) {}
 
   @Throttle({ default: { limit: 60, ttl: 60000 } })
   @Get(':token')
@@ -56,6 +64,27 @@ export class ClientPortalController {
   @ApiOperation({ summary: 'El cliente aprueba el diseño o pide cambios' })
   respond(@Param('token') token: string, @Body() dto: ClientPortalRespondDto) {
     return this.portal.respond(token, dto);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post(':token/push')
+  @ApiOperation({
+    summary: 'El cliente pide aviso cuando su pedido esté listo',
+  })
+  subscribePush(
+    @Param('token') token: string,
+    @Body() dto: PortalPushSubscribeDto,
+  ) {
+    return this.readyNotice.subscribe(token, dto);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Delete(':token/push')
+  unsubscribePush(
+    @Param('token') token: string,
+    @Body() dto: PortalPushUnsubscribeDto,
+  ) {
+    return this.readyNotice.unsubscribe(token, dto.endpoint);
   }
 }
 

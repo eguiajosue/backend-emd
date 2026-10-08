@@ -3,6 +3,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { NotificationService } from 'src/notification/notification.service';
 import type { StorageService } from 'src/storage/storage.service';
 import { ClientPortalService } from './client-portal.service';
+import { ClientReadyNoticeService } from './client-ready-notice.service';
+import type { PushService } from 'src/push/push.service';
+import type { ConfigService } from '@nestjs/config';
 
 /**
  * Portal del cliente contra Postgres real (sin mocks de Prisma): que los
@@ -15,7 +18,12 @@ import { ClientPortalService } from './client-portal.service';
 const URL = process.env.PORTAL_TEST_DATABASE_URL;
 const describeDb = URL ? describe : describe.skip;
 
-const STATUS_NAMES = ['esperando autorización', 'entregado', 'autorizado'];
+const STATUS_NAMES = [
+  'esperando autorización',
+  'entregado',
+  'autorizado',
+  'terminado',
+];
 
 describeDb('Portal del cliente en Postgres', () => {
   let prisma: PrismaService;
@@ -250,6 +258,67 @@ describeDb('Portal del cliente en Postgres', () => {
       data: { changeDate: new Date(Date.now() - 31 * 86_400_000) },
     });
     expect(await statusOf(() => service.getPortal(link!.token))).toBe(410);
+  });
+
+  it('avisa una sola vez cuando el pedido queda listo', async () => {
+    const order = await orderAwaitingApproval();
+    const { link } = await service.ensureLink(order.id, userId);
+    expect(link!.readyNotifiedAt).toBeNull();
+    const send = jest.fn().mockResolvedValue('sent');
+    const notice = new ClientReadyNoticeService(
+      prisma,
+      { isEnabled: true, send } as unknown as PushService,
+      {
+        get: (k: string) =>
+          k === 'FRONTEND_URL' ? 'https://app.emd.mx' : undefined,
+      } as unknown as ConfigService,
+    );
+    const sub = {
+      endpoint: 'https://push.example/1',
+      keys: { p256dh: 'k', auth: 'a' },
+    };
+    await notice.subscribe(link!.token, sub);
+    await notice.subscribe(link!.token, sub); // idempotente
+    expect((await service.getShareState(order.id)).link!.pushSubscribers).toBe(
+      1,
+    );
+
+    await notice.sendDueNotices();
+    expect(send).not.toHaveBeenCalled(); // todavía no está listo
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { statusId: statusIds['terminado'] },
+    });
+    await notice.sendDueNotices();
+    await notice.sendDueNotices();
+    const calls = send.mock.calls.filter(
+      ([s]) => (s as { endpoint: string }).endpoint === sub.endpoint,
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({
+      title: `Tu pedido #${order.id} está listo`,
+      url: `https://app.emd.mx/p/${link!.token}`,
+    });
+    expect(
+      (await service.getShareState(order.id)).link!.readyNotifiedAt,
+    ).not.toBeNull();
+
+    // Regenerar el enlace corta los avisos del enlace viejo.
+    await service.regenerateLink(order.id, userId);
+    expect((await service.getShareState(order.id)).link!.pushSubscribers).toBe(
+      0,
+    );
+  });
+
+  it('el enlace de un pedido ya listo nace avisado', async () => {
+    const order = await orderAwaitingApproval();
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { statusId: statusIds['terminado'] },
+    });
+    const { link } = await service.ensureLink(order.id, userId);
+    expect(link!.readyNotifiedAt).not.toBeNull();
   });
 
   it('tokens mal formados son 404 sin tocar la base', async () => {
