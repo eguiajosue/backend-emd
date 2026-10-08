@@ -329,3 +329,21 @@ cuenta ni contraseña: el token (32 bytes aleatorios) es la llave.
   repite); un enlace creado con el pedido ya listo o entregado nace avisado.
   Regenerar o desactivar el enlace borra sus suscripciones. Recepción ve en
   "Compartir" cuántos dispositivos esperan el aviso y si ya se mandó.
+
+
+## 9. Coordinación
+
+Tablero para Recepción y gestión (`GET /coordination/overview`, roles
+recepcion/admin/superuser):
+
+- **Carga por área y persona**: tareas abiertas por área (pendientes, en
+  proceso, atrasadas, para hoy/mañana, sin persona; la cuenta compartida del
+  área cuenta como "sin persona") y, dentro, por quien las tiene.
+- **Tiempos por etapa** (últimos 30 días, mediana y p75 en horas): diseño
+  (alta → primer envío a autorizar), autorización del cliente, espera y
+  producción de cada área (`createdAt → startedAt → completedAt` de la tarea)
+  y entrega (listo → entregado).
+- **Pedidos atrasados**: pasó el día de entrega (hora de México) y no está
+  entregado ni cancelado; con dónde está detenido y su **motivo**
+  (`PATCH /coordination/orders/:id/delay-reason`, `reason` ∈ material,
+  cliente, retrabajo, carga, maquinaria, otro; `null` lo borra).

@@ -128,6 +128,10 @@ model Order {
   description        String // Descripción de la orden.
   creationDate       DateTime // Fecha en que se creó la orden.
   deliveryDate       DateTime? // Fecha de entrega opcional.
+  delayReason        String? // Motivo del atraso (Coordinación): 'material' | 'cliente' | 'retrabajo' | 'carga' | 'maquinaria' | 'otro'. Null = sin registrar.
+  delayNote          String? // Detalle libre del atraso (máx. 300).
+  delayReasonAt      DateTime? // Cuándo se registró el motivo.
+  delayReasonById    Int? // Quién lo registró (sin relación: sólo auditoría).
 
   requiresDesign Boolean @default(true) // Si el pedido pasa por la fase de Diseño antes de producción (decidido por Recepción al crear el pedido).
   productionArea String? // Área de producción destino una vez autorizado el diseño (uno de ORDER_AREAS salvo 'diseno'). Editable por recepción/admin/superuser y por usuarios con rol diseno.
