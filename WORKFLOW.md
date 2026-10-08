@@ -153,6 +153,14 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
   terminar** (`PATCH .../status` responde 400).
 - **Enviar a pruebas** (`POST /orders/:id/area-tasks/:taskId/send-to-test`,
   `notes` opcional): abre una **ronda de prueba** y la tarea pasa a **en pruebas**.
+  - Puede llevar una **foto de la prueba hecha** (`photo`, PNG o JPEG, hasta
+    5MB; en el celular se toma con la cámara). Es opcional y queda en la ronda
+    (`AreaTaskSampleTest.photo*`); se consulta con
+    `GET /orders/:id/area-tasks/:taskId/tests/:testId/photo`. El detalle de la
+    tarea sólo trae `photoName`, la imagen se baja al pedir "Ver foto".
+  - **Aviso a Recepción**: al mandar a pruebas le llega a la recepcionista que
+    atiende el pedido (`attendedByUserId ?? userId`, §2) para que la revise y
+    autorice. Nadie recibe el aviso de su propia acción.
 - **Resultado** (`POST /orders/:id/area-tasks/:taskId/test-result`,
   `{ result: 'aprobada' | 'rechazada', notes }`):
   - **aprobada**: `prepStage = null`; la tarea queda `pendiente` y el área ya
@@ -165,6 +173,9 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
   `sampleTests` con la tarea. **Las rondas nunca se borran**: una prueba
   rechazada se queda en el historial. Además cada acción deja un registro en
   `AuditLog` (`embroidery_test_sent` / `_approved` / `_rejected`).
+- **Avisos del resultado**: rechazada → a Bordado, con las observaciones;
+  aprobada → a Bordado y a la recepcionista que atiende el pedido. Nadie
+  recibe el aviso de su propia acción.
 - **Permisos**: el área Bordado y Recepción/admin/superuser.
 - Las tareas de Bordado que **ya existían** al desplegar quedan con
   `prepStage = null`: siguen su curso sin pasar por las etapas nuevas.

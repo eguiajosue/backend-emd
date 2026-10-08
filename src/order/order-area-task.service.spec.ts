@@ -10,6 +10,10 @@ import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AuditLogService } from 'src/audit-log/audit-log.service';
 
+// PNG mínimo válido: el servicio confirma por contenido que la foto es imagen.
+const MINIMAL_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
 /** Estado global "terminado" = listo para entregar (ver WORKFLOW.md §3). */
 const READY_FOR_DELIVERY_STATUS_ID = 4;
 const AUTORIZADO_STATUS_ID = 9;
@@ -40,6 +44,7 @@ describe('OrderAreaTaskService', () => {
       aggregate: jest.Mock;
       create: jest.Mock;
       findFirst: jest.Mock;
+      findUnique: jest.Mock;
       update: jest.Mock;
     };
     order: {
@@ -84,6 +89,7 @@ describe('OrderAreaTaskService', () => {
         aggregate: jest.fn(),
         create: jest.fn(),
         findFirst: jest.fn(),
+        findUnique: jest.fn(),
         update: jest.fn(),
       },
       order: {
@@ -277,6 +283,121 @@ describe('OrderAreaTaskService', () => {
           action: 'embroidery_test_sent',
           entityId: 5,
         }),
+      );
+    });
+
+    it('mandar a pruebas avisa a la recepcionista que atiende el pedido', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.order.findUnique.mockResolvedValue({
+        attendedByUserId: 21,
+        userId: 20,
+      });
+
+      await service.sendToTest(10, undefined, bordador, 5);
+
+      expect(notificationService.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 21,
+          type: 'embroidery_test_sent',
+          orderId: 5,
+        }),
+      );
+    });
+
+    it('quien manda a pruebas no recibe su propio aviso', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.order.findUnique.mockResolvedValue({
+        attendedByUserId: null,
+        userId: 3,
+      });
+
+      await service.sendToTest(10, undefined, {
+        userId: 3,
+        roles: ['recepcion'],
+      });
+
+      expect(notificationService.createNotification).not.toHaveBeenCalled();
+    });
+
+    it('guarda la foto de la prueba y avisa que va con foto', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.order.findUnique.mockResolvedValue({ userId: 20 });
+
+      await service.sendToTest(10, undefined, bordador, 5, {
+        data: MINIMAL_PNG_BASE64,
+        filename: 'prueba.png',
+        mimeType: 'image/png',
+      });
+
+      expect(prisma.areaTaskSampleTest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          photoData: MINIMAL_PNG_BASE64,
+          photoName: 'prueba.png',
+          photoMime: 'image/png',
+        }),
+      });
+      expect(notificationService.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.stringContaining('con foto'),
+        }),
+      );
+    });
+
+    it('rechaza una foto cuyo contenido no es una imagen', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      await expect(
+        service.sendToTest(10, undefined, bordador, 5, {
+          data: Buffer.from('<html></html>').toString('base64'),
+          filename: 'x.png',
+          mimeType: 'image/png',
+        }),
+      ).rejects.toThrow(/PNG o JPEG/);
+      expect(prisma.orderAreaTask.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('sin foto, la ronda se abre igual', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      await service.sendToTest(10, undefined, bordador, 5);
+      expect(
+        prisma.areaTaskSampleTest.create.mock.calls[0][0].data,
+      ).not.toHaveProperty('photoName');
+    });
+
+    it('devuelve la foto de una prueba como data URL', async () => {
+      prisma.areaTaskSampleTest.findUnique.mockResolvedValue({
+        areaTaskId: 10,
+        photoData: MINIMAL_PNG_BASE64,
+        photoKey: null,
+        photoName: 'prueba.png',
+        photoMime: 'image/png',
+        areaTask: { orderId: 5 },
+      });
+
+      const photo = await service.getSampleTestPhoto(10, 77, 5);
+
+      expect(photo.dataUrl).toBe(`data:image/png;base64,${MINIMAL_PNG_BASE64}`);
+    });
+
+    it('la foto no se entrega por otro pedido ni si la prueba no tiene', async () => {
+      const row = {
+        areaTaskId: 10,
+        photoData: null,
+        photoKey: null,
+        photoName: null,
+        photoMime: null,
+        areaTask: { orderId: 5 },
+      };
+      prisma.areaTaskSampleTest.findUnique.mockResolvedValue(row);
+      await expect(service.getSampleTestPhoto(10, 77, 5)).rejects.toThrow(
+        /no tiene foto/,
+      );
+      prisma.areaTaskSampleTest.findUnique.mockResolvedValue({
+        ...row,
+        photoName: 'a.png',
+        photoMime: 'image/png',
+      });
+      await expect(service.getSampleTestPhoto(10, 77, 99)).rejects.toThrow(
+        HttpException,
       );
     });
 

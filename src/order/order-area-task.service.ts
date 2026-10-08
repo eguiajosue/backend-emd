@@ -18,6 +18,13 @@ import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { Role } from 'src/common/enums/roles.enum';
 import { AuditLogService } from 'src/audit-log/audit-log.service';
+import { assertBase64FileValid } from 'src/common/file-validation';
+import {
+  STORAGE_FOLDERS,
+  StorageService,
+  type StoredBlob,
+} from 'src/storage/storage.service';
+import type { OrderFileDto } from './dto/create-order.dto';
 import { PRODUCTION_AREAS } from './dto/create-order.dto';
 import { AreaSupplyDto } from './dto/order-area-supply.dto';
 import {
@@ -74,6 +81,10 @@ const ALLOWED_TASK_TRANSITIONS: Record<AreaTaskStatus, AreaTaskStatus[]> = {
  * pruebas). WORKFLOW.md §3.1.
  */
 const PREP_STAGE_AREA = Role.BORDADO;
+
+/** La foto de la prueba la toma el celular: PNG o JPEG, hasta 5MB. */
+const SAMPLE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+const SAMPLE_PHOTO_MIME_TYPES = ['image/png', 'image/jpeg'] as const;
 
 /** Una entrada de la bandeja "Tareas asignadas" (ver `findMyTasks`). */
 export interface MyTaskItem {
@@ -142,6 +153,9 @@ export class OrderAreaTaskService {
     private readonly notificationService: NotificationService,
     private readonly notificationsGateway: NotificationsGateway,
     private readonly auditLog: AuditLogService,
+    // Lo inyecta siempre StorageModule (global); el default es el modo legacy
+    // (todo en la DB) para quien construye el servicio a mano.
+    private readonly storage: StorageService = StorageService.database(),
   ) {
     this.statusIds = new StatusIdResolver(this.prisma);
   }
@@ -166,6 +180,7 @@ export class OrderAreaTaskService {
           round: true,
           sentAt: true,
           sentNotes: true,
+          photoName: true,
           result: true,
           resultNotes: true,
           decidedAt: true,
@@ -909,6 +924,7 @@ export class OrderAreaTaskService {
     notes: string | undefined,
     requestingUser: RequestingUser,
     orderId?: number,
+    photo?: OrderFileDto,
   ) {
     const task = await this.loadBordadoTask(taskId, requestingUser, orderId);
     if (task.prepStage !== EmbroideryPrepStage.digitalizado) {
@@ -919,8 +935,60 @@ export class OrderAreaTaskService {
       );
     }
     const trimmed = notes?.trim() || null;
+    if (photo) {
+      await assertBase64FileValid(photo, {
+        maxBytes: SAMPLE_PHOTO_MAX_BYTES,
+        allowedMimeTypes: SAMPLE_PHOTO_MIME_TYPES,
+        sizeErrorMessage: 'La foto no puede superar 5MB',
+        typeErrorMessage: 'La foto debe ser una imagen PNG o JPEG',
+      });
+    }
+    const photoBlob: StoredBlob | null = photo
+      ? await this.storage.saveBase64(
+          STORAGE_FOLDERS.sampleTestPhoto,
+          photo.data,
+          photo.mimeType,
+        )
+      : null;
 
-    const updated = await this.prisma.$transaction(async (tx) => {
+    let updated;
+    try {
+      updated = await this.openSampleTestRound(
+        taskId,
+        trimmed,
+        requestingUser.userId,
+        photo,
+        photoBlob,
+      );
+    } catch (error) {
+      // La ronda no se abrió: el objeto recién subido quedaría huérfano.
+      await this.storage.deleteQuietly([photoBlob?.key]);
+      throw error;
+    }
+
+    const round = updated.sampleTests.at(-1)?.round;
+    await this.recordSampleAudit('embroidery_test_sent', task, requestingUser, {
+      round,
+      notes: trimmed,
+      hasPhoto: !!photo,
+    });
+    await this.notifyReceptionOfSampleSent(
+      task.orderId,
+      round ?? 1,
+      !!photo,
+      requestingUser.userId,
+    );
+    return this.stripSupplyForBranch(updated, requestingUser);
+  }
+
+  private async openSampleTestRound(
+    taskId: number,
+    trimmed: string | null,
+    userId: number,
+    photo: OrderFileDto | undefined,
+    photoBlob: StoredBlob | null,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
       // Condicional sobre la etapa: dos clics simultáneos no abren dos rondas.
       const { count } = await tx.orderAreaTask.updateMany({
         where: { id: taskId, prepStage: EmbroideryPrepStage.digitalizado },
@@ -937,8 +1005,15 @@ export class OrderAreaTaskService {
         data: {
           areaTaskId: taskId,
           round: (last._max.round ?? 0) + 1,
-          sentByUserId: requestingUser.userId,
+          sentByUserId: userId,
           sentNotes: trimmed,
+          ...(photo &&
+            photoBlob && {
+              photoData: photoBlob.data,
+              photoKey: photoBlob.key,
+              photoName: photo.filename,
+              photoMime: photo.mimeType,
+            }),
         },
       });
       return tx.orderAreaTask.findUniqueOrThrow({
@@ -946,12 +1021,63 @@ export class OrderAreaTaskService {
         select: this.taskSelect(),
       });
     });
+  }
 
-    await this.recordSampleAudit('embroidery_test_sent', task, requestingUser, {
-      round: updated.sampleTests.at(-1)?.round,
-      notes: trimmed,
+  /** Aviso a Recepción: hay una prueba esperando revisión y autorización. */
+  private async notifyReceptionOfSampleSent(
+    orderId: number,
+    round: number,
+    hasPhoto: boolean,
+    actorId: number,
+  ) {
+    try {
+      const receptionOwnerId = await this.orderReceptionOwnerId(orderId);
+      // Nadie recibe el aviso de su propia acción.
+      if (receptionOwnerId === null || receptionOwnerId === actorId) return;
+      await this.notificationService.createNotification({
+        userId: receptionOwnerId,
+        type: 'embroidery_test_sent',
+        title: 'Prueba de bordado por revisar',
+        body: `Pedido #${orderId}: Bordado mandó la prueba ${round}${hasPhoto ? ' con foto' : ''} a revisión y autorización`,
+        orderId,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo avisar la prueba a Recepción: ${(error as Error)?.message}`,
+      );
+    }
+  }
+
+  /** Foto de una prueba de bordado, como data URL. 404 si no tiene. */
+  async getSampleTestPhoto(taskId: number, testId: number, orderId?: number) {
+    const test = await this.prisma.areaTaskSampleTest.findUnique({
+      where: { id: testId },
+      select: {
+        areaTaskId: true,
+        photoData: true,
+        photoKey: true,
+        photoName: true,
+        photoMime: true,
+        areaTask: { select: { orderId: true } },
+      },
     });
-    return this.stripSupplyForBranch(updated, requestingUser);
+    if (
+      !test ||
+      test.areaTaskId !== taskId ||
+      !this.belongsToOrder(test.areaTask.orderId, orderId) ||
+      !test.photoName ||
+      !test.photoMime
+    ) {
+      throw new HttpException('La prueba no tiene foto', HttpStatus.NOT_FOUND);
+    }
+    return {
+      filename: test.photoName,
+      mimeType: test.photoMime,
+      dataUrl: await this.storage.toDataUrl(test.photoMime, {
+        data: test.photoData,
+        key: test.photoKey,
+      }),
+    };
   }
 
   /**
@@ -1175,12 +1301,19 @@ export class OrderAreaTaskService {
     }
     const task = await this.prisma.orderAreaTask.findUnique({
       where: { id: taskId },
-      select: { orderId: true },
+      select: {
+        orderId: true,
+        sampleTests: { select: { photoKey: true } },
+      },
     });
     if (!task || !this.belongsToOrder(task.orderId, orderId)) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
     }
     await this.prisma.orderAreaTask.delete({ where: { id: taskId } });
+    // Las pruebas se borran en cascada; sus fotos en el bucket, no.
+    await this.storage.deleteQuietly(
+      (task.sampleTests ?? []).map((test) => test.photoKey),
+    );
     await this.syncOrderStatusFromTasks(task.orderId, requestingUser.userId);
     return { deleted: true };
   }

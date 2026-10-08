@@ -361,6 +361,10 @@ model AreaTaskSampleTest {
   sentAt          DateTime          @default(now()) // Cuándo se mandó a pruebas.
   sentByUserId    Int? // Quién la mandó a pruebas.
   sentNotes       String? // Comentarios al mandar (qué se corrigió, parámetros de la prueba).
+  photoData       String? // Foto de la prueba (base64 sin prefijo data:). Legacy: null si está en el almacenamiento de objetos (ver photoKey).
+  photoKey        String? // Clave del objeto (R2/S3) de la foto cuando STORAGE_DRIVER=s3. Si está, manda sobre photoData.
+  photoName       String? // Nombre de archivo de la foto; null = la prueba se mandó sin foto.
+  photoMime       String? // Mime type de la foto (image/jpeg | image/png).
   result          SampleTestResult? // null = prueba en curso.
   resultNotes     String? // Observaciones del resultado (obligatorias al rechazar).
   decidedAt       DateTime? // Cuándo se aprobó o rechazó.
