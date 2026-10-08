@@ -1027,7 +1027,63 @@ export class OrderAreaTaskService {
       requestingUser,
       { round, notes: trimmed },
     );
+    await this.notifySampleTestResult(
+      task.orderId,
+      result,
+      round,
+      trimmed,
+      requestingUser.userId,
+    );
     return this.stripSupplyForBranch(updated, requestingUser);
+  }
+
+  /**
+   * Avisos del resultado de una prueba de bordado (WORKFLOW.md §3.1):
+   * - rechazada: a Bordado, que tiene que corregir la digitalización;
+   * - aprobada: a Bordado (ya puede producir) y a la recepcionista que atiende
+   *   el pedido.
+   * Nadie recibe el aviso de su propia acción. Un fallo al avisar no revierte
+   * el resultado, que ya quedó guardado.
+   */
+  private async notifySampleTestResult(
+    orderId: number,
+    result: SampleTestResult,
+    round: number,
+    notes: string | null,
+    actorId: number,
+  ) {
+    try {
+      const approved = result === SampleTestResult.aprobada;
+      const areaUserIds = (
+        await this.notificationService.userIdsForArea(PREP_STAGE_AREA)
+      ).filter((id) => id !== actorId);
+      await this.notificationService.createNotificationForUsers(areaUserIds, {
+        type: approved
+          ? 'embroidery_test_approved'
+          : 'embroidery_test_rejected',
+        title: approved
+          ? 'Prueba de bordado aprobada'
+          : 'Prueba de bordado rechazada',
+        body: approved
+          ? `Pedido #${orderId}: la prueba ${round} se aprobó, ya se puede producir`
+          : `Pedido #${orderId}: la prueba ${round} se rechazó${notes ? ` — ${notes}` : ''}`,
+        orderId,
+      });
+      if (!approved) return;
+      const receptionOwnerId = await this.orderReceptionOwnerId(orderId);
+      if (receptionOwnerId === null || receptionOwnerId === actorId) return;
+      await this.notificationService.createNotification({
+        userId: receptionOwnerId,
+        type: 'embroidery_test_approved',
+        title: 'Prueba de bordado aprobada',
+        body: `Pedido #${orderId}: la prueba ${round} se aprobó, Bordado pasa a producción`,
+        orderId,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo avisar el resultado de la prueba: ${(error as Error)?.message}`,
+      );
+    }
   }
 
   private async recordSampleAudit(

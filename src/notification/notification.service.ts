@@ -41,6 +41,8 @@ const PRODUCTION_NOTIFICATION_TYPES = new Set([
   'design_montage_sent',
   'design_feedback_added',
   'design_approved',
+  'embroidery_test_approved',
+  'embroidery_test_rejected',
 ]);
 
 /**

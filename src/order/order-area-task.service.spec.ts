@@ -360,6 +360,74 @@ describe('OrderAreaTaskService', () => {
       );
     });
 
+    it('rechazar avisa a Bordado (menos a quien rechazó) con las observaciones', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      notificationService.userIdsForArea.mockResolvedValue([3, 8]);
+
+      await service.decideTest(
+        10,
+        SampleTestResult.rechazada,
+        'hilo muy tenso',
+        bordador,
+        5,
+      );
+
+      expect(notificationService.userIdsForArea).toHaveBeenCalledWith(
+        'bordado',
+      );
+      expect(
+        notificationService.createNotificationForUsers,
+      ).toHaveBeenCalledWith(
+        [8],
+        expect.objectContaining({
+          type: 'embroidery_test_rejected',
+          orderId: 5,
+          body: expect.stringContaining('hilo muy tenso'),
+        }),
+      );
+      expect(notificationService.createNotification).not.toHaveBeenCalled();
+    });
+
+    it('aprobar avisa a Bordado y a la recepcionista que atiende el pedido', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      notificationService.userIdsForArea.mockResolvedValue([8]);
+      prisma.order.findUnique.mockResolvedValue({
+        attendedByUserId: 21,
+        userId: 20,
+      });
+
+      await service.decideTest(
+        10,
+        SampleTestResult.aprobada,
+        undefined,
+        bordador,
+        5,
+      );
+
+      expect(
+        notificationService.createNotificationForUsers,
+      ).toHaveBeenCalledWith(
+        [8],
+        expect.objectContaining({ type: 'embroidery_test_approved' }),
+      );
+      expect(notificationService.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 21,
+          type: 'embroidery_test_approved',
+        }),
+      );
+    });
+
+    it('si falla el aviso, el resultado igual queda registrado', async () => {
+      taskAt(EmbroideryPrepStage.en_pruebas);
+      notificationService.userIdsForArea.mockRejectedValue(new Error('x'));
+
+      await expect(
+        service.decideTest(10, SampleTestResult.aprobada, undefined, bordador),
+      ).resolves.toBeDefined();
+      expect(prisma.areaTaskSampleTest.update).toHaveBeenCalled();
+    });
+
     it('rechazar exige observaciones', async () => {
       taskAt(EmbroideryPrepStage.en_pruebas);
       await expect(
