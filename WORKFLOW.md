@@ -181,6 +181,14 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
   `prepStage = null`: siguen su curso sin pasar por las etapas nuevas.
 - Para el tablero y los conteos, una tarea en digitalizado/pruebas sigue siendo
   `pendiente` (todavía no es trabajo en curso del área).
+- **Tablero de Bordado (frontend)**: en "Tareas asignadas" y en el Modo TV,
+  cuando sólo se ve Bordado, el tablero lleva cuatro columnas que siguen estas
+  etapas: **Digitalizado → En pruebas → En producción** (pendiente + en proceso)
+  **→ Terminado**. Cada tarjeta trae el botón de su siguiente paso (mandar a
+  pruebas, aprobar/rechazar, empezar, terminar) y, si la prueba anterior se
+  rechazó, el motivo. Para eso `GET /orders/my-tasks` manda `prepStage` y
+  `lastTest` (última ronda: `round`, `result`, `sentNotes`, `resultNotes`);
+  `GET /orders/my-area-tasks` ya traía `prepStage` y `sampleTests`.
 
 ### Hoja de materiales al autorizar (origen de insumos)
 

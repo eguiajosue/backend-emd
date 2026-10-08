@@ -97,6 +97,16 @@ export interface MyTaskItem {
   status: string;
   /** Etapa previa a producción de Bordado (digitalizado | en_pruebas); null si ya puede producir. */
   prepStage?: EmbroideryPrepStage | null;
+  /**
+   * Última ronda de pruebas de Bordado (null si no hay): la tarjeta muestra por
+   * qué se rechazó la prueba o cuántas rondas lleva.
+   */
+  lastTest?: {
+    round: number;
+    result: SampleTestResult | null;
+    sentNotes: string | null;
+    resultNotes: string | null;
+  } | null;
   /** A nombre de quien la pide (nunca desde la cuenta compartida). */
   mine: boolean;
   /** Responsable si es una persona; null si está libre. */
@@ -506,6 +516,16 @@ export class OrderAreaTaskService {
           area: true,
           status: true,
           prepStage: true,
+          sampleTests: {
+            orderBy: { round: 'desc' as const },
+            take: 1,
+            select: {
+              round: true,
+              result: true,
+              sentNotes: true,
+              resultNotes: true,
+            },
+          },
           assignedUserId: true,
           startedAt: true,
           assignedUser: assigneeSelect,
@@ -522,6 +542,7 @@ export class OrderAreaTaskService {
           taskId: task.id,
           status: task.status,
           prepStage: task.prepStage,
+          lastTest: task.sampleTests?.[0] ?? null,
           mine: isMine(task.assignedUserId),
           assignee: isFree(task.assignedUserId) ? null : task.assignedUser,
           startedAt: task.startedAt,
