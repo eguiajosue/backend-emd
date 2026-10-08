@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OrderAreaTaskService } from './order-area-task.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
 
 /**
  * Concurrencia REAL contra Postgres (sin mocks de Prisma): dos peticiones
@@ -69,6 +70,9 @@ describeDb('Hoja de materiales: concurrencia real en Postgres', () => {
         createNotification: jest.fn().mockResolvedValue(undefined),
       } as unknown as NotificationService,
       { notifyNewOrderToArea: jest.fn() } as unknown as NotificationsGateway,
+      {
+        record: jest.fn().mockResolvedValue(undefined),
+      } as unknown as AuditLogService,
     );
   });
 

@@ -340,6 +340,9 @@ describe('OrderAreaTaskService: destinatario efectivo de los avisos a Recepción
       prisma as unknown as PrismaService,
       notificationService as unknown as NotificationService,
       { notifyNewOrderToArea: jest.fn() } as unknown as NotificationsGateway,
+      {
+        record: jest.fn().mockResolvedValue(undefined),
+      } as unknown as AuditLogService,
     );
     return { service, notificationService };
   };

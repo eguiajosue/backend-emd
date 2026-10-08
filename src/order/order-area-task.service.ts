@@ -6,11 +6,18 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { AreaTaskStatus, Prisma, SupplySource } from '@prisma/client';
+import {
+  AreaTaskStatus,
+  EmbroideryPrepStage,
+  Prisma,
+  SampleTestResult,
+  SupplySource,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { Role } from 'src/common/enums/roles.enum';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
 import { PRODUCTION_AREAS } from './dto/create-order.dto';
 import { AreaSupplyDto } from './dto/order-area-supply.dto';
 import {
@@ -62,6 +69,12 @@ const ALLOWED_TASK_TRANSITIONS: Record<AreaTaskStatus, AreaTaskStatus[]> = {
   [AreaTaskStatus.terminado]: [AreaTaskStatus.en_proceso],
 };
 
+/**
+ * Sólo Bordado pasa por las etapas previas a producción (digitalizado →
+ * pruebas). WORKFLOW.md §3.1.
+ */
+const PREP_STAGE_AREA = Role.BORDADO;
+
 /** Una entrada de la bandeja "Tareas asignadas" (ver `findMyTasks`). */
 export interface MyTaskItem {
   key: string;
@@ -71,6 +84,8 @@ export interface MyTaskItem {
   taskId: number | null;
   /** Estado de la tarea de área, o nombre del estado de diseño del pedido. */
   status: string;
+  /** Etapa previa a producción de Bordado (digitalizado | en_pruebas); null si ya puede producir. */
+  prepStage?: EmbroideryPrepStage | null;
   /** A nombre de quien la pide (nunca desde la cuenta compartida). */
   mine: boolean;
   /** Responsable si es una persona; null si está libre. */
@@ -126,6 +141,7 @@ export class OrderAreaTaskService {
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
     private readonly notificationsGateway: NotificationsGateway,
+    private readonly auditLog: AuditLogService,
   ) {
     this.statusIds = new StatusIdResolver(this.prisma);
   }
@@ -141,6 +157,22 @@ export class OrderAreaTaskService {
       createdAt: true,
       startedAt: true,
       completedAt: true,
+      prepStage: true,
+      // Registro de pruebas de bordado (vacío fuera de Bordado).
+      sampleTests: {
+        orderBy: { round: 'asc' as const },
+        select: {
+          id: true,
+          round: true,
+          sentAt: true,
+          sentNotes: true,
+          result: true,
+          resultNotes: true,
+          decidedAt: true,
+          sentBy: { select: { id: true, firstName: true, lastName: true } },
+          decidedBy: { select: { id: true, firstName: true, lastName: true } },
+        },
+      },
       assignedUser: {
         select: {
           id: true,
@@ -236,7 +268,15 @@ export class OrderAreaTaskService {
       toCreate.map(async (area) => {
         const assignedUserId = await this.sharedAccountIdForArea(area, client);
         return client.orderAreaTask.create({
-          data: { orderId, area, assignedUserId },
+          data: {
+            orderId,
+            area,
+            assignedUserId,
+            // Bordado arranca en digitalización (WORKFLOW.md §3.1).
+            ...(area === PREP_STAGE_AREA && {
+              prepStage: EmbroideryPrepStage.digitalizado,
+            }),
+          },
           select: this.taskSelect(),
         });
       }),
@@ -450,6 +490,7 @@ export class OrderAreaTaskService {
           id: true,
           area: true,
           status: true,
+          prepStage: true,
           assignedUserId: true,
           startedAt: true,
           assignedUser: assigneeSelect,
@@ -465,6 +506,7 @@ export class OrderAreaTaskService {
           area: task.area,
           taskId: task.id,
           status: task.status,
+          prepStage: task.prepStage,
           mine: isMine(task.assignedUserId),
           assignee: isFree(task.assignedUserId) ? null : task.assignedUser,
           startedAt: task.startedAt,
@@ -732,6 +774,7 @@ export class OrderAreaTaskService {
         orderId: true,
         area: true,
         status: true,
+        prepStage: true,
         assignedUserId: true,
       },
     });
@@ -740,6 +783,7 @@ export class OrderAreaTaskService {
     }
     this.assertCanWorkArea(task.area, requestingUser);
     this.assertValidTransition(task.status, status);
+    this.assertNotInPrepStage(task.prepStage, status);
 
     // "Empezar" es "tomar" (WORKFLOW.md §3, paso 7): si la tarea está sin
     // asignar o todavía en la cuenta compartida del área, al pasarla a
@@ -814,6 +858,191 @@ export class OrderAreaTaskService {
       );
     }
     return this.stripSupplyForBranch(updated, requestingUser);
+  }
+
+  /**
+   * Una tarea de Bordado que sigue en digitalización o en pruebas no puede
+   * empezar ni terminar: antes necesita la prueba aprobada (WORKFLOW.md §3.1).
+   * Quedarse en `pendiente` (o repetir el mismo estado) sí es válido.
+   */
+  private assertNotInPrepStage(
+    prepStage: EmbroideryPrepStage | null,
+    to: AreaTaskStatus,
+  ) {
+    if (!prepStage || to === AreaTaskStatus.pendiente) return;
+    throw new BadRequestException(
+      prepStage === EmbroideryPrepStage.digitalizado
+        ? 'Bordado todavía está en digitalización: primero hay que mandarlo a pruebas y que la prueba se apruebe.'
+        : 'La prueba de bordado sigue pendiente: hay que aprobarla antes de empezar la producción.',
+    );
+  }
+
+  /** Carga la tarea para las acciones de pruebas y valida pedido, área y permiso. */
+  private async loadBordadoTask(
+    taskId: number,
+    requestingUser: RequestingUser,
+    orderId?: number,
+  ) {
+    const task = await this.prisma.orderAreaTask.findUnique({
+      where: { id: taskId },
+      select: { id: true, orderId: true, area: true, prepStage: true },
+    });
+    if (!task || !this.belongsToOrder(task.orderId, orderId)) {
+      throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
+    }
+    if (task.area !== PREP_STAGE_AREA) {
+      throw new BadRequestException(
+        'Sólo Bordado pasa por digitalización y pruebas',
+      );
+    }
+    this.assertCanWorkArea(task.area, requestingUser);
+    return task;
+  }
+
+  /**
+   * Manda la digitalización a pruebas: abre una ronda nueva en el registro y
+   * la tarea pasa de `digitalizado` a `en_pruebas`. Se usa tanto la primera vez
+   * como después de corregir una prueba rechazada.
+   */
+  async sendToTest(
+    taskId: number,
+    notes: string | undefined,
+    requestingUser: RequestingUser,
+    orderId?: number,
+  ) {
+    const task = await this.loadBordadoTask(taskId, requestingUser, orderId);
+    if (task.prepStage !== EmbroideryPrepStage.digitalizado) {
+      throw new BadRequestException(
+        task.prepStage === EmbroideryPrepStage.en_pruebas
+          ? 'La tarea ya está en pruebas'
+          : 'La tarea ya pasó las pruebas',
+      );
+    }
+    const trimmed = notes?.trim() || null;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Condicional sobre la etapa: dos clics simultáneos no abren dos rondas.
+      const { count } = await tx.orderAreaTask.updateMany({
+        where: { id: taskId, prepStage: EmbroideryPrepStage.digitalizado },
+        data: { prepStage: EmbroideryPrepStage.en_pruebas },
+      });
+      if (count !== 1) {
+        throw new BadRequestException('La tarea ya está en pruebas');
+      }
+      const last = await tx.areaTaskSampleTest.aggregate({
+        where: { areaTaskId: taskId },
+        _max: { round: true },
+      });
+      await tx.areaTaskSampleTest.create({
+        data: {
+          areaTaskId: taskId,
+          round: (last._max.round ?? 0) + 1,
+          sentByUserId: requestingUser.userId,
+          sentNotes: trimmed,
+        },
+      });
+      return tx.orderAreaTask.findUniqueOrThrow({
+        where: { id: taskId },
+        select: this.taskSelect(),
+      });
+    });
+
+    await this.recordSampleAudit('embroidery_test_sent', task, requestingUser, {
+      round: updated.sampleTests.at(-1)?.round,
+      notes: trimmed,
+    });
+    return this.stripSupplyForBranch(updated, requestingUser);
+  }
+
+  /**
+   * Registra el resultado de la prueba abierta.
+   * - `aprobada`: la tarea queda lista para producción (`prepStage = null`,
+   *   sigue `pendiente` hasta que el área la empiece).
+   * - `rechazada`: vuelve a `digitalizado` para corregir; las observaciones son
+   *   obligatorias para que quien digitaliza sepa qué corregir.
+   */
+  async decideTest(
+    taskId: number,
+    result: SampleTestResult,
+    notes: string | undefined,
+    requestingUser: RequestingUser,
+    orderId?: number,
+  ) {
+    const task = await this.loadBordadoTask(taskId, requestingUser, orderId);
+    if (task.prepStage !== EmbroideryPrepStage.en_pruebas) {
+      throw new BadRequestException('La tarea no está en pruebas');
+    }
+    const trimmed = notes?.trim() || null;
+    if (result === SampleTestResult.rechazada && !trimmed) {
+      throw new BadRequestException(
+        'Explica qué hay que corregir al rechazar la prueba',
+      );
+    }
+
+    const { updated, round } = await this.prisma.$transaction(async (tx) => {
+      // Condicional sobre la etapa: dos resultados simultáneos no se pisan.
+      const { count } = await tx.orderAreaTask.updateMany({
+        where: { id: taskId, prepStage: EmbroideryPrepStage.en_pruebas },
+        data: {
+          prepStage:
+            result === SampleTestResult.aprobada
+              ? null
+              : EmbroideryPrepStage.digitalizado,
+        },
+      });
+      if (count !== 1) {
+        throw new BadRequestException('La tarea no está en pruebas');
+      }
+      const open = await tx.areaTaskSampleTest.findFirst({
+        where: { areaTaskId: taskId, result: null },
+        orderBy: { round: 'desc' },
+        select: { id: true, round: true },
+      });
+      if (!open) {
+        throw new BadRequestException('No hay una prueba abierta');
+      }
+      await tx.areaTaskSampleTest.update({
+        where: { id: open.id },
+        data: {
+          result,
+          resultNotes: trimmed,
+          decidedAt: new Date(),
+          decidedByUserId: requestingUser.userId,
+        },
+      });
+      return {
+        round: open.round,
+        updated: await tx.orderAreaTask.findUniqueOrThrow({
+          where: { id: taskId },
+          select: this.taskSelect(),
+        }),
+      };
+    });
+
+    await this.recordSampleAudit(
+      result === SampleTestResult.aprobada
+        ? 'embroidery_test_approved'
+        : 'embroidery_test_rejected',
+      task,
+      requestingUser,
+      { round, notes: trimmed },
+    );
+    return this.stripSupplyForBranch(updated, requestingUser);
+  }
+
+  private async recordSampleAudit(
+    action: string,
+    task: { id: number; orderId: number },
+    requestingUser: RequestingUser,
+    metadata: Record<string, unknown>,
+  ) {
+    await this.auditLog.record({
+      actorUserId: requestingUser.userId,
+      action,
+      entityType: 'order',
+      entityId: task.orderId,
+      metadata: { areaTaskId: task.id, ...metadata },
+    });
   }
 
   /**

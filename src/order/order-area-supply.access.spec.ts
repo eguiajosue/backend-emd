@@ -9,6 +9,7 @@ import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AreaSupplyLineDto } from './dto/order-area-supply.dto';
 import { CreateInventoryMovementDto } from '../inventory/dto/create-inventory-movement.dto';
 import { CreateRestockRequestDto } from '../inventory/dto/restock-request.dto';
+import { AuditLogService } from 'src/audit-log/audit-log.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 
@@ -72,6 +73,9 @@ describe('Hoja de materiales: visibilidad y descuento pendiente', () => {
       prisma as PrismaService,
       {} as NotificationService,
       {} as NotificationsGateway,
+      {
+        record: jest.fn().mockResolvedValue(undefined),
+      } as unknown as AuditLogService,
     );
   });
 

@@ -1,4 +1,4 @@
-import { AreaTaskStatus } from '@prisma/client';
+import { AreaTaskStatus, SampleTestResult } from '@prisma/client';
 import {
   ArrayMaxSize,
   ArrayNotEmpty,
@@ -8,6 +8,8 @@ import {
   IsInt,
   IsOptional,
   IsPositive,
+  IsString,
+  MaxLength,
 } from 'class-validator';
 import { PRODUCTION_AREAS } from './create-order.dto';
 
@@ -32,4 +34,25 @@ export class AssignAreaTaskDto {
   @IsInt()
   @IsPositive()
   assignedUserId?: number | null;
+}
+
+/** Mandar la digitalización de Bordado a pruebas (WORKFLOW.md §3.1). */
+export class SendToTestDto {
+  /** Qué se corrigió o con qué parámetros se hace la prueba. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
+}
+
+/** Resultado de la prueba de bordado abierta. */
+export class SampleTestResultDto {
+  @IsEnum(SampleTestResult)
+  result: SampleTestResult;
+
+  /** Obligatoria al rechazar: qué hay que corregir. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
 }
