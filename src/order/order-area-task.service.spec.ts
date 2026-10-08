@@ -261,6 +261,17 @@ describe('OrderAreaTaskService', () => {
       expect(prisma.orderAreaTask.update).toHaveBeenCalled();
     });
 
+    it('no deja mandar a pruebas mientras el pedido sigue en diseño', async () => {
+      taskAt(EmbroideryPrepStage.digitalizado);
+      prisma.order.findUnique.mockResolvedValue({
+        status: { name: 'Esperando autorización' },
+      });
+      await expect(
+        service.sendToTest(10, undefined, bordador, 5),
+      ).rejects.toThrow(/cuando el cliente lo autorice/);
+      expect(prisma.orderAreaTask.updateMany).not.toHaveBeenCalled();
+    });
+
     it('mandar a pruebas abre la ronda 1 y pasa a en_pruebas', async () => {
       taskAt(EmbroideryPrepStage.digitalizado);
 
@@ -1213,6 +1224,38 @@ describe('OrderAreaTaskService', () => {
 
       expect(items).toHaveLength(1);
       expect(items[0].mine).toBe(false);
+    });
+
+    it('Bordado: trae la etapa previa y la última prueba (por qué se rechazó)', async () => {
+      prisma.orderAreaTask.findMany.mockResolvedValue([
+        {
+          ...task(7, 'bordado', ME),
+          prepStage: EmbroideryPrepStage.digitalizado,
+          sampleTests: [
+            {
+              round: 2,
+              result: SampleTestResult.rechazada,
+              sentNotes: null,
+              resultNotes: 'El hilo se frunce',
+            },
+          ],
+        },
+      ]);
+
+      const items = await service.findMyTasks({
+        userId: ME,
+        roles: ['bordado'],
+      });
+
+      expect(items[0]).toMatchObject({
+        prepStage: EmbroideryPrepStage.digitalizado,
+        lastTest: { round: 2, resultNotes: 'El hilo se frunce' },
+      });
+      const select = prisma.orderAreaTask.findMany.mock.calls[0][0].select;
+      expect(select.sampleTests).toMatchObject({
+        orderBy: { round: 'desc' },
+        take: 1,
+      });
     });
 
     it('sin áreas de trabajo no devuelve nada', async () => {

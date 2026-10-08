@@ -108,6 +108,14 @@ describe('Visibilidad de sucursales: superficie de rutas', () => {
       'AuthController.login',
       'AuthController.refresh',
       'BugReportController.create',
+      // Portal del cliente: público a propósito, la llave es el token de 32
+      // bytes del enlace (WORKFLOW.md §8). Sólo lee el pedido de ESE enlace.
+      'ClientPortalController.designFile',
+      'ClientPortalController.get',
+      'ClientPortalController.mockup',
+      'ClientPortalController.respond',
+      'ClientPortalController.subscribePush',
+      'ClientPortalController.unsubscribePush',
       'HealthController.liveness',
       'HealthController.readiness',
       'PushController.getVapidPublicKey',

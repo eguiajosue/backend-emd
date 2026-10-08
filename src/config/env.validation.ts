@@ -56,6 +56,11 @@ export const envSchema = z.object({
   // de la cuenta de Resend.
   BUG_REPORT_RECIPIENT: z.string().optional(),
   BUG_REPORT_FROM: z.string().optional(),
+  // Aviso "tu pedido está listo" por correo al cliente (portal, WORKFLOW.md
+  // §8). Sin remitente verificado en Resend no se manda correo (sí el push).
+  CLIENT_EMAIL_FROM: z.string().optional(),
+  // Base de los enlaces del portal en avisos; si falta, el 1er FRONTEND_URL.
+  CLIENT_PORTAL_URL: z.string().optional(),
 
   // Almacenamiento de archivos (ver src/storage y docs/storage-r2.md).
   // `db` (default) = base64 en Postgres como siempre; `s3` = Cloudflare R2 o

@@ -152,11 +152,11 @@ model Order {
   clientResourceFileName String? // Nombre de archivo original del archivo del cliente.
   clientResourceFileMime String? // Mime type del archivo del cliente (image/png, image/jpeg, application/pdf).
 
-  client             Client?             @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
-  user               User                @relation(fields: [userId], references: [id]) // Relación con User (creador).
-  assignedUser       User?               @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
-  attendedBy         User?               @relation("AttendedOrders", fields: [attendedByUserId], references: [id]) // Relación con la recepcionista que atiende el pedido.
-  status             Status              @relation(fields: [statusId], references: [id]) // Relación con Status.
+  client             Client?                @relation(fields: [clientId], references: [id]) // Relación con Client (opcional).
+  user               User                   @relation(fields: [userId], references: [id]) // Relación con User (creador).
+  assignedUser       User?                  @relation("AssignedOrders", fields: [assignedUserId], references: [id]) // Relación con User asignado.
+  attendedBy         User?                  @relation("AttendedOrders", fields: [attendedByUserId], references: [id]) // Relación con la recepcionista que atiende el pedido.
+  status             Status                 @relation(fields: [statusId], references: [id]) // Relación con Status.
   histories          OrderHistory[] // Relación uno a muchos con OrderHistory.
   orderProducts      OrderProduct[] // Líneas de producto del pedido.
   notes              OrderNote[] // Notas/comentarios internos sobre el pedido.
@@ -171,8 +171,10 @@ model Order {
   inventoryMovements InventoryMovement[] // Consumos de inventario imputados a este pedido (opcional).
   mockups            OrderMockup[] // Mockups 3D (playera/gorra con los diseños del cliente) adjuntados al pedido.
   quote              Quote? // Cotización aceptada que se convirtió en este pedido (si vino de una).
-  branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de origen (si vino de una).
-  branchEmployee     BranchEmployee?     @relation(fields: [branchEmployeeId], references: [id], onDelete: SetNull) // Empleado de la sucursal que lo levantó.
+  shareLink          OrderShareLink? // Enlace privado para que el cliente siga su pedido (portal del cliente, WORKFLOW.md §8).
+  clientResponses    ClientDesignResponse[] // Respuestas del cliente al diseño desde el portal, pendientes de confirmar por Recepción.
+  branch             Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de origen (si vino de una).
+  branchEmployee     BranchEmployee?        @relation(fields: [branchEmployeeId], references: [id], onDelete: SetNull) // Empleado de la sucursal que lo levantó.
 
   @@index([statusId])
   @@index([clientId])
@@ -215,11 +217,12 @@ model DesignRevision {
 
   createdAt DateTime @default(now()) // Fecha de creación de la ronda.
 
-  order          Order                @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order (se borra en cascada si se borra el pedido).
-  sentByUser     User?                @relation("DesignRevisionSentBy", fields: [sentByUserId], references: [id]) // Relación con User que envió el montaje.
-  feedbackByUser User?                @relation("DesignRevisionFeedbackBy", fields: [feedbackByUserId], references: [id]) // Relación con User que cargó el feedback.
-  approvedByUser User?                @relation("DesignRevisionApprovedBy", fields: [approvedByUserId], references: [id]) // Relación con User que autorizó.
-  files          DesignRevisionFile[] // Archivos de la ronda (montaje y/o feedback); una ronda admite varios (WORKFLOW.md §2).
+  order           Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relación con Order (se borra en cascada si se borra el pedido).
+  sentByUser      User?                  @relation("DesignRevisionSentBy", fields: [sentByUserId], references: [id]) // Relación con User que envió el montaje.
+  feedbackByUser  User?                  @relation("DesignRevisionFeedbackBy", fields: [feedbackByUserId], references: [id]) // Relación con User que cargó el feedback.
+  approvedByUser  User?                  @relation("DesignRevisionApprovedBy", fields: [approvedByUserId], references: [id]) // Relación con User que autorizó.
+  files           DesignRevisionFile[] // Archivos de la ronda (montaje y/o feedback); una ronda admite varios (WORKFLOW.md §2).
+  clientResponses ClientDesignResponse[] // Respuestas del cliente a esta ronda desde el portal.
 
   @@index([orderId])
   @@index([orderId, round])
@@ -1020,7 +1023,7 @@ model ClientInsight {
 model OrderMockup {
   id               Int      @id @default(autoincrement()) // Identificador único del mockup.
   orderId          Int // Clave foránea que referencia al Order al que se adjuntó.
-  garment          String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' | 'termo' | 'taza' | 'car' | 'minivan' | 'pickup' | 'trailer' | 'bicycle' [rotulaciones] (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
+  garment          String // Prenda del mockup: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' | 'termo' | 'taza' | 'mousepad' | 'car' | 'minivan' | 'pickup' | 'trailer' | 'bicycle' [rotulaciones] (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
   imageData        String? // Lámina exportada en base64 (sin prefijo data:), PNG o JPEG, máx. 8MB decodificada. Legacy: null si está en el almacenamiento de objetos.
   imageKey         String? // Clave del objeto (R2/S3) de la lámina. Si está, manda sobre imageData.
   imageMime        String // Mime type de la lámina: image/png | image/jpeg.
@@ -1048,7 +1051,7 @@ model OrderMockup {
 model MockupTemplate {
   id            Int      @id @default(autoincrement()) // Identificador único de la plantilla.
   name          String // Nombre que le puso el usuario (máx. 80 caracteres).
-  garment       String // Prenda de la plantilla: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' | 'termo' | 'taza' | 'car' | 'minivan' | 'pickup' | 'trailer' | 'bicycle' [rotulaciones] (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
+  garment       String // Prenda de la plantilla: 'tshirt' | 'cap' | 'hoodie' | 'dress-shirt' | 'termo' | 'taza' | 'mousepad' | 'car' | 'minivan' | 'pickup' | 'trailer' | 'bicycle' [rotulaciones] (MOCKUP_GARMENTS de src/common/mockup-garments.ts).
   config        Json // Configuración del estudio (MockupConfig del frontend: prenda, colores y capas de diseño) que se aplica al elegirla. Máx. 8MB.
   thumbnailData String? // Miniatura en base64 (sin prefijo data:), PNG o JPEG, máx. 96KB decodificada. Se lista junto con la plantilla. Legacy: null si está en el almacenamiento de objetos.
   thumbnailKey  String? // Clave del objeto (R2/S3) de la miniatura. Si está, manda sobre thumbnailData.
@@ -1158,4 +1161,65 @@ model BranchEmployee {
 
   @@unique([branchId, name])
   @@index([branchId])
+}
+
+// ─── Portal del cliente ────────────────────────────────────────────────────
+//
+// Un enlace privado (sin cuenta) para que el cliente vea en qué va su pedido,
+// sus productos y tallas, y el diseño a aprobar. Su respuesta NO se aplica
+// sola: queda como `ClientDesignResponse` pendiente y Recepción la confirma
+// con el flujo de siempre (autorizar con hoja de materiales, o cargar el
+// feedback). Ver WORKFLOW.md §8 y src/client-portal.
+
+model OrderShareLink {
+  id              Int       @id @default(autoincrement()) // Identificador único del enlace.
+  orderId         Int       @unique // Pedido al que da acceso (un enlace vigente por pedido; regenerar cambia el token).
+  token           String    @unique // Secreto del enlace (/p/<token>): 32 bytes aleatorios en base64url. Quien lo tiene ve el pedido.
+  createdById     Int? // Usuario (Recepción) que lo creó o regeneró por última vez. Sin relación: sólo auditoría.
+  createdAt       DateTime  @default(now()) // Cuándo se creó (o regeneró) el token vigente.
+  lastViewedAt    DateTime? // Última vez que el cliente abrió el enlace ("Visto hace…" en el pedido). Null = nunca.
+  viewCount       Int       @default(0) // Cuántas veces se abrió.
+  readyNotifiedAt DateTime? // Cuándo se avisó al cliente que su pedido está listo (push del portal y/o correo). Un solo aviso por pedido.
+
+  order             Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade) // Se borra junto con el pedido.
+  pushSubscriptions PortalPushSubscription[] // Navegadores del cliente que pidieron "Avísame cuando esté listo".
+}
+
+/// Suscripción Web Push del CLIENTE desde el portal ("Avísame cuando esté
+/// listo"). Cuelga del enlace: si Recepción lo desactiva o lo regenera, se
+/// borran (quien tenía el enlace viejo deja de recibir avisos).
+model PortalPushSubscription {
+  id        Int      @id @default(autoincrement()) // Identificador único.
+  linkId    Int // Enlace del portal desde el que se suscribió.
+  endpoint  String // URL del servicio push del navegador.
+  p256dh    String // Clave pública del navegador.
+  auth      String // Secreto de autenticación del navegador.
+  createdAt DateTime @default(now()) // Cuándo se suscribió.
+
+  link OrderShareLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@unique([linkId, endpoint])
+}
+
+/// Respuesta del cliente a una ronda de diseño desde el portal: 'aprobar' o
+/// 'cambios' (con comentario). Queda 'pendiente' hasta que Recepción la
+/// aplique (al autorizar la ronda o cargar el feedback queda 'aplicada') o la
+/// descarte. Sólo puede haber una pendiente por pedido: una nueva reemplaza a
+/// la anterior.
+model ClientDesignResponse {
+  id           Int       @id @default(autoincrement()) // Identificador único de la respuesta.
+  orderId      Int // Pedido.
+  revisionId   Int // Ronda de diseño a la que responde.
+  kind         String // 'aprobar' | 'cambios'.
+  comment      String? // Qué cambiar (obligatorio en 'cambios', máx. 2000) o comentario opcional al aprobar.
+  status       String    @default("pendiente") // 'pendiente' | 'aplicada' | 'descartada' | 'reemplazada'.
+  createdAt    DateTime  @default(now()) // Cuándo respondió el cliente.
+  resolvedAt   DateTime? // Cuándo Recepción la aplicó o descartó.
+  resolvedById Int? // Quién la resolvió (sin relación: sólo auditoría).
+
+  order    Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  revision DesignRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, status])
+  @@index([revisionId])
 }

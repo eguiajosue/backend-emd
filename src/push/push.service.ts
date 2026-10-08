@@ -17,7 +17,12 @@ export interface PushNotificationPayload {
   title: string;
   body?: string;
   orderId?: number;
+  /** A dónde lleva el toque en la notificación (p. ej. el portal del cliente). */
+  url?: string;
 }
+
+/** Resultado de un envío: `gone` = el navegador la dio de baja (borrarla). */
+export type PushSendResult = 'sent' | 'gone' | 'failed' | 'disabled';
 
 /**
  * Envío de Web Push real (además del Socket.io en vivo existente), usando el
@@ -100,39 +105,57 @@ export class PushService {
     });
     if (subscriptions.length === 0) return;
 
-    const body = JSON.stringify(payload);
-
     await Promise.all(
       subscriptions.map(async (subscription) => {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: subscription.endpoint,
-              keys: {
-                p256dh: subscription.p256dh,
-                auth: subscription.auth,
-              },
-            },
-            body,
-          );
-        } catch (error) {
-          const statusCode = (error as { statusCode?: number }).statusCode;
-          if (statusCode === 404 || statusCode === 410) {
-            // Suscripción caducada/revocada por el navegador: se borra para
-            // no seguir intentando en cada notificación futura.
-            await this.prisma.pushSubscription
-              .delete({ where: { id: subscription.id } })
-              .catch(() => undefined);
-          } else {
-            this.logger.warn(
-              `Fallo enviando push a la suscripción ${subscription.id}: ${
-                (error as Error).message
-              }`,
-            );
-          }
+        const result = await this.send(subscription, payload);
+        if (result === 'gone') {
+          // Suscripción caducada/revocada por el navegador: se borra para
+          // no seguir intentando en cada notificación futura.
+          await this.prisma.pushSubscription
+            .delete({ where: { id: subscription.id } })
+            .catch(() => undefined);
         }
       }),
     );
+  }
+
+  /**
+   * Un envío a una suscripción cualquiera (de un usuario o del portal del
+   * cliente). Nunca lanza: el llamador decide qué hacer con `gone`.
+   */
+  async send(
+    subscription: {
+      id?: number;
+      endpoint: string;
+      p256dh: string;
+      auth: string;
+    },
+    payload: PushNotificationPayload,
+  ): Promise<PushSendResult> {
+    if (!this.enabled) return 'disabled';
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: subscription.endpoint,
+          keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+        },
+        JSON.stringify(payload),
+      );
+      return 'sent';
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number }).statusCode;
+      if (statusCode === 404 || statusCode === 410) return 'gone';
+      this.logger.warn(
+        `Fallo enviando push a la suscripción ${subscription.id ?? subscription.endpoint}: ${
+          (error as Error).message
+        }`,
+      );
+      return 'failed';
+    }
+  }
+
+  get isEnabled() {
+    return this.enabled;
   }
 
   /**

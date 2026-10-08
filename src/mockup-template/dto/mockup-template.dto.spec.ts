@@ -42,6 +42,7 @@ describe('CreateMockupTemplateDto', () => {
     'dress-shirt',
     'termo',
     'taza',
+    'mousepad',
     'car',
     'minivan',
     'pickup',

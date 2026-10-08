@@ -7,6 +7,7 @@
  * frontend-emd/docs/plans/sidebar-y-mockups-v2.md). Que la UI muestre o no
  * una prenda lo decide el frontend (`ENABLED_GARMENTS`).
  *
+ * Productos promocionales: `termo`, `taza` y `mousepad` (tapete de mouse).
  * Rotulaciones: `car` (carro), `minivan`, `pickup`, `trailer` (tráiler) y
  * `bicycle` (bicicleta). El tráiler guarda qué parte se rotula en
  * `config.vehiclePart` (`MOCKUP_VEHICLE_PARTS`).
@@ -18,6 +19,7 @@ export const MOCKUP_GARMENTS = [
   'dress-shirt',
   'termo',
   'taza',
+  'mousepad',
   // Rotulaciones (vinil sobre vehículos): el estudio las agrupa en la
   // categoría "Rotulaciones". Sin tallas ni panel láser.
   'car',
@@ -66,4 +68,4 @@ export function isMockupGarment(value: unknown): value is MockupGarment {
 
 /** Mensaje de 400 para una prenda fuera de `MOCKUP_GARMENTS`. */
 export const MOCKUP_GARMENT_MESSAGE =
-  'La prenda debe ser playera (tshirt), gorra (cap), sudadera (hoodie), camisa (dress-shirt), termo (termo), taza (taza), carro (car), minivan (minivan), pickup (pickup), tráiler (trailer) o bicicleta (bicycle)';
+  'La prenda debe ser playera (tshirt), gorra (cap), sudadera (hoodie), camisa (dress-shirt), termo (termo), taza (taza), mousepad (mousepad), carro (car), minivan (minivan), pickup (pickup), tráiler (trailer) o bicicleta (bicycle)';

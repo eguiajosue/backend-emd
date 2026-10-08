@@ -181,6 +181,14 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
   `prepStage = null`: siguen su curso sin pasar por las etapas nuevas.
 - Para el tablero y los conteos, una tarea en digitalizado/pruebas sigue siendo
   `pendiente` (todavía no es trabajo en curso del área).
+- **Tablero de Bordado (frontend)**: en "Tareas asignadas" y en el Modo TV,
+  cuando sólo se ve Bordado, el tablero lleva cuatro columnas que siguen estas
+  etapas: **Digitalizado → En pruebas → En producción** (pendiente + en proceso)
+  **→ Terminado**. Cada tarjeta trae el botón de su siguiente paso (mandar a
+  pruebas, aprobar/rechazar, empezar, terminar) y, si la prueba anterior se
+  rechazó, el motivo. Para eso `GET /orders/my-tasks` manda `prepStage` y
+  `lastTest` (última ronda: `round`, `result`, `sentNotes`, `resultNotes`);
+  `GET /orders/my-area-tasks` ya traía `prepStage` y `sampleTests`.
 
 ### Hoja de materiales al autorizar (origen de insumos)
 
@@ -280,3 +288,44 @@ Los pedidos existentes no tienen datos que preservar: la migración a tareas de
 | Destinatario efectivo de los avisos a Recepción | `OrderService.receptionOwnerIdOf` y `OrderAreaTaskService.orderReceptionOwnerId` |
 | Tomar un pedido (Diseño) | `POST /orders/:id/take-design` → `OrderService.takeDesign` |
 | Recursos que manda el cliente en el alta | `Order.clientResourceFile*`; `CreateOrderDto.clientResourceFile`; se devuelve en `GET /orders/:id` como `clientResourceFile` y en los listados como `hasClientResourceFile` |
+
+## 8. Portal del cliente (enlace privado del pedido)
+
+Recepción comparte con el cliente un enlace privado `/p/<token>` (botón
+**Compartir** en el detalle del pedido: WhatsApp, copiar o código QR). Sin
+cuenta ni contraseña: el token (32 bytes aleatorios) es la llave.
+
+- **Qué ve el cliente**: la etapa del pedido (Diseño → Tu aprobación →
+  Producción → Listo para entregar → Entregado), la fecha de entrega, los
+  productos con sus tallas y, si hay diseño, el montaje de la ronda vigente
+  y los mockups 3D. No ve precios, notas internas ni rondas anteriores.
+- **Su respuesta no se aplica sola**: "Aprobar" o "Pedir cambios" (con
+  comentario obligatorio, sin archivos) queda como `ClientDesignResponse`
+  **pendiente** y le llega un aviso a la recepcionista que atiende el pedido
+  (`attendedByUserId ?? userId`). Una respuesta nueva reemplaza a la pendiente.
+- **Recepción confirma** con el flujo de siempre: "Confirmar y autorizar" abre
+  la autorización con la hoja de materiales; "Confirmar y mandar a Diseño"
+  abre "Pidió cambios" con el comentario del cliente ya escrito. Al autorizar
+  o cargar el feedback de la ronda, la respuesta queda `aplicada` (en la misma
+  transacción). También se puede **descartar**.
+- **Visto**: cada apertura guarda `lastViewedAt` y `viewCount` ("Visto hace…").
+- **Vigencia**: el enlace sirve hasta 30 días después de la entrega (410).
+  Recepción puede **generar uno nuevo** (el anterior deja de servir) o
+  **desactivarlo** (404).
+- Endpoints públicos (sin sesión, con throttle): `GET /portal/:token`,
+  `GET /portal/:token/design-files/:fileId` (sólo montajes de la ronda
+  vigente), `GET /portal/:token/mockups/:mockupId`, `POST /portal/:token/respond`.
+  De Recepción/admin: `GET|POST|DELETE /orders/:id/share-link`,
+  `POST /orders/:id/share-link/regenerate`,
+  `POST /orders/:id/client-responses/:responseId/discard`.
+- **Aviso "tu pedido está listo"** (`ClientReadyNoticeService`): cada minuto
+  busca enlaces cuyo pedido ya está `terminado` y sin `readyNotifiedAt`, lo
+  marca (update condicional: un solo aviso aunque haya varias instancias) y
+  avisa al cliente por **Web Push** (los navegadores que tocaron "Avísame
+  cuando esté listo" en el portal: `POST|DELETE /portal/:token/push`) y por
+  **correo** si el cliente tiene email y hay `RESEND_API_KEY` +
+  `CLIENT_EMAIL_FROM`. El enlace del aviso usa `CLIENT_PORTAL_URL` o el primer
+  `FRONTEND_URL`. Un solo aviso por pedido (si regresa a producción no se
+  repite); un enlace creado con el pedido ya listo o entregado nace avisado.
+  Regenerar o desactivar el enlace borra sus suscripciones. Recepción ve en
+  "Compartir" cuántos dispositivos esperan el aviso y si ya se mandó.

@@ -8,7 +8,7 @@ import {
 } from './mockup-garments';
 
 describe('MOCKUP_GARMENTS', () => {
-  it('incluye termo, taza y las rotulaciones además de las prendas', () => {
+  it('incluye termo, taza, mousepad y las rotulaciones además de las prendas', () => {
     expect(MOCKUP_GARMENTS).toEqual([
       'tshirt',
       'cap',
@@ -16,6 +16,7 @@ describe('MOCKUP_GARMENTS', () => {
       'dress-shirt',
       'termo',
       'taza',
+      'mousepad',
       'car',
       'minivan',
       'pickup',
@@ -43,7 +44,7 @@ describe('MOCKUP_GARMENTS', () => {
     expect(isMockupVehiclePart(undefined)).toBe(false);
   });
 
-  it.each(['termo', 'taza', 'tshirt'])('acepta %s', (g) => {
+  it.each(['termo', 'taza', 'mousepad', 'tshirt'])('acepta %s', (g) => {
     expect(isMockupGarment(g)).toBe(true);
   });
 

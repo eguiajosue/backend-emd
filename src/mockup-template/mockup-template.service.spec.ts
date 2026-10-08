@@ -185,6 +185,7 @@ describe('MockupTemplateService', () => {
       'dress-shirt',
       'termo',
       'taza',
+      'mousepad',
       'car',
       'minivan',
       'pickup',
