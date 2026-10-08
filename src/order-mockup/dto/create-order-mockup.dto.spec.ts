@@ -41,6 +41,7 @@ describe('CreateOrderMockupDto', () => {
     'dress-shirt',
     'termo',
     'taza',
+    'mousepad',
     'car',
     'minivan',
     'pickup',

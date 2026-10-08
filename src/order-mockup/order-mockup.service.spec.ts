@@ -187,6 +187,7 @@ describe('OrderMockupService', () => {
       'dress-shirt',
       'termo',
       'taza',
+      'mousepad',
       'car',
       'minivan',
       'pickup',
