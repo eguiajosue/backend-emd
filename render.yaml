@@ -16,7 +16,7 @@ services:
     plan: free
     region: oregon
     branch: main
-    buildCommand: npm install && npx prisma generate && npm run build
+    buildCommand: npm ci && npx prisma generate && npm run build
     startCommand: npm run start:prod:seeded
     healthCheckPath: /health/ready
     envVars:
@@ -27,6 +27,10 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false

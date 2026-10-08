@@ -30,7 +30,7 @@ export const envSchema = z.object({
 
   // Opcionales con default
   JWT_REFRESH_SECRET: z.string().min(32).optional(),
-  JWT_ACCESS_EXPIRES_IN: z.string().default('1d'),
+  JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
   PORT: z.coerce.number().int().positive().optional(),
@@ -44,6 +44,10 @@ export const envSchema = z.object({
   // Protección basic-auth opcional de /api/docs
   SWAGGER_USER: z.string().optional(),
   SWAGGER_PASSWORD: z.string().optional(),
+
+  // Saltos de proxy confiables (Render pone 1 delante de la app). Sin esto
+  // req.ip es la IP del proxy y todos los usuarios comparten el rate limit.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
 
   THROTTLE_TTL: z.coerce.number().int().positive().default(60000),
   THROTTLE_LIMIT: z.coerce.number().int().positive().default(60),
@@ -96,6 +100,21 @@ export type Env = z.infer<typeof envSchema>;
 export function validateEnv(config: Record<string, unknown>): Env {
   const parsed = envSchema
     .superRefine((env, ctx) => {
+      if (env.NODE_ENV === 'production') {
+        if (!env.JWT_REFRESH_SECRET) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['JWT_REFRESH_SECRET'],
+            message: 'JWT_REFRESH_SECRET es obligatoria en producción',
+          });
+        } else if (env.JWT_REFRESH_SECRET === env.JWT_SECRET) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['JWT_REFRESH_SECRET'],
+            message: 'JWT_REFRESH_SECRET debe ser distinto de JWT_SECRET',
+          });
+        }
+      }
       if (env.STORAGE_DRIVER !== 's3') return;
       for (const name of REQUIRED_S3_VARS) {
         if (!env[name]) {
