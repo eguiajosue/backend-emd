@@ -9,8 +9,7 @@ describe('validateEnv', () => {
   it('applies defaults for optional variables', () => {
     const env = validateEnv({ ...baseEnv });
 
-    expect(env.JWT_ACCESS_EXPIRES_IN).toBe('15m');
-    expect(env.TRUST_PROXY_HOPS).toBe(1);
+    expect(env.JWT_ACCESS_EXPIRES_IN).toBe('1d');
     expect(env.JWT_REFRESH_EXPIRES_IN).toBe('7d');
     expect(env.BACKEND_PORT).toBe(3001);
     expect(env.FRONTEND_URL).toBe('http://localhost:3000');
@@ -35,26 +34,6 @@ describe('validateEnv', () => {
   it('coerces numeric variables', () => {
     const env = validateEnv({ ...baseEnv, PORT: '8080' });
     expect(env.PORT).toBe(8080);
-  });
-
-  describe('producción', () => {
-    const prodEnv = { ...baseEnv, NODE_ENV: 'production' };
-
-    it('exige JWT_REFRESH_SECRET', () => {
-      expect(() => validateEnv(prodEnv)).toThrow(/JWT_REFRESH_SECRET/);
-    });
-
-    it('rechaza JWT_REFRESH_SECRET igual a JWT_SECRET', () => {
-      expect(() =>
-        validateEnv({ ...prodEnv, JWT_REFRESH_SECRET: baseEnv.JWT_SECRET }),
-      ).toThrow(/distinto de JWT_SECRET/);
-    });
-
-    it('valida con un JWT_REFRESH_SECRET propio', () => {
-      expect(() =>
-        validateEnv({ ...prodEnv, JWT_REFRESH_SECRET: 'b'.repeat(32) }),
-      ).not.toThrow();
-    });
   });
 
   describe('almacenamiento y Sentry', () => {

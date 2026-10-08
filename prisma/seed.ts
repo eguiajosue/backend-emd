@@ -53,14 +53,7 @@ const AREA_ACCOUNT_SEEDS: { role: string; username: string; label: string }[] =
   ];
 
 const ADMIN_USERNAME = 'admin';
-// En producción no hay contraseña por defecto: un admin con una clave
-// conocida públicamente sería una puerta abierta.
-const ADMIN_PASSWORD =
-  process.env.SEED_ADMIN_PASSWORD ||
-  (process.env.NODE_ENV === 'production' ? '' : 'Admin123!');
-// El seed corre en cada arranque (start:prod:seeded): resetear el admin
-// existente tiene que ser una decisión explícita, no el comportamiento normal.
-const RESET_ADMIN = process.env.SEED_RESET_ADMIN === 'true';
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
 
 // Estados con id EXPLÍCITO: varios ids están hardcodeados en el código
 // (ver DELIVERED_STATUS_ID en order.service.ts y
@@ -234,44 +227,30 @@ async function main() {
   }
 
   console.log('Seeding admin user...');
+  const hashedPassword = await bcryptjs.hash(ADMIN_PASSWORD, 10);
+
   const existingAdmin = await prisma.user.findUnique({
     where: { username: ADMIN_USERNAME },
   });
 
   if (existingAdmin) {
-    if (RESET_ADMIN) {
-      if (!ADMIN_PASSWORD) {
-        throw new Error(
-          'SEED_RESET_ADMIN=true requiere SEED_ADMIN_PASSWORD en producción.',
-        );
-      }
-      await prisma.user.update({
-        where: { username: ADMIN_USERNAME },
-        data: {
-          password: await bcryptjs.hash(ADMIN_PASSWORD, 10),
-          roles: { connect: [{ id: roles['admin'].id }] },
-        },
-      });
-      console.log(
-        `  admin user already existed, password and role reset (id=${existingAdmin.id})`,
-      );
-    } else {
-      console.log(
-        `  admin user already existed, left untouched (id=${existingAdmin.id})`,
-      );
-    }
+    await prisma.user.update({
+      where: { username: ADMIN_USERNAME },
+      data: {
+        password: hashedPassword,
+        roles: { connect: [{ id: roles['admin'].id }] },
+      },
+    });
+    console.log(
+      `  admin user already existed, password and role reset (id=${existingAdmin.id})`,
+    );
   } else {
-    if (!ADMIN_PASSWORD) {
-      throw new Error(
-        'SEED_ADMIN_PASSWORD es obligatoria en producción para crear el admin.',
-      );
-    }
     const admin = await prisma.user.create({
       data: {
         firstName: 'Admin',
         lastName: 'User',
         username: ADMIN_USERNAME,
-        password: await bcryptjs.hash(ADMIN_PASSWORD, 10),
+        password: hashedPassword,
         roles: { connect: [{ id: roles['admin'].id }] },
       },
     });

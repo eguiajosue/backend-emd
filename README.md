@@ -36,16 +36,15 @@ Configurar `/health` como health check path en Render.
 
 `POST /auth/login` → `{ token, refreshToken, username, first_name, last_name, roles }`
 
-- `token` es el access token (duración `JWT_ACCESS_EXPIRES_IN`, default `15m`).
+- `token` es el access token (duración `JWT_ACCESS_EXPIRES_IN`, default `1d`).
 - `refreshToken` (duración `JWT_REFRESH_EXPIRES_IN`, default `7d`) se canjea en
   `POST /auth/refresh` con body `{ "refreshToken": "..." }`, que devuelve el
   mismo shape que el login (con roles releídos de la base).
 - Un refresh token NO sirve como access token: los endpoints protegidos lo
   rechazan con 401.
 
-El frontend renueva el access token con el refresh token, por eso el default
-es corto (`15m`). En producción `JWT_REFRESH_SECRET` es obligatoria y distinta
-de `JWT_SECRET`.
+Cuando el frontend implemente el flujo de refresh, bajar `JWT_ACCESS_EXPIRES_IN`
+a `15m`. Se mantiene en `1d` por defecto para no cerrar sesiones hoy.
 
 Política de contraseñas (alta/edición de usuarios): mínimo 8 caracteres, al
 menos una mayúscula y un número. Los intentos de login fallidos se registran en

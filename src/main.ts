@@ -41,17 +41,6 @@ async function bootstrap() {
     bufferLogs: false,
     bodyParser: false,
   });
-  // Detrás del proxy de Render, sin esto req.ip es siempre la IP del proxy y
-  // el rate limit por IP se comparte entre todos los usuarios.
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .set(
-      'trust proxy',
-      app
-        .get(ConfigService<Env, true>)
-        .get('TRUST_PROXY_HOPS', { infer: true }),
-    );
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
   const config = app.get(ConfigService<Env, true>);
