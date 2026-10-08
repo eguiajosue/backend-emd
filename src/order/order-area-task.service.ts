@@ -349,6 +349,43 @@ export class OrderAreaTaskService {
    * El frontend decide con esta misma lista si mostrarlas todas juntas o
    * agrupadas por área, según la preferencia personal del usuario.
    */
+  /**
+   * Marcador del Modo TV (logros del equipo): tareas terminadas hoy y en la
+   * semana, cuántas a tiempo, el mejor día de las últimas dos semanas y la
+   * racha de días de trabajo sin atrasos. Días en hora de México.
+   * "A tiempo" = terminada a más tardar el día de entrega del pedido.
+   */
+  async scoreboard(requestingUser: RequestingUser, area?: string) {
+    const isManager = requestingUser.roles.some((r) =>
+      TASK_MANAGER_ROLES.includes(r),
+    );
+    const ownAreas = requestingUser.roles.filter((role) =>
+      (PRODUCTION_AREAS as readonly string[]).includes(role),
+    );
+    if (!isManager && ownAreas.length === 0) {
+      return scoreboardFrom([], new Date());
+    }
+    const allowed = isManager ? null : ownAreas;
+    const areas =
+      area && (!allowed || allowed.includes(area)) ? [area] : allowed;
+    const now = new Date();
+    const tasks = await this.prisma.orderAreaTask.findMany({
+      where: {
+        ...(areas ? { area: { in: areas } } : {}),
+        status: AreaTaskStatus.terminado,
+        completedAt: { gte: new Date(now.getTime() - 15 * 86_400_000) },
+      },
+      select: { completedAt: true, order: { select: { deliveryDate: true } } },
+    });
+    return scoreboardFrom(
+      tasks.map((t) => ({
+        completedAt: t.completedAt!,
+        deliveryDate: t.order.deliveryDate,
+      })),
+      now,
+    );
+  }
+
   async findForUser(requestingUser: RequestingUser) {
     const closedStatusIds = await this.finalStatusIds();
     const isManager = requestingUser.roles.some((r) =>
@@ -1545,4 +1582,56 @@ export class OrderAreaTaskService {
       orderId,
     });
   }
+}
+
+const SCORE_TZ = 'America/Mexico_City';
+const dayKey = (d: Date) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: SCORE_TZ }).format(d);
+
+/** Cálculo puro del marcador (ver `OrderAreaTaskService.scoreboard`). */
+export function scoreboardFrom(
+  tasks: { completedAt: Date; deliveryDate: Date | null }[],
+  now: Date,
+) {
+  const days = new Map<string, { done: number; late: number }>();
+  for (const t of tasks) {
+    const key = dayKey(t.completedAt);
+    const late = !!t.deliveryDate && key > dayKey(t.deliveryDate) ? 1 : 0;
+    const d = days.get(key) ?? { done: 0, late: 0 };
+    d.done += 1;
+    d.late += late;
+    days.set(key, d);
+  }
+  const today = dayKey(now);
+  const lastDays = Array.from({ length: 14 }, (_, i) =>
+    dayKey(new Date(now.getTime() - i * 86_400_000)),
+  );
+  const t = days.get(today) ?? { done: 0, late: 0 };
+  const week = lastDays.slice(0, 7).reduce(
+    (acc, k) => {
+      const d = days.get(k);
+      return d ? { done: acc.done + d.done, late: acc.late + d.late } : acc;
+    },
+    { done: 0, late: 0 },
+  );
+  let best: { date: string; done: number } | null = null;
+  for (const k of lastDays) {
+    const d = days.get(k);
+    if (d && (!best || d.done > best.done)) best = { date: k, done: d.done };
+  }
+  // Racha: días con trabajo terminado y sin atrasos, hacia atrás (los días
+  // sin nada terminado —domingos, festivos— no la cortan).
+  let streak = 0;
+  for (const k of lastDays) {
+    const d = days.get(k);
+    if (!d) continue;
+    if (d.late > 0) break;
+    streak += 1;
+  }
+  return {
+    today: { done: t.done, onTime: t.done - t.late },
+    week: { done: week.done, onTime: week.done - week.late },
+    bestDay: best,
+    streakDays: streak,
+  };
 }

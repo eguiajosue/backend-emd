@@ -170,6 +170,28 @@ export class OrderController {
       roles: user.roles,
     });
   }
+
+  /** Marcador del Modo TV: lo terminado hoy/semana, a tiempo y la racha. */
+  @Auth(
+    Role.ADMIN,
+    Role.SUPERUSER,
+    Role.RECEPCION,
+    Role.TALLER,
+    Role.DTF,
+    Role.BORDADO,
+    Role.LASER,
+    Role.IMPRESIONES,
+  )
+  @Get('area-scoreboard')
+  getAreaScoreboard(
+    @ActiveUser() user: AccessTokenPayload,
+    @Query('area') area?: string,
+  ) {
+    return this.orderAreaTaskService.scoreboard(
+      { userId: user.sub, roles: user.roles },
+      area,
+    );
+  }
   /**
    * Bandeja "Tareas asignadas" de Diseño y Producción: una entrada por tarea,
    * sólo lo propio y lo libre de las áreas del usuario.
