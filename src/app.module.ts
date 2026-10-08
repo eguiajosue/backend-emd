@@ -22,6 +22,7 @@ import { HealthModule } from './health/health.module';
 import { AreaVisibilityModule } from './area-visibility/area-visibility.module';
 import { OrderProductPresetModule } from './order-product-preset/order-product-preset.module';
 import { PerformanceModule } from './performance/performance.module';
+import { CoordinationModule } from './coordination/coordination.module';
 import { BugReportModule } from './bug-report/bug-report.module';
 import { SettingsModule } from './settings/settings.module';
 import { ChatModule } from './chat/chat.module';
@@ -83,6 +84,7 @@ import { AppController } from './app.controller';
     AreaVisibilityModule,
     OrderProductPresetModule,
     PerformanceModule,
+    CoordinationModule,
     BugReportModule,
     SettingsModule,
     ChatModule,
