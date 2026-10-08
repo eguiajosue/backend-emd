@@ -1,3 +1,4 @@
+import { ClientPortalModule } from './client-portal/client-portal.module';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
@@ -102,6 +103,7 @@ import { AppController } from './app.controller';
     MockupLogoModule,
     QuoteModule,
     BranchModule,
+    ClientPortalModule,
   ],
   providers: [
     {

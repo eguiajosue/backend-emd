@@ -288,3 +288,33 @@ Los pedidos existentes no tienen datos que preservar: la migración a tareas de
 | Destinatario efectivo de los avisos a Recepción | `OrderService.receptionOwnerIdOf` y `OrderAreaTaskService.orderReceptionOwnerId` |
 | Tomar un pedido (Diseño) | `POST /orders/:id/take-design` → `OrderService.takeDesign` |
 | Recursos que manda el cliente en el alta | `Order.clientResourceFile*`; `CreateOrderDto.clientResourceFile`; se devuelve en `GET /orders/:id` como `clientResourceFile` y en los listados como `hasClientResourceFile` |
+
+## 8. Portal del cliente (enlace privado del pedido)
+
+Recepción comparte con el cliente un enlace privado `/p/<token>` (botón
+**Compartir** en el detalle del pedido: WhatsApp, copiar o código QR). Sin
+cuenta ni contraseña: el token (32 bytes aleatorios) es la llave.
+
+- **Qué ve el cliente**: la etapa del pedido (Diseño → Tu aprobación →
+  Producción → Listo para entregar → Entregado), la fecha de entrega, los
+  productos con sus tallas y, si hay diseño, el montaje de la ronda vigente
+  y los mockups 3D. No ve precios, notas internas ni rondas anteriores.
+- **Su respuesta no se aplica sola**: "Aprobar" o "Pedir cambios" (con
+  comentario obligatorio, sin archivos) queda como `ClientDesignResponse`
+  **pendiente** y le llega un aviso a la recepcionista que atiende el pedido
+  (`attendedByUserId ?? userId`). Una respuesta nueva reemplaza a la pendiente.
+- **Recepción confirma** con el flujo de siempre: "Confirmar y autorizar" abre
+  la autorización con la hoja de materiales; "Confirmar y mandar a Diseño"
+  abre "Pidió cambios" con el comentario del cliente ya escrito. Al autorizar
+  o cargar el feedback de la ronda, la respuesta queda `aplicada` (en la misma
+  transacción). También se puede **descartar**.
+- **Visto**: cada apertura guarda `lastViewedAt` y `viewCount` ("Visto hace…").
+- **Vigencia**: el enlace sirve hasta 30 días después de la entrega (410).
+  Recepción puede **generar uno nuevo** (el anterior deja de servir) o
+  **desactivarlo** (404).
+- Endpoints públicos (sin sesión, con throttle): `GET /portal/:token`,
+  `GET /portal/:token/design-files/:fileId` (sólo montajes de la ronda
+  vigente), `GET /portal/:token/mockups/:mockupId`, `POST /portal/:token/respond`.
+  De Recepción/admin: `GET|POST|DELETE /orders/:id/share-link`,
+  `POST /orders/:id/share-link/regenerate`,
+  `POST /orders/:id/client-responses/:responseId/discard`.

@@ -2692,6 +2692,15 @@ export class OrderService {
             }),
           },
         }),
+        // Lo que pidió el cliente desde su enlace (portal) ya se cargó.
+        this.prisma.clientDesignResponse.updateMany({
+          where: { orderId, status: 'pendiente' },
+          data: {
+            status: 'aplicada',
+            resolvedAt: new Date(),
+            resolvedById: requestingUser.userId,
+          },
+        }),
         this.prisma.orderAuditLog.create({
           data: {
             action: 'design_feedback_added',
@@ -2873,6 +2882,16 @@ export class OrderService {
           supplies,
           requestingUser.userId,
         );
+        // Si el cliente lo había aprobado desde su enlace (portal), su
+        // respuesta queda aplicada (WORKFLOW.md §8).
+        await tx.clientDesignResponse.updateMany({
+          where: { orderId, status: 'pendiente' },
+          data: {
+            status: 'aplicada',
+            resolvedAt: new Date(),
+            resolvedById: requestingUser.userId,
+          },
+        });
         return { revision: approvedRevision, supplyWarnings: warnings };
       },
       // Crea tareas + hoja de materiales (varias escrituras y candados).

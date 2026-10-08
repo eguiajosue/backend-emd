@@ -171,6 +171,8 @@ model Order {
   inventoryMovements InventoryMovement[] // Consumos de inventario imputados a este pedido (opcional).
   mockups            OrderMockup[] // Mockups 3D (playera/gorra con los diseños del cliente) adjuntados al pedido.
   quote              Quote? // Cotización aceptada que se convirtió en este pedido (si vino de una).
+  shareLink          OrderShareLink? // Enlace privado para que el cliente siga su pedido (portal del cliente, WORKFLOW.md §8).
+  clientResponses    ClientDesignResponse[] // Respuestas del cliente al diseño desde el portal, pendientes de confirmar por Recepción.
   branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de origen (si vino de una).
   branchEmployee     BranchEmployee?     @relation(fields: [branchEmployeeId], references: [id], onDelete: SetNull) // Empleado de la sucursal que lo levantó.
 
@@ -220,6 +222,7 @@ model DesignRevision {
   feedbackByUser User?                @relation("DesignRevisionFeedbackBy", fields: [feedbackByUserId], references: [id]) // Relación con User que cargó el feedback.
   approvedByUser User?                @relation("DesignRevisionApprovedBy", fields: [approvedByUserId], references: [id]) // Relación con User que autorizó.
   files          DesignRevisionFile[] // Archivos de la ronda (montaje y/o feedback); una ronda admite varios (WORKFLOW.md §2).
+  clientResponses ClientDesignResponse[] // Respuestas del cliente a esta ronda desde el portal.
 
   @@index([orderId])
   @@index([orderId, round])
@@ -1158,4 +1161,47 @@ model BranchEmployee {
 
   @@unique([branchId, name])
   @@index([branchId])
+}
+
+// ─── Portal del cliente ────────────────────────────────────────────────────
+//
+// Un enlace privado (sin cuenta) para que el cliente vea en qué va su pedido,
+// sus productos y tallas, y el diseño a aprobar. Su respuesta NO se aplica
+// sola: queda como `ClientDesignResponse` pendiente y Recepción la confirma
+// con el flujo de siempre (autorizar con hoja de materiales, o cargar el
+// feedback). Ver WORKFLOW.md §8 y src/client-portal.
+
+model OrderShareLink {
+  id           Int       @id @default(autoincrement()) // Identificador único del enlace.
+  orderId      Int       @unique // Pedido al que da acceso (un enlace vigente por pedido; regenerar cambia el token).
+  token        String    @unique // Secreto del enlace (/p/<token>): 32 bytes aleatorios en base64url. Quien lo tiene ve el pedido.
+  createdById  Int? // Usuario (Recepción) que lo creó o regeneró por última vez. Sin relación: sólo auditoría.
+  createdAt    DateTime  @default(now()) // Cuándo se creó (o regeneró) el token vigente.
+  lastViewedAt DateTime? // Última vez que el cliente abrió el enlace ("Visto hace…" en el pedido). Null = nunca.
+  viewCount    Int       @default(0) // Cuántas veces se abrió.
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade) // Se borra junto con el pedido.
+}
+
+/// Respuesta del cliente a una ronda de diseño desde el portal: 'aprobar' o
+/// 'cambios' (con comentario). Queda 'pendiente' hasta que Recepción la
+/// aplique (al autorizar la ronda o cargar el feedback queda 'aplicada') o la
+/// descarte. Sólo puede haber una pendiente por pedido: una nueva reemplaza a
+/// la anterior.
+model ClientDesignResponse {
+  id           Int       @id @default(autoincrement()) // Identificador único de la respuesta.
+  orderId      Int // Pedido.
+  revisionId   Int // Ronda de diseño a la que responde.
+  kind         String // 'aprobar' | 'cambios'.
+  comment      String? // Qué cambiar (obligatorio en 'cambios', máx. 2000) o comentario opcional al aprobar.
+  status       String    @default("pendiente") // 'pendiente' | 'aplicada' | 'descartada' | 'reemplazada'.
+  createdAt    DateTime  @default(now()) // Cuándo respondió el cliente.
+  resolvedAt   DateTime? // Cuándo Recepción la aplicó o descartó.
+  resolvedById Int? // Quién la resolvió (sin relación: sólo auditoría).
+
+  order    Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  revision DesignRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, status])
+  @@index([revisionId])
 }

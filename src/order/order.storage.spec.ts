@@ -84,6 +84,7 @@ describe('OrderService - almacenamiento de archivos (R2/S3)', () => {
         update: jest.fn(),
         delete: jest.fn().mockResolvedValue({ id: 1 }),
       },
+      clientDesignResponse: { updateMany: jest.fn() },
       designRevision: {
         findFirst: jest.fn().mockResolvedValue(null),
         // Relectura de la ronda para la respuesta (select liviano).

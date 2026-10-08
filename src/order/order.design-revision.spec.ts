@@ -51,6 +51,7 @@ describe('OrderService - flujo de diseño', () => {
         }),
         update: jest.fn(),
       },
+      clientDesignResponse: { updateMany: jest.fn() },
       designRevision: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue({
@@ -431,6 +432,22 @@ describe('OrderService - flujo de diseño', () => {
       expect(gateway.notifyNewOrderToArea).not.toHaveBeenCalled();
     });
 
+    it('deja aplicada la respuesta del cliente desde el portal', async () => {
+      await orderService.addDesignFeedback(
+        1,
+        100,
+        { feedbackText: 'cambiar el logo' },
+        receptionist,
+      );
+      expect(prisma.clientDesignResponse.updateMany).toHaveBeenCalledWith({
+        where: { orderId: 1, status: 'pendiente' },
+        data: expect.objectContaining({
+          status: 'aplicada',
+          resolvedById: receptionist.userId,
+        }),
+      });
+    });
+
     it('si la ronda no tiene diseñador, cae al aviso por área', async () => {
       prisma.designRevision.findUnique.mockResolvedValue({
         id: 100,
@@ -498,6 +515,7 @@ describe('OrderService - flujo de diseño', () => {
 
     beforeEach(() => {
       tx = {
+        clientDesignResponse: { updateMany: jest.fn() },
         designRevision: { update: jest.fn().mockResolvedValue({ id: 100 }) },
         order: { update: prisma.order.update },
         orderAuditLog: { create: jest.fn() },
@@ -578,6 +596,11 @@ describe('OrderService - flujo de diseño', () => {
       );
 
       expect(tx.designRevision.update).toHaveBeenCalled();
+      // La aprobación del cliente desde el portal queda aplicada en la misma transacción.
+      expect(tx.clientDesignResponse.updateMany).toHaveBeenCalledWith({
+        where: { orderId: 1, status: 'pendiente' },
+        data: expect.objectContaining({ status: 'aplicada' }),
+      });
       expect(tx.orderAreaSupply.create).toHaveBeenCalledWith({
         data: {
           areaTaskId: 70,
