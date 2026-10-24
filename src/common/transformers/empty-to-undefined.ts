@@ -13,3 +13,11 @@ export const EmptyToUndefined = () =>
 /** Trim de strings antes de validar. */
 export const TrimString = () =>
   Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
+
+/** Trim de cada texto de una lista antes de validar (el resto se deja tal cual). */
+export const TrimStringList = () =>
+  Transform(({ value }) =>
+    Array.isArray(value)
+      ? value.map((item) => (typeof item === 'string' ? item.trim() : item))
+      : value,
+  );

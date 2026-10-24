@@ -13,6 +13,9 @@ export interface AreaView {
   isProductionDestination: boolean;
   hasInventory: boolean;
   generalViewEnabled: boolean;
+  /** Sugerencias de categoría/unidad al dar de alta artículos de inventario del área. */
+  inventoryCategories: string[];
+  inventoryUnits: string[];
   sortOrder: number;
   active: boolean;
 }
@@ -24,7 +27,7 @@ export interface AreaView {
  */
 export type AreaUse = 'any' | 'production';
 
-const AREA_SELECT = {
+export const AREA_SELECT = {
   id: true,
   slug: true,
   name: true,
@@ -34,6 +37,8 @@ const AREA_SELECT = {
   isProductionDestination: true,
   hasInventory: true,
   generalViewEnabled: true,
+  inventoryCategories: true,
+  inventoryUnits: true,
   sortOrder: true,
   active: true,
 } as const;
@@ -174,6 +179,8 @@ export function defaultAreaViews(): AreaView[] {
     isProductionDestination: !area.isDesign,
     hasInventory: true,
     generalViewEnabled: true,
+    inventoryCategories: [],
+    inventoryUnits: [],
     active: true,
   }));
 }

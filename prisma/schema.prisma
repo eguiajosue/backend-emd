@@ -510,6 +510,8 @@ model Area {
   isProductionDestination Boolean  @default(true) // Si un pedido puede ir a producirse aquí (Order.productionArea / OrderAreaTask).
   hasInventory            Boolean  @default(true) // Si lleva inventario propio (InventoryItem.area).
   generalViewEnabled      Boolean  @default(true) // Si es true, todos los usuarios del área ven todos los pedidos de su etapa; si es false, sólo los sin asignar o asignados a ellos mismos.
+  inventoryCategories     String[] @default([]) // Sugerencias de categoría al dar de alta un artículo de inventario de esta área ("Filamento", "Resina").
+  inventoryUnits          String[] @default([]) // Sugerencias de unidad ("kg", "rollo", "litro").
   sortOrder               Int      @default(0) // Orden en listas y selectores.
   active                  Boolean  @default(true) // Un área desactivada no se borra (sus pedidos, tareas e inventario se conservan), pero deja de ofrecerse y no da acceso.
   createdAt               DateTime @default(now())

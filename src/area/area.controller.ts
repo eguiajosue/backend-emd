@@ -1,22 +1,35 @@
 import {
+  Body,
   Controller,
   Get,
+  Param,
   ParseBoolPipe,
+  ParseIntPipe,
+  Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from 'src/common/guards/auth.guard';
+import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
+import { Role } from 'src/common/enums/roles.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { isFullVisibilityRole } from 'src/order/role-stage-mapping';
 import { AreaService } from './area.service';
+import { AreaAdminService } from './area-admin.service';
+import { CreateAreaDto } from './dto/create-area.dto';
+import { UpdateAreaDto } from './dto/update-area.dto';
 
 @ApiTags('areas')
 @ApiBearerAuth()
 @Controller('areas')
 export class AreaController {
-  constructor(private readonly areaService: AreaService) {}
+  constructor(
+    private readonly areaService: AreaService,
+    private readonly areaAdminService: AreaAdminService,
+  ) {}
 
   /**
    * Catálogo de áreas (nombre, ícono, color y comportamiento). Lo necesita
@@ -34,5 +47,30 @@ export class AreaController {
     return this.areaService.findAll({
       includeInactive: !!includeInactive && isFullVisibilityRole(user.roles),
     });
+  }
+
+  /** Panel de administración: todas las áreas con usuarios y trabajo abierto. */
+  @Auth(Role.ADMIN, Role.SUPERUSER)
+  @Get('overview')
+  overview() {
+    return this.areaAdminService.overview();
+  }
+
+  /** Alta de un área (wizard). */
+  @Auth(Role.ADMIN, Role.SUPERUSER)
+  @Post()
+  create(@Body() dto: CreateAreaDto, @ActiveUser() user: AccessTokenPayload) {
+    return this.areaAdminService.create(dto, user.sub);
+  }
+
+  /** Edición y (des)activación; el slug no cambia. */
+  @Auth(Role.ADMIN, Role.SUPERUSER)
+  @Patch(':id')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateAreaDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.areaAdminService.update(id, dto, user.sub);
   }
 }

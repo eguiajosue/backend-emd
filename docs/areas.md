@@ -1,9 +1,8 @@
 # Áreas de trabajo
 
-Fase 1 de las áreas dinámicas: las áreas dejan de estar fijas en el código y
-pasan a ser un catálogo en la base. Todavía no hay pantalla para dar de alta
-áreas (eso es la fase 2, el wizard), pero todo el sistema ya lee las áreas de
-la tabla `Area`.
+Las áreas dejan de estar fijas en el código y pasan a ser un catálogo en la
+base: todo el sistema lee las áreas de la tabla `Area`. Fase 1: el catálogo y
+su uso. Fase 2: alta (wizard), edición y desactivación desde la app.
 
 ## Modelo
 
@@ -46,6 +45,14 @@ la tabla `Area`.
 
 - `GET /areas`: catálogo de áreas activas, para cualquier sesión.
   `?includeInactive=true` (administración y Recepción) suma las desactivadas.
+- `GET /areas/overview` (admin/superuser): todas las áreas con usuarios,
+  cuenta compartida y pedidos/tareas abiertos.
+- `POST /areas` (admin/superuser): alta desde el wizard. Genera el slug del
+  nombre ("Impresión 3D" → `impresion-3d`; no cambia nunca), crea la cuenta
+  compartida del área (sin contraseña conocida; opcional) y conecta a los
+  usuarios elegidos, todo en una transacción. El canal de chat nace solo.
+- `PATCH /areas/:id` (admin/superuser): nombre, ícono, color, comportamiento,
+  sugerencias de inventario y `active`.
 - `GET/PATCH /area-visibility`: se conserva con la misma forma
   (`role` = slug), ahora sobre `Area.generalViewEnabled`.
 - `POST/PATCH /users`: aceptan `areaIds` además de `roleIds`; hace falta al
@@ -57,3 +64,23 @@ Los DTOs sólo validan el formato del slug (`@IsAreaSlug()`); que el área
 exista, esté activa y sirva para ese uso lo comprueba el servicio con
 `AreaService.assertArea(slug, 'any' | 'production')`. El catálogo se guarda en
 memoria 30 s (`AreaService.CACHE_TTL_MS`) y se invalida en cada escritura.
+
+## Alta, edición y desactivación (fase 2)
+
+- Un área nunca se borra: sus pedidos, tareas e inventario guardan el slug.
+- Desactivarla (o quitarla como destino de producción) se rechaza con 409 si
+  tiene pedidos o tareas abiertos: hay que terminarlos o reasignarlos antes.
+  Desactivada no se ofrece como destino ni da acceso; reactivarla la devuelve.
+- Diseño se edita (nombre, ícono, color) pero no se desactiva ni se vuelve
+  destino de producción. Su slug no se puede reutilizar.
+- Los nombres no se repiten (sin importar mayúsculas) y no pueden ser
+  reservados (`admin`, `recepcion`, `superuser`, `sucursal`, `todas`, `all`).
+- `inventoryCategories` / `inventoryUnits` sólo sugieren en el alta de
+  artículos: el inventario sigue aceptando texto libre.
+- Los íconos permitidos están en `src/area/area-icons.ts` (deben coincidir con
+  el registro del frontend).
+- Cada cambio queda en `AuditLog` (`area.create`, `area.update`,
+  `area.deactivate`, `area.activate`).
+- Quien se asigna a un área nueva ve su bandeja en cuanto renueva su sesión
+  (al volver a entrar o cuando su token se renueva): las áreas viajan en el
+  token.
