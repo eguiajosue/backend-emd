@@ -35,8 +35,12 @@ describe('OrderService - flujo de diseño', () => {
     notifyNewOrderToArea: jest.Mock;
   };
 
-  const designer: RequestingUser = { userId: 5, roles: ['diseno'] };
-  const receptionist: RequestingUser = { userId: 1, roles: ['recepcion'] };
+  const designer: RequestingUser = { userId: 5, roles: [], areas: ['diseno'] };
+  const receptionist: RequestingUser = {
+    userId: 1,
+    roles: ['recepcion'],
+    areas: [],
+  };
 
   beforeEach(() => {
     prisma = {
@@ -750,9 +754,10 @@ describe('OrderService - flujo de diseño', () => {
       'laser',
       'impresiones',
     ];
-    const areaUser = (role: string): RequestingUser => ({
+    const areaUser = (area: string): RequestingUser => ({
       userId: 30,
-      roles: [role],
+      roles: [],
+      areas: [area],
     });
     const orderInArea = (area: string) => ({
       id: 1,

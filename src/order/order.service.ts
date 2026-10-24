@@ -24,7 +24,7 @@ import {
 } from 'src/common/dto/pagination-query.dto';
 import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import { AreaVisibilityService } from 'src/area-visibility/area-visibility.service';
-import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
+import { isFullVisibilityRole } from './role-stage-mapping';
 import { OrderProductPresetService } from 'src/order-product-preset/order-product-preset.service';
 import { OrderProductDto } from './dto/create-order.dto';
 import { CreateOrderNoteDto } from './dto/create-order-note.dto';
@@ -41,7 +41,8 @@ import { BulkOrderActionDto } from './dto/bulk-order-action.dto';
 import { OrderAreaTaskService } from './order-area-task.service';
 import { StatusIdResolver } from './status-id-resolver';
 import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
-import { chatAreaLabel } from 'src/chat/chat.constants';
+import { AreaService } from 'src/area/area.service';
+import { areasOf, belongsToArea, DESIGN_AREA } from 'src/area/area-access';
 import { StartDesignDto } from './dto/start-design.dto';
 import {
   hasBlob,
@@ -64,10 +65,12 @@ import {
   isBranchOnlyUser,
 } from 'src/branch/branch-access';
 
-/** Roles + id del usuario autenticado, usados para filtrar pedidos por área. */
+/** Roles, áreas e id del usuario autenticado, usados para filtrar pedidos por área. */
 export interface RequestingUser {
   userId: number;
   roles: string[];
+  /** Slugs de las áreas activas en las que trabaja (ver model Area). */
+  areas: string[];
   /** Usado sólo para armar el texto de la notificación genérica a Recepción (Feature 2). */
   username?: string;
 }
@@ -127,12 +130,11 @@ const STATUS_NAME_ESPERANDO_AUTORIZACION = 'esperando autorización';
 const STATUS_NAME_CAMBIOS_SOLICITADOS = 'cambios solicitados';
 const STATUS_NAME_AUTORIZADO = 'autorizado';
 
-/** Roles que pueden editar `productionArea` en un pedido, además de RECEPCION/ADMIN/SUPERUSER. */
+/** Roles que pueden editar `productionArea` en un pedido (además, quien trabaja en Diseño). */
 const PRODUCTION_AREA_EDITOR_ROLES = [
   Role.RECEPCION,
   Role.ADMIN,
   Role.SUPERUSER,
-  Role.DISENO,
 ];
 
 /** Selección liviana del historial, solo lo necesario para calcular `deliveredAt`. */
@@ -213,14 +215,16 @@ export class OrderService {
     // Default sólo para los tests que construyen el service a mano: en la app
     // lo inyecta siempre StorageModule (global).
     private readonly storage: StorageService = StorageService.database(),
+    // Igual que `storage`: en la app lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
   ) {
     this.statusIds = new StatusIdResolver(this.prisma);
   }
 
   /**
-   * Valida que el usuario asignado tenga el rol del área indicada. Aplica tanto
+   * Valida que el usuario asignado trabaje en el área indicada. Aplica tanto
    * a personas concretas como a las cuentas compartidas de área
-   * (`isSharedAccount`), que también llevan el rol del área que representan.
+   * (`isSharedAccount`), que también pertenecen al área que representan.
    *
    * Evita que un pedido con montaje quede en manos de alguien que no es de
    * Diseño, o que un pedido directo se asigne a alguien de otra área
@@ -238,7 +242,7 @@ export class OrderService {
     }
     const user = await this.prisma.user.findUnique({
       where: { id: assignedUserId },
-      select: { id: true, roles: { select: { name: true } } },
+      select: { id: true, areas: { select: { slug: true } } },
     });
     if (!user) {
       throw new HttpException(
@@ -246,7 +250,7 @@ export class OrderService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (!user.roles.some((r) => r.name === area)) {
+    if (!user.areas.some((a) => a.slug === area)) {
       throw new HttpException(
         `El usuario asignado no pertenece al área ${area}`,
         HttpStatus.BAD_REQUEST,
@@ -324,18 +328,18 @@ export class OrderService {
    * Filtra los pedidos según el área/rol del usuario autenticado.
    *
    * - admin/superuser/recepcion: ven todo, sin cambios.
-   * - Roles puramente operativos: se filtra DIRECTO por `order.area` (el
-   *   área del pedido coincide textualmente con el nombre del rol, ya no
-   *   se mapea contra el status). Cualquier usuario con un rol operativo
-   *   que alcance esa área ve y puede trabajar TODOS los pedidos de esa
+   * - Quien trabaja en áreas: se filtra DIRECTO por `order.area` (el área
+   *   del pedido coincide textualmente con el slug de sus áreas, ya no se
+   *   mapea contra el status). Cualquier usuario de esa área ve y puede
+   *   trabajar TODOS los pedidos de esa
    *   área, estén o no asignados a él específicamente: el trabajo dentro
    *   de una misma área es colaborativo (ej. cualquier diseñador puede
    *   tomar cualquier pedido de Diseño). El filtro cruzado entre áreas
    *   distintas se mantiene: un usuario operativo nunca ve pedidos de un
    *   área que no le corresponde. Pedidos con `area: null` (datos viejos
-   *   sin migrar) no son visibles para roles operativos.
+   *   sin migrar) no son visibles para usuarios de área.
    *
-   * `AreaVisibilitySetting.generalViewEnabled` ya NO restringe esta
+   * `Area.generalViewEnabled` ya NO restringe esta
    * visibilidad intra-área (decisión de producto: la asignación individual
    * es solo informativa/de seguimiento, no debe bloquear la colaboración
    * dentro de la propia área). El endpoint/tabla se deja intacto por si se
@@ -353,14 +357,13 @@ export class OrderService {
       return orders;
     }
 
-    const userOperationalRoles = operationalRolesOf(roles);
-    if (userOperationalRoles.length === 0) {
-      // Usuario sin ningún rol operativo ni de visibilidad total: no ve nada.
+    const userAreas = areasOf(requestingUser);
+    if (userAreas.length === 0) {
+      // Usuario sin ningún área ni rol de visibilidad total: no ve nada.
       return [];
     }
 
-    // Todas las áreas alcanzables por los roles operativos del usuario.
-    const allUserAreas = new Set<string>(userOperationalRoles);
+    const allUserAreas = new Set<string>(userAreas);
 
     return orders.filter((order) => {
       const area = order.area;
@@ -377,11 +380,11 @@ export class OrderService {
    * después paginar sobre el array ya filtrado. El criterio es el mismo que
    * `filterOrdersForUser` (que se mantiene para el caso de un único pedido,
    * ver `assertOrderAccess`): sólo depende de los roles del usuario y de
-   * `order.area`, ya no de `AreaVisibilitySetting` (ver comentario en
+   * `order.area`, ya no de `Area.generalViewEnabled` (ver comentario en
    * `filterOrdersForUser`).
    *
-   * Devuelve `null` como sentinel cuando el usuario no tiene ningún rol que
-   * le dé acceso (no ve nada, sin necesidad de consultar la base).
+   * Devuelve `null` como sentinel cuando el usuario no tiene ningún rol ni
+   * área que le dé acceso (no ve nada, sin necesidad de consultar la base).
    */
   private orderVisibilityWhere(
     requestingUser?: RequestingUser,
@@ -391,13 +394,13 @@ export class OrderService {
     }
     const { roles } = requestingUser;
     // Cuenta de sucursal: sólo los pedidos levantados desde SU sucursal.
-    if (isBranchOnlyUser(roles)) {
+    if (isBranchOnlyUser(requestingUser)) {
       return branchOrdersWhere(requestingUser.userId);
     }
     if (isFullVisibilityRole(roles)) {
       return {};
     }
-    const userAreas = operationalRolesOf(roles);
+    const userAreas = areasOf(requestingUser);
     if (userAreas.length === 0) {
       return null;
     }
@@ -439,7 +442,7 @@ export class OrderService {
     if (!order) {
       throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
     }
-    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) {
+    if (requestingUser && isBranchOnlyUser(requestingUser)) {
       const own = await this.prisma.order.count({
         where: { id: orderId, ...branchOrdersWhere(requestingUser.userId) },
       });
@@ -545,13 +548,13 @@ export class OrderService {
 
   /**
    * Verifica que el usuario autenticado pueda editar `productionArea`
-   * (recepcion/admin/superuser, o diseño). Lanza 403 si no.
+   * (recepcion/admin/superuser, o quien trabaja en Diseño). Lanza 403 si no.
    */
   private assertCanEditProductionArea(requestingUser?: RequestingUser) {
     const roles = requestingUser?.roles ?? [];
-    const allowed = roles.some((r) =>
-      PRODUCTION_AREA_EDITOR_ROLES.includes(r as Role),
-    );
+    const allowed =
+      roles.some((r) => PRODUCTION_AREA_EDITOR_ROLES.includes(r as Role)) ||
+      belongsToArea(requestingUser, DESIGN_AREA);
     if (!allowed) {
       throw new HttpException(
         'Sin permiso para editar el área de producción',
@@ -620,7 +623,7 @@ export class OrderService {
       // queda. Se ignora lo que mande y se fuerza el alta estándar (con
       // montaje, igual que un pedido de Recepción que requiere diseño).
       const branchAccount =
-        !!requestingUser && isBranchOnlyUser(requestingUser.roles);
+        !!requestingUser && isBranchOnlyUser(requestingUser);
       const {
         branchEmployeeId,
         clientId,
@@ -649,7 +652,7 @@ export class OrderService {
             await this.prisma.user.findFirst({
               where: {
                 isSharedAccount: true,
-                roles: { some: { name: Role.DISENO } },
+                areas: { some: { slug: DESIGN_AREA } },
               },
               select: { id: true },
             })
@@ -670,12 +673,24 @@ export class OrderService {
 
       // Sin montaje el pedido va directo a producción: Diseño no es un
       // destino válido (para eso está requiresDesign=true). WORKFLOW.md §1.b.
-      if (!needsDesign && area === Role.DISENO) {
+      if (!needsDesign && area === DESIGN_AREA) {
         throw new HttpException(
           'Un pedido sin diseño debe ir a un área de producción, no a Diseño',
           HttpStatus.BAD_REQUEST,
         );
       }
+      // Las áreas llegan como texto: tienen que existir y estar activas.
+      await this.areaService.assertArea(area);
+      await this.areaService.assertArea(
+        productionArea,
+        'production',
+        'productionArea',
+      );
+      await this.areaService.assertAreas(
+        productionAreas,
+        'production',
+        'productionAreas',
+      );
 
       const branchOrigin = await this.resolveBranchOrigin(
         branchEmployeeId,
@@ -718,7 +733,7 @@ export class OrderService {
       if (needsDesign) {
         // (La cuenta de sucursal ya recibe la compartida de Diseño: sin recheck.)
         if (!branchAccount) {
-          await this.assertUserBelongsToArea(assignedUserId, Role.DISENO);
+          await this.assertUserBelongsToArea(assignedUserId, DESIGN_AREA);
         }
       } else if (assignedUserId !== undefined && area) {
         // Sin montaje, si se nomina a alguien debe ser del área destino.
@@ -730,7 +745,7 @@ export class OrderService {
       // Recepción; `productionArea` queda guardado como destino futuro
       // (puede venir vacío, se define/corrige más adelante). Si no requiere
       // Diseño, comportamiento anterior intacto.
-      const resolvedArea = needsDesign ? 'diseno' : area;
+      const resolvedArea = needsDesign ? DESIGN_AREA : area;
       const resolvedStatusId = needsDesign
         ? await this.resolveStatusIdByName(STATUS_NAME_EN_DISENO)
         : statusId;
@@ -811,7 +826,7 @@ export class OrderService {
           : ([productionArea ?? (needsDesign ? undefined : area)].filter(
               Boolean,
             ) as string[]);
-      const productionOnlyAreas = plannedAreas.filter((a) => a !== 'diseno');
+      const productionOnlyAreas = plannedAreas.filter((a) => a !== DESIGN_AREA);
       if (productionOnlyAreas.length > 0) {
         await this.orderAreaTaskService.createTasksForAreas(
           order.id,
@@ -911,7 +926,7 @@ export class OrderService {
             {
               type: 'order_assigned',
               title: 'Nuevo pedido en el área',
-              body: `Nuevo pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} para ${chatAreaLabel(order.area)}: lo toma quien esté libre`,
+              body: `Nuevo pedido #${order.id}${clientNameForNotification ? ` de ${clientNameForNotification}` : ''} para ${await this.areaService.labelOf(order.area)}: lo toma quien esté libre`,
               orderId: order.id,
             },
           );
@@ -990,7 +1005,7 @@ export class OrderService {
           id: true,
           area: true,
           status: true,
-          prepStage: true,
+          stage: { select: { id: true, key: true, name: true, kind: true } },
           assignedUserId: true,
           supply: TASK_SUPPLY_SELECT,
         },
@@ -1014,7 +1029,7 @@ export class OrderService {
     } satisfies Prisma.OrderSelect;
     // Las cuentas de sucursal no ven los insumos de inventario (nombres,
     // códigos de barras, cantidades) de las tareas de área.
-    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) {
+    if (requestingUser && isBranchOnlyUser(requestingUser)) {
       const taskSelect: Record<string, unknown> = {
         ...select.areaTasks.select,
       };
@@ -1082,7 +1097,7 @@ export class OrderService {
       // El historial de la sucursal va de lo más reciente a lo más antiguo
       // por fecha de creación; el resto de roles conserva el orden por id.
       const orderBy: Prisma.OrderOrderByWithRelationInput[] =
-        requestingUser && isBranchOnlyUser(requestingUser.roles)
+        requestingUser && isBranchOnlyUser(requestingUser)
           ? [{ creationDate: 'desc' }, { id: 'desc' }]
           : [{ id: 'desc' }];
 
@@ -1196,7 +1211,7 @@ export class OrderService {
     requestingUser?: RequestingUser,
   ): Prisma.OrderWhereInput[] {
     if (!query) return [];
-    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) return [];
+    if (requestingUser && isBranchOnlyUser(requestingUser)) return [];
     return [
       ...(query.origin === 'matriz' ? [{ branchId: null }] : []),
       ...(query.origin === 'sucursal' ? [{ branchId: { not: null } }] : []),
@@ -1468,6 +1483,13 @@ export class OrderService {
       // habilita para cualquier área, pero el cierre del pedido no.
       this.assertCanMarkDelivered(statusId, requestingUser);
 
+      await this.areaService.assertArea(area);
+      await this.areaService.assertArea(
+        productionArea,
+        'production',
+        'productionArea',
+      );
+
       if (clientResourceFile) {
         await this.assertOrderFileValid(clientResourceFile);
       }
@@ -1493,9 +1515,9 @@ export class OrderService {
       if (
         hasAssignedUserId &&
         assignedUserId != null &&
-        (area ?? existingOrder.area) === Role.DISENO
+        (area ?? existingOrder.area) === DESIGN_AREA
       ) {
-        await this.assertUserBelongsToArea(assignedUserId, Role.DISENO);
+        await this.assertUserBelongsToArea(assignedUserId, DESIGN_AREA);
       }
 
       // Auditoría: diff de los campos "editables" relevantes (no incluye
@@ -1713,7 +1735,7 @@ export class OrderService {
         Object.keys(auditChanges).length > 0 &&
         requestingUser &&
         !isFullVisibilityRole(requestingUser.roles) &&
-        operationalRolesOf(requestingUser.roles).length > 0
+        areasOf(requestingUser).length > 0
       ) {
         await this.notifyAreaUserUpdatedOrder(
           updatedOrder.id,
@@ -1823,7 +1845,7 @@ export class OrderService {
     await this.assertOrderAccess(orderId, requestingUser);
     // Tomar el pedido es asignárselo, así que quien lo toma tiene que ser de
     // Diseño (mismo criterio que la asignación del alta).
-    await this.assertUserBelongsToArea(requestingUser.userId, Role.DISENO);
+    await this.assertUserBelongsToArea(requestingUser.userId, DESIGN_AREA);
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -1835,7 +1857,7 @@ export class OrderService {
           select: {
             id: true,
             isSharedAccount: true,
-            roles: { select: { name: true } },
+            areas: { select: { slug: true } },
           },
         },
       },
@@ -1853,7 +1875,7 @@ export class OrderService {
     // endpoint.
     const heldByDesignSharedAccount =
       order.assignedUser?.isSharedAccount === true &&
-      order.assignedUser.roles.some((r) => r.name === Role.DISENO);
+      order.assignedUser.areas.some((a) => a.slug === DESIGN_AREA);
 
     if (order.assignedUserId !== null && !heldByDesignSharedAccount) {
       throw new HttpException(
@@ -1895,6 +1917,14 @@ export class OrderService {
     return this.findOrderForWriteResponse(orderId);
   }
 
+  /** Nombres visibles de varias áreas, separados por coma. */
+  private async areaLabels(areas: readonly string[]): Promise<string> {
+    const labels = await Promise.all(
+      areas.map((area) => this.areaService.labelOf(area)),
+    );
+    return labels.join(', ');
+  }
+
   /** Nombre visible de un usuario ("Ana Ruiz", o el username si no tiene). */
   private async userDisplayName(userId: number): Promise<string> {
     const user = await this.prisma.user.findUnique({
@@ -1918,7 +1948,7 @@ export class OrderService {
     requestingUser: RequestingUser,
   ) {
     await this.assertOrderAccess(orderId, requestingUser);
-    await this.assertUserBelongsToArea(requestingUser.userId, Role.DISENO);
+    await this.assertUserBelongsToArea(requestingUser.userId, DESIGN_AREA);
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -1932,7 +1962,7 @@ export class OrderService {
     if (!order) {
       throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
     }
-    if (!order.requiresDesign || order.area !== Role.DISENO) {
+    if (!order.requiresDesign || order.area !== DESIGN_AREA) {
       throw new HttpException(
         'El pedido no está en Diseño',
         HttpStatus.BAD_REQUEST,
@@ -2040,6 +2070,7 @@ export class OrderService {
 
     if (dto.area !== undefined) {
       this.assertCanEditProductionArea(requestingUser);
+      await this.areaService.assertArea(dto.area);
     }
 
     // Igual que en PATCH /orders/:id: la entrega la confirma Recepción.
@@ -2681,7 +2712,7 @@ export class OrderService {
         this.prisma.order.update({
           where: { id: orderId },
           data: {
-            area: 'diseno',
+            area: DESIGN_AREA,
             status: { connect: { id: statusId } },
             // El pedido vuelve a Diseño: si estaba archivado (por una ronda
             // autorizada previa) hay que desarchivarlo, o el diseñador recibe
@@ -2733,22 +2764,22 @@ export class OrderService {
       this.notificationsGateway.notifyNewAssignedOrder(previousDesignerId, {
         orderId,
         description: 'El cliente pidió cambios sobre el montaje',
-        area: 'diseno',
+        area: DESIGN_AREA,
         deliveryDate: null,
       });
     } else {
       const disenoUserIds =
-        await this.notificationService.userIdsForArea('diseno');
+        await this.notificationService.userIdsForArea(DESIGN_AREA);
       await this.notificationService.createNotificationForUsers(disenoUserIds, {
         type: 'design_feedback_added',
         title: 'El cliente pidió cambios',
         body: `Pedido #${orderId}: el cliente pidió cambios sobre el montaje`,
         orderId,
       });
-      this.notificationsGateway.notifyNewOrderToArea('diseno', {
+      this.notificationsGateway.notifyNewOrderToArea(DESIGN_AREA, {
         orderId,
         description: 'El cliente pidió cambios sobre el montaje',
-        area: 'diseno',
+        area: DESIGN_AREA,
         deliveryDate: null,
       });
     }
@@ -2777,6 +2808,16 @@ export class OrderService {
       revisionId,
     );
     await this.assertRevisionAwaitingResponse(orderId, revisionToApprove);
+    await this.areaService.assertArea(
+      dto.productionArea,
+      'production',
+      'productionArea',
+    );
+    await this.areaService.assertAreas(
+      dto.productionAreas,
+      'production',
+      'productionAreas',
+    );
     const order = await this.getOrderOrThrow(orderId);
 
     // Áreas que van a producir el pedido. Pueden ser varias y trabajan en
@@ -2811,14 +2852,14 @@ export class OrderService {
     const uncovered = resolvedAreas.filter((area) => !coveredAreas.has(area));
     if (uncovered.length > 0) {
       throw new HttpException(
-        `Captura la hoja de materiales (origen de insumos) de: ${uncovered.map(chatAreaLabel).join(', ')}`,
+        `Captura la hoja de materiales (origen de insumos) de: ${await this.areaLabels(uncovered)}`,
         HttpStatus.BAD_REQUEST,
       );
     }
     const extra = supplies.filter((s) => !resolvedAreas.includes(s.area));
     if (extra.length > 0) {
       throw new HttpException(
-        `${chatAreaLabel(extra[0].area)} no es un área de este pedido`,
+        `${await this.areaService.labelOf(extra[0].area)} no es un área de este pedido`,
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -2901,16 +2942,17 @@ export class OrderService {
     // Recién ahora hay trabajo real para producción: se avisa a cada área
     // involucrada, sólo de lo suyo.
     for (const area of resolvedAreas) {
+      const areaLabel = await this.areaService.labelOf(area);
       const areaUserIds = await this.notificationService.userIdsForArea(area);
       await this.notificationService.createNotificationForUsers(areaUserIds, {
         type: 'design_approved',
         title: 'Diseño autorizado, listo para producción',
-        body: `Pedido #${orderId}: diseño autorizado, pasa a ${chatAreaLabel(area)}`,
+        body: `Pedido #${orderId}: diseño autorizado, pasa a ${areaLabel}`,
         orderId,
       });
       this.notificationsGateway.notifyNewOrderToArea(area, {
         orderId,
-        description: `Diseño autorizado, pedido listo para producción en ${chatAreaLabel(area)}`,
+        description: `Diseño autorizado, pedido listo para producción en ${areaLabel}`,
         area,
         deliveryDate: null,
       });
@@ -2924,7 +2966,7 @@ export class OrderService {
         userId: designerId,
         type: 'design_approved',
         title: 'El cliente autorizó el diseño',
-        body: `Pedido #${orderId}: pasa a ${resolvedAreas.map(chatAreaLabel).join(', ')}`,
+        body: `Pedido #${orderId}: pasa a ${await this.areaLabels(resolvedAreas)}`,
         orderId,
       });
     }

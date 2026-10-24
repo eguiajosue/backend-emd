@@ -4,8 +4,8 @@ import { ClientService } from './client.service';
 describe('ClientService - clientes por sucursal', () => {
   let prisma: any;
   let service: ClientService;
-  const branchUser = { userId: 7, roles: ['sucursal'] };
-  const matriz = { userId: 2, roles: ['recepcion'] };
+  const branchUser = { userId: 7, roles: ['sucursal'], areas: [] };
+  const matriz = { userId: 2, roles: ['recepcion'], areas: [] };
   const BRANCH = { id: 1, name: 'Punto Madero', active: true };
 
   beforeEach(() => {

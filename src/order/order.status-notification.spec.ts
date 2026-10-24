@@ -74,7 +74,7 @@ describe('OrderService.update - notificación de cambio de estado', () => {
   it('persiste una notificación tipo "order_status_changed" para Recepción con el texto legible', async () => {
     await update(
       { statusId: 4 },
-      { userId: 7, roles: ['taller'], username: 'Ana' },
+      { userId: 7, roles: [], areas: ['taller'], username: 'Ana' },
     );
 
     expect(notificationService.createNotificationForUsers).toHaveBeenCalledWith(
@@ -90,7 +90,7 @@ describe('OrderService.update - notificación de cambio de estado', () => {
   it('emite el evento WS específico con estado previo, nuevo, autor y timestamp', async () => {
     await update(
       { statusId: 4 },
-      { userId: 7, roles: ['taller'], username: 'Ana' },
+      { userId: 7, roles: [], areas: ['taller'], username: 'Ana' },
     );
 
     expect(gateway.notifyOrderStatusChangedToRecepcion).toHaveBeenCalledWith(
@@ -111,7 +111,7 @@ describe('OrderService.update - notificación de cambio de estado', () => {
 
     await update(
       { statusId: 4 },
-      { userId: 7, roles: ['taller'], username: 'Ana' },
+      { userId: 7, roles: [], areas: ['taller'], username: 'Ana' },
     );
 
     expect(notificationService.createNotificationForUsers).toHaveBeenCalledWith(
@@ -123,7 +123,7 @@ describe('OrderService.update - notificación de cambio de estado', () => {
   it('notifica también cuando el cambio lo hace admin/recepción (cualquier usuario)', async () => {
     await update(
       { statusId: 4 },
-      { userId: 1, roles: ['admin'], username: 'Root' },
+      { userId: 1, roles: ['admin'], areas: [], username: 'Root' },
     );
 
     expect(gateway.notifyOrderStatusChangedToRecepcion).toHaveBeenCalled();
@@ -138,7 +138,7 @@ describe('OrderService.update - notificación de cambio de estado', () => {
 
     await update(
       { description: 'Otra cosa' },
-      { userId: 7, roles: ['taller'], username: 'Ana' },
+      { userId: 7, roles: [], areas: ['taller'], username: 'Ana' },
     );
 
     expect(gateway.notifyOrderStatusChangedToRecepcion).not.toHaveBeenCalled();
@@ -151,7 +151,7 @@ describe('OrderService.update - notificación de cambio de estado', () => {
   it('un cambio de estado no genera además la notificación genérica (statusId fuera de la auditoría)', async () => {
     await update(
       { statusId: 4 },
-      { userId: 7, roles: ['taller'], username: 'Ana' },
+      { userId: 7, roles: [], areas: ['taller'], username: 'Ana' },
     );
 
     const types = notificationService.createNotificationForUsers.mock.calls.map(

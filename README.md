@@ -50,6 +50,14 @@ Política de contraseñas (alta/edición de usuarios): mínimo 8 caracteres, al
 menos una mayúscula y un número. Los intentos de login fallidos se registran en
 el logger de Nest (usuario inexistente / contraseña incorrecta).
 
+## Áreas de trabajo
+
+Las áreas (Taller, DTF, Bordado, Diseño, Láser, Impresiones y las que se den de
+alta) son un catálogo en la tabla `Area`, separadas de los roles: el rol dice
+qué puede hacer una persona, el área dónde trabaja. El login devuelve
+`areas` (slugs) junto a `roles`, y `GET /areas` da el catálogo con nombre,
+ícono y color. Ver [docs/areas.md](docs/areas.md).
+
 ## Paginación (opt-in)
 
 `GET /orders`, `GET /order-histories`, `GET /logs` y `GET /clients` aceptan
@@ -127,7 +135,7 @@ existen en inventario (conos de hilo de bordado, tintas de impresión...).
   `ENTRADA` suma, `SALIDA` resta (nunca deja negativo, puede imputarse a un
   pedido con `orderId`) y `AJUSTE` fija el valor contado físicamente.
 - Admin/superuser/recepción ven todos los departamentos y son los únicos que
-  crean, editan, borran artículos y registran movimientos. Cada rol de área
+  crean, editan, borran artículos y registran movimientos. Quien trabaja en un área
   sólo CONSULTA el inventario de su departamento (`GET /inventory/areas`).
 - Al cruzar el mínimo (`minStock`) o agotarse, se notifica (`inventory_low_stock`)
   al área, a Recepción y a admin.

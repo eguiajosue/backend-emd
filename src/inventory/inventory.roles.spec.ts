@@ -3,6 +3,7 @@ import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { RequestMethod } from '@nestjs/common';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { InventoryController } from './inventory.controller';
 
 /**
@@ -26,14 +27,7 @@ describe('InventoryController: roles y contrato de rutas', () => {
   };
 
   const MANAGERS = [Role.RECEPCION, Role.ADMIN, Role.SUPERUSER].sort();
-  const WITH_AREAS = [
-    ...MANAGERS,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  ].sort();
+  const WITH_AREAS = [...MANAGERS, AreaAccess.PRODUCTION].sort();
 
   // [nombre, handler, verbo, ruta, ¿áreas de producción?]
   const ROUTES: [string, string, RequestMethod, string, boolean][] = [
@@ -115,7 +109,7 @@ describe('InventoryController: roles y contrato de rutas', () => {
 
   it('Diseño no entra a ninguna ruta (403)', () => {
     for (const [, method] of ROUTES) {
-      expect(rolesFor(method)).not.toContain(Role.DISENO);
+      expect(rolesFor(method)).not.toContain(AreaAccess.DESIGN);
     }
   });
 

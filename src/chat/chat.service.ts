@@ -16,12 +16,12 @@ import {
   CHAT_ATTACHMENT_MIME_TYPES,
 } from './dto/send-message.dto';
 import {
-  CHAT_AREAS,
   CHAT_CONVERSATION_TYPE_AREA,
   CHAT_CONVERSATION_TYPE_DIRECT,
-  chatAreaLabel,
   isMonitorRole,
 } from './chat.constants';
+import { AreaService } from 'src/area/area.service';
+import { belongsToArea } from 'src/area/area-access';
 
 /** Tamaño máximo (en bytes, ya decodificado) para un adjunto de chat. Mismo
  * límite que los archivos de un pedido (ver order.service.ts). */
@@ -78,6 +78,7 @@ const MESSAGE_ORDER_SELECT = {
 export interface ChatRequestingUser {
   userId: number;
   roles: string[];
+  areas: string[];
 }
 
 /** Forma mínima de conversación necesaria para resolver autorización. */
@@ -111,6 +112,8 @@ export class ChatService {
     // Default sólo para los tests que construyen el service a mano: en la app
     // lo inyecta siempre StorageModule (global).
     private readonly storage: StorageService = StorageService.database(),
+    // Igual que `storage`: en la app lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
   ) {}
 
   // ---------------------------------------------------------------------
@@ -125,7 +128,7 @@ export class ChatService {
    * - admin / superuser: miembros de TODOS los canales de área (monitoreo).
    *   NO son miembros automáticos de los mensajes directos ajenos: en un DM
    *   sólo entran si son alguno de los dos participantes.
-   * - canal de área: los usuarios con ese rol de área + todos los de recepción.
+   * - canal de área: quienes trabajan en esa área + todos los de recepción.
    * - mensaje directo: únicamente los dos participantes.
    */
   private canAccess(
@@ -138,7 +141,7 @@ export class ChatService {
       }
       if (!conversation.area) return false;
       return (
-        user.roles.includes(conversation.area) ||
+        belongsToArea(user, conversation.area) ||
         user.roles.includes(Role.RECEPCION)
       );
     }
@@ -212,9 +215,10 @@ export class ChatService {
     ) {
       const users = await this.prisma.user.findMany({
         where: {
-          roles: {
-            some: { name: { in: [conversation.area, Role.RECEPCION] } },
-          },
+          OR: [
+            { areas: { some: { slug: conversation.area } } },
+            { roles: { some: { name: Role.RECEPCION } } },
+          ],
         },
         select: { id: true },
       });
@@ -329,10 +333,11 @@ export class ChatService {
   // Conversaciones
   // ---------------------------------------------------------------------
 
-  /** Crea (idempotente) el canal fijo de cada área operativa. */
+  /** Crea (idempotente) el canal fijo de cada área activa. */
   private async ensureAreaConversations() {
+    const areas = await this.areaService.slugs();
     await this.prisma.chatConversation.createMany({
-      data: CHAT_AREAS.map((area) => ({
+      data: areas.map((area) => ({
         type: CHAT_CONVERSATION_TYPE_AREA,
         area,
       })),
@@ -446,7 +451,7 @@ export class ChatService {
   }
 
   /** Título en español según el tipo de conversación. */
-  private toConversationDto(
+  private async toConversationDto(
     conversation: {
       id: number;
       type: string;
@@ -486,7 +491,7 @@ export class ChatService {
     const otherUser = rawOtherUser ? this.attachPresence(rawOtherUser) : null;
 
     const title = isArea
-      ? `Recepción ↔ ${chatAreaLabel(conversation.area)}`
+      ? `Recepción ↔ ${await this.areaService.labelOf(conversation.area)}`
       : otherUser
         ? `${otherUser.firstName} ${otherUser.lastName ?? ''}`.trim()
         : [conversation.directUserA, conversation.directUserB]
@@ -677,6 +682,7 @@ export class ChatService {
       await this.orderService.assertOrderAccess(orderId, {
         userId: user.userId,
         roles: user.roles,
+        areas: user.areas,
       });
     }
 
@@ -846,6 +852,7 @@ export class ChatService {
       select: {
         ...USER_SUMMARY_SELECT,
         roles: { select: { name: true } },
+        areas: { select: { slug: true } },
         lastSeenAt: true,
       },
       orderBy: [{ firstName: 'asc' }, { username: 'asc' }],
@@ -856,6 +863,7 @@ export class ChatService {
       firstName: u.firstName,
       lastName: u.lastName,
       roles: u.roles.map((r) => r.name),
+      areas: u.areas.map((a) => a.slug),
       isOnline: this.notificationsGateway.isUserOnline(u.id),
       lastSeenAt: u.lastSeenAt,
     }));

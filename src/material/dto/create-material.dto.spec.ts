@@ -25,10 +25,11 @@ describe('CreateMaterialDto', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('rechaza un área que no existe', async () => {
+  // Que el área exista lo valida MaterialService contra el catálogo.
+  it('rechaza un área con formato inválido', async () => {
     const dto = plainToInstance(CreateMaterialDto, {
       name: 'X',
-      areas: ['cocina'],
+      areas: ['Cocina Industrial'],
     });
     const errors = await validate(dto);
     expect(errors.some((e) => e.property === 'areas')).toBe(true);

@@ -15,24 +15,19 @@ import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 
 /** Traduce el payload del token al usuario que consume ChatService. */
 function requestingUser(user: AccessTokenPayload): ChatRequestingUser {
-  return { userId: user.sub, roles: user.roles ?? [] };
+  return {
+    userId: user.sub,
+    roles: user.roles ?? [],
+    areas: user.areas ?? [],
+  };
 }
 
-@Auth(
-  Role.ADMIN,
-  Role.SUPERUSER,
-  Role.RECEPCION,
-  Role.TALLER,
-  Role.DTF,
-  Role.BORDADO,
-  Role.DISENO,
-  Role.LASER,
-  Role.IMPRESIONES,
-)
+@Auth(Role.ADMIN, Role.SUPERUSER, Role.RECEPCION, AreaAccess.ANY)
 @ApiTags('chat')
 @Controller('chat')
 export class ChatController {

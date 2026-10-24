@@ -18,6 +18,7 @@ import {
 export interface ClientRequestingUser {
   userId: number;
   roles: string[];
+  areas: string[];
 }
 
 /** Cliente con su empresa y su sucursal dueña (`branch` null = matriz). */
@@ -46,7 +47,7 @@ export class ClientService {
       };
       delete data.branchId;
       const branchId =
-        requestingUser && isBranchOnlyUser(requestingUser.roles)
+        requestingUser && isBranchOnlyUser(requestingUser)
           ? (await branchOfUser(this.prisma, requestingUser.userId)).id
           : null;
       const client = await this.prisma.client.create({
@@ -109,7 +110,7 @@ export class ClientService {
     query?: ClientListQueryDto,
     requestingUser?: ClientRequestingUser,
   ): Promise<Prisma.ClientWhereInput> {
-    if (requestingUser && isBranchOnlyUser(requestingUser.roles)) {
+    if (requestingUser && isBranchOnlyUser(requestingUser)) {
       // Los filtros del query se ignoran: la sucursal sólo ve lo suyo.
       const branch = await branchOfUser(this.prisma, requestingUser.userId);
       return { branchId: branch.id };
@@ -129,7 +130,7 @@ export class ClientService {
     client: { branchId: number | null },
     requestingUser?: ClientRequestingUser,
   ) {
-    if (!requestingUser || !isBranchOnlyUser(requestingUser.roles)) return;
+    if (!requestingUser || !isBranchOnlyUser(requestingUser)) return;
     const branch = await branchOfUser(this.prisma, requestingUser.userId);
     if (client.branchId !== branch.id) {
       throw new HttpException(
@@ -171,7 +172,7 @@ export class ClientService {
         ...updateClientDto,
       };
       delete data.branchId;
-      if (requestingUser && isBranchOnlyUser(requestingUser.roles)) {
+      if (requestingUser && isBranchOnlyUser(requestingUser)) {
         const existing = await this.prisma.client.findUnique({
           where: { id },
           select: { branchId: true },

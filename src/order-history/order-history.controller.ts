@@ -15,18 +15,9 @@ import { CreateOrderHistoryDto } from './dto/create-order-history.dto';
 import { UpdateOrderHistoryDto } from './dto/update-order-history.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 
-@Auth(
-  Role.ADMIN,
-  Role.RECEPCION,
-  Role.SUPERUSER,
-  Role.TALLER,
-  Role.DTF,
-  Role.BORDADO,
-  Role.DISENO,
-  Role.LASER,
-  Role.IMPRESIONES,
-)
+@Auth(Role.ADMIN, Role.RECEPCION, Role.SUPERUSER, AreaAccess.ANY)
 @ApiTags('order-histories')
 @Controller('order-histories')
 export class OrderHistoryController {

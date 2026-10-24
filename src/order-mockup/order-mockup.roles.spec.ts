@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { HTTP_CODE_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { OrderController } from 'src/order/order.controller';
 import { OrderMockupController } from './order-mockup.controller';
 
@@ -29,20 +30,15 @@ describe('OrderMockupController: roles y contrato de rutas', () => {
     Role.RECEPCION,
     Role.ADMIN,
     Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
     Role.SUCURSAL,
+    AreaAccess.ANY,
   ].sort();
 
   const WRITE_ROLES = [
     Role.RECEPCION,
     Role.ADMIN,
     Role.SUPERUSER,
-    Role.DISENO,
+    AreaAccess.DESIGN,
   ].sort();
 
   it.each([

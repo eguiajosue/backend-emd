@@ -58,6 +58,7 @@ model User {
   lastSeenAt      DateTime? // Última vez que se desconectó el último socket vivo de este usuario (ver NotificationsGateway.handleDisconnect). Null si nunca se conectó por WebSocket.
 
   roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
+  areas                   Area[] // Áreas de trabajo del usuario (ver Area). Separadas de los roles: el rol dice QUÉ puede hacer, el área DÓNDE trabaja.
   branch                  Branch?                  @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de la cuenta (ver Branch).
   orders                  Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
   assignedOrders          Order[]                  @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
@@ -310,13 +311,14 @@ enum AreaTaskStatus {
   terminado
 }
 
-/// Etapa previa a producción de una tarea de Bordado (WORKFLOW.md §3.1).
-/// Mientras la tarea tiene una etapa, su `status` sigue en `pendiente` y no se
-/// puede empezar: primero se digitaliza el bordado, luego se hace una prueba y
-/// sólo con la prueba aprobada pasa a producción (`prepStage = null`).
-enum EmbroideryPrepStage {
-  digitalizado
-  en_pruebas
+/// Tipo de una etapa previa a producción (ver AreaStage).
+///  - work: un paso de trabajo; se avanza con "pasar a la siguiente etapa".
+///  - review: una revisión (en Bordado, la prueba): al entrar se abre una ronda
+///    y alguien la aprueba (sigue el flujo) o la rechaza (regresa a la etapa
+///    anterior con observaciones).
+enum AreaStageKind {
+  work
+  review
 }
 
 /// Resultado de una prueba de bordado. Una prueba abierta (en curso) no tiene
@@ -334,18 +336,22 @@ enum SampleTestResult {
 /// a "listo para entregar"; la entrega la confirma Recepción a mano.
 /// Ver WORKFLOW.md §3.
 model OrderAreaTask {
-  id             Int                  @id @default(autoincrement())
+  id             Int            @id @default(autoincrement())
   orderId        Int // Pedido al que pertenece esta tarea.
   area           String // Área que la trabaja: taller | dtf | bordado | laser | impresiones (nunca 'diseno').
-  status         AreaTaskStatus       @default(pendiente) // Avance de esta área en particular.
+  status         AreaTaskStatus @default(pendiente) // Avance de esta área en particular.
   assignedUserId Int? // Responsable. Por defecto la cuenta compartida del área; alguien del área puede tomarla.
-  createdAt      DateTime             @default(now())
+  createdAt      DateTime       @default(now())
   startedAt      DateTime? // Cuándo pasó a en_proceso.
   completedAt    DateTime? // Cuándo pasó a terminado.
-  prepStage      EmbroideryPrepStage? // Sólo Bordado: etapa previa a producción (digitalizado → en_pruebas). null = ya puede producir (o no aplica al área).
+  machineId      Int? // Máquina del área a la que se asignó (AreaMachine). null = sin asignar.
+  fieldValues    Json? // Valores de los datos propios del área (AreaField): { [key]: texto | número | booleano }. null = nada capturado.
+  stageId        Int? // Etapa previa a producción en la que está (AreaStage del área; en Bordado: digitalizado → en pruebas). null = ya puede producir (o el área no tiene etapas).
 
   order        Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
   assignedUser User?                @relation("AssignedAreaTasks", fields: [assignedUserId], references: [id])
+  stage        AreaStage?           @relation(fields: [stageId], references: [id])
+  machine      AreaMachine?         @relation(fields: [machineId], references: [id])
   supply       OrderAreaSupply? // Hoja de materiales del área: de dónde salen los insumos (ver WORKFLOW.md §3).
   sampleTests  AreaTaskSampleTest[] // Registro de las pruebas de bordado, una por ronda.
 
@@ -355,6 +361,8 @@ model OrderAreaTask {
   @@index([area])
   @@index([assignedUserId])
   @@index([status])
+  @@index([stageId])
+  @@index([machineId])
 }
 
 /// Una ronda de prueba de bordado de una tarea de Bordado. Se abre al mandar la
@@ -363,7 +371,7 @@ model OrderAreaTask {
 /// se hizo: nunca se borra una ronda, una prueba rechazada queda en el historial.
 model AreaTaskSampleTest {
   id              Int               @id @default(autoincrement())
-  areaTaskId      Int // Tarea de Bordado a la que pertenece.
+  areaTaskId      Int // Tarea a la que pertenece (ronda de una etapa de revisión; hoy sólo Bordado la usa).
   round           Int // 1, 2, 3... dentro de la tarea (max(round)+1 al abrirla).
   sentAt          DateTime          @default(now()) // Cuándo se mandó a pruebas.
   sentByUserId    Int? // Quién la mandó a pruebas.
@@ -495,10 +503,106 @@ model CalendarTask {
   @@index([orderId])
 }
 
-model AreaVisibilitySetting {
-  id                 Int     @id @default(autoincrement()) // Identificador único de la configuración.
-  role               String  @unique // Rol operativo ('taller' | 'dtf' | 'bordado' | 'diseno' | 'laser' | 'impresiones').
-  generalViewEnabled Boolean @default(true) // Si es true, todos los usuarios del rol ven todos los pedidos de su etapa; si es false, solo ven los pedidos sin asignar o asignados a ellos mismos.
+/// Área de trabajo (departamento): Taller, DTF, Bordado, Diseño, Láser,
+/// Impresiones y las que se den de alta desde Configuración. Es el catálogo
+/// del que salen las áreas válidas de un pedido, de una tarea, del inventario
+/// y de los canales de chat (ver docs/areas.md).
+model Area {
+  id                      Int      @id @default(autoincrement())
+  slug                    String   @unique // Identificador estable en ASCII ('taller', 'impresion-3d'). Es lo que se guarda en Order.area, OrderAreaTask.area, InventoryItem.area y ChatConversation.area, y viaja en el JWT: no cambia nunca.
+  name                    String   @unique // Nombre visible ("Láser").
+  icon                    String // Nombre del ícono de lucide-react ("Zap"). El frontend lo traduce con su catálogo de íconos.
+  color                   String // Color base #rrggbb. El frontend deriva el tinte y el texto legible, en claro y en oscuro.
+  isDesign                Boolean  @default(false) // Sólo Diseño: fase previa con su propio circuito, nunca destino de producción.
+  isProductionDestination Boolean  @default(true) // Si un pedido puede ir a producirse aquí (Order.productionArea / OrderAreaTask).
+  hasInventory            Boolean  @default(true) // Si lleva inventario propio (InventoryItem.area).
+  generalViewEnabled      Boolean  @default(true) // Si es true, todos los usuarios del área ven todos los pedidos de su etapa; si es false, sólo los sin asignar o asignados a ellos mismos.
+  inventoryCategories     String[] @default([]) // Sugerencias de categoría al dar de alta un artículo de inventario de esta área ("Filamento", "Resina").
+  inventoryUnits          String[] @default([]) // Sugerencias de unidad ("kg", "rollo", "litro").
+  sortOrder               Int      @default(0) // Orden en listas y selectores.
+  active                  Boolean  @default(true) // Un área desactivada no se borra (sus pedidos, tareas e inventario se conservan), pero deja de ofrecerse y no da acceso.
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  users  User[] // Personas (y la cuenta compartida) que trabajan en el área.
+  stages AreaStage[] // Etapas previas a producción, en orden (vacío = las tareas nacen listas para producir).
+
+  capacity        Int? // Tareas abiertas que el área puede llevar a la vez. null = sin tope definido. Coordinación marca el área como sobrecargada al pasarlo.
+  turnaroundHours Int? // Horas típicas de producción por tarea. null = sin dato. Coordinación estima las horas de trabajo en cola (tareas abiertas × turnaroundHours).
+  machines        AreaMachine[] // Máquinas o equipos del área (Impresora 1, Láser CO2...).
+  fields          AreaField[] // Datos propios que se capturan en cada tarea del área (Material, Alto en cm...).
+}
+
+/// Máquina o equipo de un área. Una tarea puede asignarse a una
+/// (`OrderAreaTask.machineId`) y Coordinación cuenta la carga por máquina.
+/// Nunca se borra: al quitarla se desactiva.
+model AreaMachine {
+  id        Int      @id @default(autoincrement())
+  areaId    Int
+  name      String
+  sortOrder Int
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  area  Area            @relation(fields: [areaId], references: [id])
+  tasks OrderAreaTask[]
+
+  @@index([areaId])
+}
+
+enum AreaFieldType {
+  text
+  number
+  select
+  boolean
+}
+
+/// Dato propio de un área que se captura en cada una de sus tareas (valores
+/// en `OrderAreaTask.fieldValues`, por `key`). El tipo no cambia una vez creado;
+/// al quitarlo se desactiva y los valores ya capturados se conservan.
+model AreaField {
+  id        Int           @id @default(autoincrement())
+  areaId    Int
+  key       String // Identificador estable dentro del área ('material'). No cambia al renombrar.
+  label     String // Nombre visible ("Material").
+  type      AreaFieldType
+  required  Boolean       @default(false) // Obligatorio para empezar la producción de la tarea.
+  options   String[]      @default([]) // Sólo `select`: opciones permitidas.
+  unit      String? // Sólo `number`: unidad que se muestra ("cm", "g").
+  sortOrder Int
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  area Area @relation(fields: [areaId], references: [id])
+
+  @@unique([areaId, key])
+  @@index([areaId])
+}
+
+/// Etapa previa a producción de las tareas de un área. Una tarea nueva nace en
+/// la primera etapa activa; mientras tenga una (`OrderAreaTask.stageId`) su
+/// `status` sigue en `pendiente` y no se puede empezar. Al agotarlas
+/// (`stageId = null`) pasa a producción. Una etapa nunca se borra: al quitarla
+/// del área se desactiva (las tareas de pedidos cerrados la conservan).
+/// Reglas: la primera es `work` y no hay dos `review` seguidas.
+model AreaStage {
+  id        Int           @id @default(autoincrement())
+  areaId    Int
+  key       String // Identificador estable dentro del área ('digitalizado'). No cambia al renombrar.
+  name      String // Nombre visible ("Digitalizado").
+  kind      AreaStageKind @default(work)
+  sortOrder Int // 10, 20, 30...
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  area  Area            @relation(fields: [areaId], references: [id])
+  tasks OrderAreaTask[]
+
+  @@unique([areaId, key])
+  @@index([areaId])
 }
 
 model AppSetting {

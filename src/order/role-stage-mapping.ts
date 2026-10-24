@@ -1,20 +1,9 @@
 import { Role } from 'src/common/enums/roles.enum';
 
 /**
- * Roles operativos/de producción que comparten etapas del flujo de pedido.
- * Corresponde 1:1 con OPERATIONAL_ROLES en frontend-emd/src/lib/roleTaskMapping.ts.
- */
-export const OPERATIONAL_ROLES: Role[] = [
-  Role.TALLER,
-  Role.DTF,
-  Role.BORDADO,
-  Role.DISENO,
-  Role.LASER,
-  Role.IMPRESIONES,
-];
-
-/**
  * Roles con acceso administrativo total: siempre ven todos los pedidos sin filtrar.
+ * Quién trabaja en qué área ya no es un rol: ver `areasOf` en
+ * src/area/area-access.ts.
  */
 export const FULL_VISIBILITY_ROLES: Role[] = [
   Role.ADMIN,
@@ -25,9 +14,4 @@ export const FULL_VISIBILITY_ROLES: Role[] = [
 export function isFullVisibilityRole(roles: string[] | undefined): boolean {
   if (!roles) return false;
   return roles.some((r) => FULL_VISIBILITY_ROLES.includes(r as Role));
-}
-
-export function operationalRolesOf(roles: string[] | undefined): string[] {
-  if (!roles) return [];
-  return roles.filter((r) => OPERATIONAL_ROLES.includes(r as Role));
 }

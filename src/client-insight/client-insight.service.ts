@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DataChange, PrismaService } from '../prisma/prisma.service';
-import { PRODUCTION_AREAS } from '../order/dto/create-order.dto';
+import { AreaService } from '../area/area.service';
 import { STATUS_NAME_CANCELADO } from '../order/status-id-resolver';
 import {
   buildClientProfile,
@@ -102,7 +102,12 @@ export class ClientInsightService
   private timer: NodeJS.Timeout | null = null;
   private backfillTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
+  ) {}
 
   private readonly onChange = (change: DataChange) => {
     const result = (change.result ?? {}) as Record<string, any>;
@@ -263,7 +268,10 @@ export class ClientInsightService
       take: MAX_ORDERS_ANALYZED,
       select: LEARNING_ORDER_SELECT,
     });
-    const profile = buildClientProfile(orders, PRODUCTION_AREAS);
+    const profile = buildClientProfile(
+      orders,
+      await this.areaService.slugs('production'),
+    );
     const data = {
       version: profile.version,
       ordersAnalyzed: profile.ordersAnalyzed,

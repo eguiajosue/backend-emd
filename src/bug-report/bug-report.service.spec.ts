@@ -20,6 +20,7 @@ describe('BugReportService', () => {
     sub: 1,
     username: 'jdoe',
     roles: ['admin'],
+    areas: [],
   };
 
   beforeEach(() => {
@@ -38,6 +39,7 @@ describe('BugReportService', () => {
         lastName: 'Dorado',
         username: 'jdoe',
         roles: [],
+        areas: [],
       }),
     } as unknown as jest.Mocked<UserService>;
 

@@ -1,10 +1,8 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { Role } from 'src/common/enums/roles.enum';
-import {
-  isFullVisibilityRole,
-  operationalRolesOf,
-} from 'src/order/role-stage-mapping';
+import { isFullVisibilityRole } from 'src/order/role-stage-mapping';
+import { areasOf, type AreaMember } from 'src/area/area-access';
 
 /**
  * Reglas de acceso de las sucursales, en funciones sueltas (sólo necesitan
@@ -20,12 +18,13 @@ export const BRANCH_BADGE_SELECT = {
 } satisfies { select: Prisma.BranchSelect };
 
 /**
- * Cuenta que SÓLO es de sucursal: sin un rol de la matriz que le dé más
- * visibilidad. Ve únicamente los pedidos de su sucursal.
+ * Cuenta que SÓLO es de sucursal: sin un rol de la matriz ni un área que le
+ * den más visibilidad. Ve únicamente los pedidos de su sucursal.
  */
-export function isBranchOnlyUser(roles: string[] | undefined): boolean {
+export function isBranchOnlyUser(user: AreaMember | undefined): boolean {
+  const roles = user?.roles;
   if (!roles?.includes(Role.SUCURSAL)) return false;
-  return !isFullVisibilityRole(roles) && operationalRolesOf(roles).length === 0;
+  return !isFullVisibilityRole(roles) && areasOf(user).length === 0;
 }
 
 /**

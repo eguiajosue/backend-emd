@@ -2,6 +2,7 @@ import { Reflector } from '@nestjs/core';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { OrderController } from './order.controller';
 
 /**
@@ -29,13 +30,8 @@ describe('OrderController: roles de las rondas de diseño', () => {
     Role.RECEPCION,
     Role.ADMIN,
     Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
     Role.SUCURSAL,
+    AreaAccess.ANY,
   ].sort();
 
   it.each([
@@ -62,7 +58,7 @@ describe('OrderController: roles de las rondas de diseño', () => {
 
   it('las escrituras no cambian: montaje Diseño; feedback y autorización Recepción', () => {
     expect(rolesFor('createDesignRevision')).toEqual(
-      [Role.DISENO, Role.ADMIN, Role.SUPERUSER].sort(),
+      [Role.ADMIN, Role.SUPERUSER, AreaAccess.DESIGN].sort(),
     );
     expect(rolesFor('addDesignFeedback')).toEqual(
       [Role.RECEPCION, Role.ADMIN, Role.SUPERUSER].sort(),
@@ -73,7 +69,7 @@ describe('OrderController: roles de las rondas de diseño', () => {
   });
 
   describe('delegan la visibilidad del pedido en el servicio', () => {
-    const user = { sub: 7, username: 'bordado', roles: ['bordado'] };
+    const user = { sub: 7, username: 'bordado', roles: [], areas: ['bordado'] };
     let orderService: Record<string, jest.Mock>;
     let controller: OrderController;
 
@@ -95,7 +91,7 @@ describe('OrderController: roles de las rondas de diseño', () => {
       await controller.getDesignRevisionMontage('42', '3', user as any);
       await controller.getDesignRevisionFile('42', '3', '9', user as any);
 
-      const requester = { userId: 7, roles: ['bordado'] };
+      const requester = { userId: 7, roles: [], areas: ['bordado'] };
       expect(orderService.getDesignRevisions).toHaveBeenCalledWith(
         42,
         requester,

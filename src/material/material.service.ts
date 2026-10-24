@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AreaService } from '../area/area.service';
 import { MaterialCategoryService } from '../material-category/material-category.service';
 import { MaterialUnitService } from '../material-unit/material-unit.service';
 import {
@@ -24,6 +25,9 @@ export class MaterialService {
     private readonly prisma: PrismaService,
     private readonly materialCategoryService: MaterialCategoryService,
     private readonly materialUnitService: MaterialUnitService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
   ) {
     this.statusIds = new StatusIdResolver(this.prisma);
   }
@@ -58,6 +62,7 @@ export class MaterialService {
   }
 
   async create(dto: CreateMaterialDto) {
+    await this.areaService.assertAreas(dto.areas);
     const [categoryId, unitId] = await Promise.all([
       this.resolveCategoryId(dto.category),
       this.resolveUnitId(dto.unit),
@@ -101,6 +106,7 @@ export class MaterialService {
   }
 
   async update(id: number, dto: UpdateMaterialDto) {
+    await this.areaService.assertAreas(dto.areas);
     const before = await this.findOrThrow(id);
     const [categoryId, unitId] = await Promise.all([
       this.resolveCategoryId(dto.category),

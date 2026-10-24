@@ -1,18 +1,23 @@
-import {
-  AreaTaskStatus,
-  EmbroideryPrepStage,
-  SampleTestResult,
-} from '@prisma/client';
+import { AreaTaskStatus, SampleTestResult } from '@prisma/client';
 import { BadRequestException, HttpException } from '@nestjs/common';
 import { OrderAreaTaskService } from './order-area-task.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { AuditLogService } from 'src/audit-log/audit-log.service';
+import { AreaService, defaultAreaViews } from 'src/area/area.service';
 
 // PNG mínimo válido: el servicio confirma por contenido que la foto es imagen.
 const MINIMAL_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+/** Las dos etapas de Bordado tal como las siembra el catálogo por defecto. */
+type StageName = 'digitalizado' | 'en_pruebas';
+const STAGE = Object.fromEntries(
+  defaultAreaViews()
+    .find((area) => area.slug === 'bordado')!
+    .stages.map((stage) => [stage.key, stage]),
+) as Record<StageName, { id: number; key: string; name: string; kind: string }>;
 
 /** Estado global "terminado" = listo para entregar (ver WORKFLOW.md §3). */
 const READY_FOR_DELIVERY_STATUS_ID = 4;
@@ -155,17 +160,17 @@ describe('OrderAreaTaskService', () => {
             orderId: 1,
             area: 'bordado',
             assignedUserId: 42,
-            prepStage: EmbroideryPrepStage.digitalizado,
+            stageId: STAGE.digitalizado.id,
           },
         }),
       );
     });
 
-    it('sólo Bordado arranca en digitalización; las demás áreas no', async () => {
+    it('las áreas con etapas arrancan en la primera; las demás no', async () => {
       await service.createTasksForAreas(1, ['dtf']);
 
       const data = prisma.orderAreaTask.create.mock.calls[0][0].data;
-      expect(data).not.toHaveProperty('prepStage');
+      expect(data).not.toHaveProperty('stageId');
     });
 
     it('no duplica un área que el pedido ya tiene', async () => {
@@ -208,11 +213,11 @@ describe('OrderAreaTaskService', () => {
   });
 
   describe('etapas de Bordado: digitalizado → pruebas → producción', () => {
-    const bordador = { userId: 3, roles: ['bordado'] };
-    const dtfUser = { userId: 4, roles: ['dtf'] };
+    const bordador = { userId: 3, roles: [], areas: ['bordado'] };
+    const dtfUser = { userId: 4, roles: [], areas: ['dtf'] };
 
     const taskAt = (
-      prepStage: EmbroideryPrepStage | null,
+      stage: StageName | null,
       overrides: Record<string, unknown> = {},
     ) =>
       prisma.orderAreaTask.findUnique.mockResolvedValue({
@@ -220,7 +225,7 @@ describe('OrderAreaTaskService', () => {
         orderId: 5,
         area: 'bordado',
         status: AreaTaskStatus.pendiente,
-        prepStage,
+        stage: stage ? STAGE[stage] : null,
         assignedUserId: null,
         ...overrides,
       });
@@ -240,19 +245,19 @@ describe('OrderAreaTaskService', () => {
       });
     });
 
-    it('no deja empezar la producción mientras está en digitalización', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+    it('no deja empezar la producción mientras está en una etapa de trabajo', async () => {
+      taskAt('digitalizado');
       await expect(
         service.updateStatus(10, AreaTaskStatus.en_proceso, bordador),
-      ).rejects.toThrow(/digitalización/);
+      ).rejects.toThrow(/Digitalizado/);
       expect(prisma.orderAreaTask.update).not.toHaveBeenCalled();
     });
 
     it('no deja empezar la producción con la prueba pendiente', async () => {
-      taskAt(EmbroideryPrepStage.en_pruebas);
+      taskAt('en_pruebas');
       await expect(
         service.updateStatus(10, AreaTaskStatus.en_proceso, bordador),
-      ).rejects.toThrow(/prueba/);
+      ).rejects.toThrow(/En pruebas/);
     });
 
     it('con la prueba aprobada (sin etapa) ya puede empezar', async () => {
@@ -262,24 +267,24 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('no deja mandar a pruebas mientras el pedido sigue en diseño', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+      taskAt('digitalizado');
       prisma.order.findUnique.mockResolvedValue({
         status: { name: 'Esperando autorización' },
       });
       await expect(
-        service.sendToTest(10, undefined, bordador, 5),
+        service.advanceStage(10, undefined, bordador, 5),
       ).rejects.toThrow(/cuando el cliente lo autorice/);
       expect(prisma.orderAreaTask.updateMany).not.toHaveBeenCalled();
     });
 
     it('mandar a pruebas abre la ronda 1 y pasa a en_pruebas', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+      taskAt('digitalizado');
 
-      await service.sendToTest(10, '  puntada de relleno  ', bordador, 5);
+      await service.advanceStage(10, '  puntada de relleno  ', bordador, 5);
 
       expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
-        where: { id: 10, prepStage: EmbroideryPrepStage.digitalizado },
-        data: { prepStage: EmbroideryPrepStage.en_pruebas },
+        where: { id: 10, stageId: STAGE.digitalizado.id },
+        data: { stageId: STAGE.en_pruebas.id },
       });
       expect(prisma.areaTaskSampleTest.create).toHaveBeenCalledWith({
         data: {
@@ -298,13 +303,13 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('mandar a pruebas avisa a la recepcionista que atiende el pedido', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+      taskAt('digitalizado');
       prisma.order.findUnique.mockResolvedValue({
         attendedByUserId: 21,
         userId: 20,
       });
 
-      await service.sendToTest(10, undefined, bordador, 5);
+      await service.advanceStage(10, undefined, bordador, 5);
 
       expect(notificationService.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -316,25 +321,26 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('quien manda a pruebas no recibe su propio aviso', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+      taskAt('digitalizado');
       prisma.order.findUnique.mockResolvedValue({
         attendedByUserId: null,
         userId: 3,
       });
 
-      await service.sendToTest(10, undefined, {
+      await service.advanceStage(10, undefined, {
         userId: 3,
         roles: ['recepcion'],
+        areas: [],
       });
 
       expect(notificationService.createNotification).not.toHaveBeenCalled();
     });
 
     it('guarda la foto de la prueba y avisa que va con foto', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+      taskAt('digitalizado');
       prisma.order.findUnique.mockResolvedValue({ userId: 20 });
 
-      await service.sendToTest(10, undefined, bordador, 5, {
+      await service.advanceStage(10, undefined, bordador, 5, {
         data: MINIMAL_PNG_BASE64,
         filename: 'prueba.png',
         mimeType: 'image/png',
@@ -355,9 +361,9 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('rechaza una foto cuyo contenido no es una imagen', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+      taskAt('digitalizado');
       await expect(
-        service.sendToTest(10, undefined, bordador, 5, {
+        service.advanceStage(10, undefined, bordador, 5, {
           data: Buffer.from('<html></html>').toString('base64'),
           filename: 'x.png',
           mimeType: 'image/png',
@@ -367,8 +373,8 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('sin foto, la ronda se abre igual', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
-      await service.sendToTest(10, undefined, bordador, 5);
+      taskAt('digitalizado');
+      await service.advanceStage(10, undefined, bordador, 5);
       expect(
         prisma.areaTaskSampleTest.create.mock.calls[0][0].data,
       ).not.toHaveProperty('photoName');
@@ -413,12 +419,12 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('tras un rechazo, la siguiente prueba es la ronda 2', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+      taskAt('digitalizado');
       prisma.areaTaskSampleTest.aggregate.mockResolvedValue({
         _max: { round: 1 },
       });
 
-      await service.sendToTest(10, undefined, bordador);
+      await service.advanceStage(10, undefined, bordador);
 
       expect(prisma.areaTaskSampleTest.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ round: 2, sentNotes: null }),
@@ -426,29 +432,29 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('no se puede mandar a pruebas si ya está en pruebas o ya la pasó', async () => {
-      taskAt(EmbroideryPrepStage.en_pruebas);
-      await expect(service.sendToTest(10, undefined, bordador)).rejects.toThrow(
-        BadRequestException,
-      );
+      taskAt('en_pruebas');
+      await expect(
+        service.advanceStage(10, undefined, bordador),
+      ).rejects.toThrow(BadRequestException);
       taskAt(null);
-      await expect(service.sendToTest(10, undefined, bordador)).rejects.toThrow(
-        /ya pasó/,
-      );
+      await expect(
+        service.advanceStage(10, undefined, bordador),
+      ).rejects.toThrow(/no tiene etapas pendientes/);
     });
 
     it('si dos clics compiten, sólo el primero abre la ronda', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+      taskAt('digitalizado');
       prisma.orderAreaTask.updateMany.mockResolvedValue({ count: 0 });
-      await expect(service.sendToTest(10, undefined, bordador)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.advanceStage(10, undefined, bordador),
+      ).rejects.toThrow(BadRequestException);
       expect(prisma.areaTaskSampleTest.create).not.toHaveBeenCalled();
     });
 
     it('aprobar la prueba libera la tarea para producción y deja registro', async () => {
-      taskAt(EmbroideryPrepStage.en_pruebas);
+      taskAt('en_pruebas');
 
-      await service.decideTest(
+      await service.decideStage(
         10,
         SampleTestResult.aprobada,
         'se ve bien',
@@ -457,8 +463,8 @@ describe('OrderAreaTaskService', () => {
       );
 
       expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
-        where: { id: 10, prepStage: EmbroideryPrepStage.en_pruebas },
-        data: { prepStage: null },
+        where: { id: 10, stageId: STAGE.en_pruebas.id },
+        data: { stageId: null },
       });
       expect(prisma.areaTaskSampleTest.update).toHaveBeenCalledWith({
         where: { id: 77 },
@@ -474,9 +480,9 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('rechazar regresa la tarea a digitalizado', async () => {
-      taskAt(EmbroideryPrepStage.en_pruebas);
+      taskAt('en_pruebas');
 
-      await service.decideTest(
+      await service.decideStage(
         10,
         SampleTestResult.rechazada,
         'hilo muy tenso',
@@ -484,8 +490,8 @@ describe('OrderAreaTaskService', () => {
       );
 
       expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
-        where: { id: 10, prepStage: EmbroideryPrepStage.en_pruebas },
-        data: { prepStage: EmbroideryPrepStage.digitalizado },
+        where: { id: 10, stageId: STAGE.en_pruebas.id },
+        data: { stageId: STAGE.digitalizado.id },
       });
       expect(auditLog.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'embroidery_test_rejected' }),
@@ -493,10 +499,10 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('rechazar avisa a Bordado (menos a quien rechazó) con las observaciones', async () => {
-      taskAt(EmbroideryPrepStage.en_pruebas);
+      taskAt('en_pruebas');
       notificationService.userIdsForArea.mockResolvedValue([3, 8]);
 
-      await service.decideTest(
+      await service.decideStage(
         10,
         SampleTestResult.rechazada,
         'hilo muy tenso',
@@ -521,14 +527,14 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('aprobar avisa a Bordado y a la recepcionista que atiende el pedido', async () => {
-      taskAt(EmbroideryPrepStage.en_pruebas);
+      taskAt('en_pruebas');
       notificationService.userIdsForArea.mockResolvedValue([8]);
       prisma.order.findUnique.mockResolvedValue({
         attendedByUserId: 21,
         userId: 20,
       });
 
-      await service.decideTest(
+      await service.decideStage(
         10,
         SampleTestResult.aprobada,
         undefined,
@@ -551,50 +557,209 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('si falla el aviso, el resultado igual queda registrado', async () => {
-      taskAt(EmbroideryPrepStage.en_pruebas);
+      taskAt('en_pruebas');
       notificationService.userIdsForArea.mockRejectedValue(new Error('x'));
 
       await expect(
-        service.decideTest(10, SampleTestResult.aprobada, undefined, bordador),
+        service.decideStage(10, SampleTestResult.aprobada, undefined, bordador),
       ).resolves.toBeDefined();
       expect(prisma.areaTaskSampleTest.update).toHaveBeenCalled();
     });
 
     it('rechazar exige observaciones', async () => {
-      taskAt(EmbroideryPrepStage.en_pruebas);
+      taskAt('en_pruebas');
       await expect(
-        service.decideTest(10, SampleTestResult.rechazada, '  ', bordador),
+        service.decideStage(10, SampleTestResult.rechazada, '  ', bordador),
       ).rejects.toThrow(/corregir/);
       expect(prisma.orderAreaTask.updateMany).not.toHaveBeenCalled();
     });
 
-    it('sólo se registra el resultado si la tarea está en pruebas', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
+    it('sólo se registra el resultado si la tarea está en una revisión', async () => {
+      taskAt('digitalizado');
       await expect(
-        service.decideTest(10, SampleTestResult.aprobada, undefined, bordador),
-      ).rejects.toThrow(/no está en pruebas/);
+        service.decideStage(10, SampleTestResult.aprobada, undefined, bordador),
+      ).rejects.toThrow(/no está en una revisión/);
     });
 
     it('otra área no puede mover las pruebas de Bordado', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado);
-      await expect(service.sendToTest(10, undefined, dtfUser)).rejects.toThrow(
-        HttpException,
+      taskAt('digitalizado');
+      await expect(
+        service.advanceStage(10, undefined, dtfUser),
+      ).rejects.toThrow(HttpException);
+    });
+
+    it('una tarea sin etapas (área sin etapas) no tiene nada que avanzar', async () => {
+      taskAt(null, { area: 'dtf' });
+      await expect(
+        service.advanceStage(10, undefined, {
+          userId: 1,
+          roles: ['recepcion'],
+          areas: [],
+        }),
+      ).rejects.toThrow(/no tiene etapas pendientes/);
+    });
+  });
+
+  describe('etapas configurables de un área nueva', () => {
+    const SLICING = { id: 901, key: 'slicing', name: 'Slicing', kind: 'work' };
+    const PRUEBA = {
+      id: 902,
+      key: 'prueba-de-impresion',
+      name: 'Prueba de impresión',
+      kind: 'review',
+    };
+    const POST = {
+      id: 903,
+      key: 'post-proceso',
+      name: 'Post-proceso',
+      kind: 'work',
+    };
+    const operador = { userId: 3, roles: [], areas: ['impresion-3d'] };
+
+    beforeEach(() => {
+      const areas = defaultAreaViews();
+      areas.push({
+        ...areas[0],
+        id: 9,
+        slug: 'impresion-3d',
+        name: 'Impresión 3D',
+        stages: [SLICING, PRUEBA, POST],
+      } as (typeof areas)[number]);
+      service = new OrderAreaTaskService(
+        prisma as unknown as PrismaService,
+        notificationService as unknown as NotificationService,
+        gateway as unknown as NotificationsGateway,
+        auditLog as unknown as AuditLogService,
+        undefined,
+        AreaService.inMemory(areas),
+      );
+      prisma.orderAreaTask.updateMany.mockResolvedValue({ count: 1 });
+      prisma.orderAreaTask.findUniqueOrThrow.mockResolvedValue({
+        id: 10,
+        sampleTests: [{ round: 1 }],
+      });
+      prisma.areaTaskSampleTest.aggregate.mockResolvedValue({
+        _max: { round: null },
+      });
+      prisma.areaTaskSampleTest.findFirst.mockResolvedValue({
+        id: 77,
+        round: 1,
+      });
+    });
+
+    const taskIn = (stage: typeof SLICING | null) =>
+      prisma.orderAreaTask.findUnique.mockResolvedValue({
+        id: 10,
+        orderId: 5,
+        area: 'impresion-3d',
+        status: AreaTaskStatus.pendiente,
+        stage,
+        assignedUserId: null,
+      });
+
+    it('una tarea nueva nace en la primera etapa del área', async () => {
+      await service.createTasksForAreas(1, ['impresion-3d']);
+      expect(prisma.orderAreaTask.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ stageId: SLICING.id }),
+        }),
       );
     });
 
-    it('las pruebas sólo existen en Bordado', async () => {
-      taskAt(EmbroideryPrepStage.digitalizado, { area: 'dtf' });
-      await expect(
-        service.sendToTest(10, undefined, {
-          userId: 1,
-          roles: ['recepcion'],
+    it('de una etapa de trabajo a una revisión abre la ronda y avisa a Recepción', async () => {
+      taskIn(SLICING);
+      prisma.order.findUnique.mockResolvedValue({
+        attendedByUserId: 8,
+        userId: 8,
+        status: { name: 'Autorizado' },
+      });
+
+      await service.advanceStage(10, 'gcode listo', operador, 5);
+
+      expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, stageId: SLICING.id },
+        data: { stageId: PRUEBA.id },
+      });
+      expect(prisma.areaTaskSampleTest.create).toHaveBeenCalled();
+      expect(notificationService.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 8,
+          type: 'embroidery_test_sent',
+          title: 'Prueba de impresión por revisar',
         }),
-      ).rejects.toThrow(/Sólo Bordado/);
+      );
+    });
+
+    it('aprobar la revisión lleva a la etapa que sigue, no a producción', async () => {
+      taskIn(PRUEBA);
+      await service.decideStage(
+        10,
+        SampleTestResult.aprobada,
+        undefined,
+        operador,
+      );
+      expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, stageId: PRUEBA.id },
+        data: { stageId: POST.id },
+      });
+    });
+
+    it('rechazar la revisión regresa a la etapa anterior', async () => {
+      taskIn(PRUEBA);
+      await service.decideStage(
+        10,
+        SampleTestResult.rechazada,
+        'se despega la base',
+        operador,
+      );
+      expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, stageId: PRUEBA.id },
+        data: { stageId: SLICING.id },
+      });
+    });
+
+    it('al agotar las etapas la tarea queda lista para producir', async () => {
+      taskIn(POST);
+      await service.advanceStage(10, undefined, operador);
+      expect(prisma.orderAreaTask.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, stageId: POST.id },
+        data: { stageId: null },
+      });
+      expect(prisma.areaTaskSampleTest.create).not.toHaveBeenCalled();
+      expect(auditLog.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'area_stage_advanced' }),
+      );
+    });
+
+    it('no se puede avanzar a mano desde una revisión', async () => {
+      taskIn(PRUEBA);
+      await expect(
+        service.advanceStage(10, undefined, operador),
+      ).rejects.toThrow(/aprueba o se rechaza/);
+    });
+
+    it('la foto sólo se adjunta al mandar a una revisión', async () => {
+      taskIn(POST);
+      await expect(
+        service.advanceStage(10, undefined, operador, 5, {
+          filename: 'p.png',
+          mimeType: 'image/png',
+          data: MINIMAL_PNG_BASE64,
+        }),
+      ).rejects.toThrow(/sólo se adjunta/);
+      expect(prisma.orderAreaTask.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('no deja empezar mientras sigue en una etapa del área', async () => {
+      taskIn(POST);
+      await expect(
+        service.updateStatus(10, AreaTaskStatus.en_proceso, operador),
+      ).rejects.toThrow(/Post-proceso/);
     });
   });
 
   describe('updateStatus', () => {
-    const manager = { userId: 1, roles: ['recepcion'] };
+    const manager = { userId: 1, roles: ['recepcion'], areas: [] };
 
     beforeEach(() => {
       // La tarea ya está en curso: el ciclo sólo avanza de a un paso, así que
@@ -664,7 +829,8 @@ describe('OrderAreaTaskService', () => {
       await expect(
         service.updateStatus(10, AreaTaskStatus.terminado, {
           userId: 2,
-          roles: ['dtf'],
+          roles: [],
+          areas: ['dtf'],
         }),
       ).rejects.toThrow(HttpException);
     });
@@ -673,7 +839,8 @@ describe('OrderAreaTaskService', () => {
       await expect(
         service.updateStatus(10, AreaTaskStatus.terminado, {
           userId: 2,
-          roles: ['bordado'],
+          roles: [],
+          areas: ['bordado'],
         }),
       ).resolves.toBeDefined();
     });
@@ -720,7 +887,7 @@ describe('OrderAreaTaskService', () => {
     });
 
     describe('tomar la tarea al empezarla (WORKFLOW.md §3)', () => {
-      const worker = { userId: 33, roles: ['bordado'] };
+      const worker = { userId: 33, roles: [], areas: ['bordado'] };
       const pendingTask = (assignedUserId: number | null) =>
         prisma.orderAreaTask.findUnique.mockResolvedValue({
           id: 10,
@@ -857,6 +1024,7 @@ describe('OrderAreaTaskService', () => {
         await service.updateStatus(10, AreaTaskStatus.en_proceso, {
           userId: 2,
           roles: ['admin'],
+          areas: [],
         });
 
         const data = prisma.orderAreaTask.update.mock.calls.at(-1)?.[0]
@@ -869,7 +1037,8 @@ describe('OrderAreaTaskService', () => {
 
         await service.updateStatus(10, AreaTaskStatus.en_proceso, {
           userId: 8,
-          roles: ['admin', 'bordado'],
+          roles: ['admin'],
+          areas: ['bordado'],
         });
 
         expect(prisma.orderAreaTask.update).toHaveBeenCalledWith(
@@ -939,6 +1108,7 @@ describe('OrderAreaTaskService', () => {
         await service.updateStatus(10, AreaTaskStatus.terminado, {
           userId: 77,
           roles: ['recepcion'],
+          areas: [],
         });
 
         expect(notificationService.createNotification).not.toHaveBeenCalled();
@@ -998,7 +1168,11 @@ describe('OrderAreaTaskService', () => {
 
   describe('findForUser', () => {
     it('un empleado ve sólo las tareas de sus propias áreas', async () => {
-      await service.findForUser({ userId: 3, roles: ['bordado', 'laser'] });
+      await service.findForUser({
+        userId: 3,
+        roles: [],
+        areas: ['bordado', 'laser'],
+      });
 
       expect(prisma.orderAreaTask.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1010,7 +1184,7 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('Recepción ve las tareas de todas las áreas', async () => {
-      await service.findForUser({ userId: 1, roles: ['recepcion'] });
+      await service.findForUser({ userId: 1, roles: ['recepcion'], areas: [] });
 
       const args = prisma.orderAreaTask.findMany.mock.calls.at(-1)?.[0] as {
         where: Record<string, unknown>;
@@ -1019,7 +1193,7 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('deja fuera pedidos cerrados y los que siguen en Diseño', async () => {
-      await service.findForUser({ userId: 3, roles: ['dtf'] });
+      await service.findForUser({ userId: 3, roles: [], areas: ['dtf'] });
 
       expect(prisma.orderAreaTask.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1035,7 +1209,7 @@ describe('OrderAreaTaskService', () => {
 
     it('sólo trae terminadas de las últimas 24 h', async () => {
       const before = Date.now();
-      await service.findForUser({ userId: 3, roles: ['dtf'] });
+      await service.findForUser({ userId: 3, roles: [], areas: ['dtf'] });
 
       const args = prisma.orderAreaTask.findMany.mock.calls.at(-1)?.[0] as {
         where: { OR: [unknown, { completedAt: { gte: Date } }] };
@@ -1051,7 +1225,8 @@ describe('OrderAreaTaskService', () => {
     it('sin áreas de producción ni gestión, no hay bandeja', async () => {
       const result = await service.findForUser({
         userId: 4,
-        roles: ['diseno'],
+        roles: [],
+        areas: ['diseno'],
       });
 
       expect(result).toEqual([]);
@@ -1059,7 +1234,7 @@ describe('OrderAreaTaskService', () => {
   });
 
   describe('remove', () => {
-    const manager = { userId: 1, roles: ['recepcion'] };
+    const manager = { userId: 1, roles: ['recepcion'], areas: [] };
 
     beforeEach(() => {
       prisma.orderAreaTask.findUnique.mockResolvedValue({ orderId: 5 });
@@ -1093,7 +1268,7 @@ describe('OrderAreaTaskService', () => {
 
     it('sólo Recepción/admin pueden quitar un área', async () => {
       await expect(
-        service.remove(10, { userId: 3, roles: ['bordado'] }),
+        service.remove(10, { userId: 3, roles: [], areas: ['bordado'] }),
       ).rejects.toThrow(HttpException);
     });
   });
@@ -1105,27 +1280,31 @@ describe('OrderAreaTaskService', () => {
         area: 'bordado',
       });
       prisma.user.findUnique.mockResolvedValue({
-        roles: [{ name: 'bordado' }],
+        roles: [],
+        areas: [{ slug: 'bordado' }],
       });
     });
 
     it('deja que alguien del área se tome la tarea', async () => {
       await expect(
-        service.assign(10, 3, { userId: 3, roles: ['bordado'] }),
+        service.assign(10, 3, { userId: 3, roles: [], areas: ['bordado'] }),
       ).resolves.toBeDefined();
     });
 
     it('impide asignarle la tarea a otra persona sin ser Recepción', async () => {
       await expect(
-        service.assign(10, 99, { userId: 3, roles: ['bordado'] }),
+        service.assign(10, 99, { userId: 3, roles: [], areas: ['bordado'] }),
       ).rejects.toThrow(HttpException);
     });
 
     it('rechaza a un usuario que no pertenece al área', async () => {
-      prisma.user.findUnique.mockResolvedValue({ roles: [{ name: 'dtf' }] });
+      prisma.user.findUnique.mockResolvedValue({
+        roles: [],
+        areas: [{ slug: 'dtf' }],
+      });
 
       await expect(
-        service.assign(10, 99, { userId: 1, roles: ['recepcion'] }),
+        service.assign(10, 99, { userId: 1, roles: ['recepcion'], areas: [] }),
       ).rejects.toThrow(HttpException);
     });
   });
@@ -1177,7 +1356,8 @@ describe('OrderAreaTaskService', () => {
 
       const items = await service.findMyTasks({
         userId: ME,
-        roles: ['taller'],
+        roles: [],
+        areas: ['taller'],
       });
 
       expect(items.map((i) => [i.taskId, i.mine])).toEqual([
@@ -1200,7 +1380,8 @@ describe('OrderAreaTaskService', () => {
 
       const items = await service.findMyTasks({
         userId: ME,
-        roles: ['diseno', 'dtf'],
+        roles: [],
+        areas: ['diseno', 'dtf'],
       });
 
       expect(items.map((i) => i.key)).toEqual(['design-50', 'task-5']);
@@ -1219,7 +1400,8 @@ describe('OrderAreaTaskService', () => {
 
       const items = await service.findMyTasks({
         userId: SHARED_TALLER,
-        roles: ['taller'],
+        roles: [],
+        areas: ['taller'],
       });
 
       expect(items).toHaveLength(1);
@@ -1230,7 +1412,7 @@ describe('OrderAreaTaskService', () => {
       prisma.orderAreaTask.findMany.mockResolvedValue([
         {
           ...task(7, 'bordado', ME),
-          prepStage: EmbroideryPrepStage.digitalizado,
+          stage: STAGE.digitalizado,
           sampleTests: [
             {
               round: 2,
@@ -1244,11 +1426,12 @@ describe('OrderAreaTaskService', () => {
 
       const items = await service.findMyTasks({
         userId: ME,
-        roles: ['bordado'],
+        roles: [],
+        areas: ['bordado'],
       });
 
       expect(items[0]).toMatchObject({
-        prepStage: EmbroideryPrepStage.digitalizado,
+        stage: STAGE.digitalizado,
         lastTest: { round: 2, resultNotes: 'El hilo se frunce' },
       });
       const select = prisma.orderAreaTask.findMany.mock.calls[0][0].select;
@@ -1262,6 +1445,7 @@ describe('OrderAreaTaskService', () => {
       const items = await service.findMyTasks({
         userId: ME,
         roles: ['recepcion'],
+        areas: [],
       });
       expect(items).toEqual([]);
       expect(prisma.orderAreaTask.findMany).not.toHaveBeenCalled();
@@ -1269,7 +1453,7 @@ describe('OrderAreaTaskService', () => {
   });
 
   describe('la tarea debe ser del pedido de la URL', () => {
-    const manager = { userId: 1, roles: ['recepcion'] };
+    const manager = { userId: 1, roles: ['recepcion'], areas: [] };
     const statusOf = async (fn: () => Promise<unknown>) => {
       try {
         await fn();
@@ -1312,6 +1496,133 @@ describe('OrderAreaTaskService', () => {
 
     it('con el pedido correcto sí escribe', async () => {
       await service.assign(10, null, manager, 5);
+      expect(prisma.orderAreaTask.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('máquina y datos propios del área', () => {
+    const operador = { userId: 3, roles: [], areas: ['impresion-3d'] };
+    const otro = { userId: 4, roles: [], areas: ['dtf'] };
+    const MATERIAL = {
+      id: 7,
+      key: 'material',
+      label: 'Material',
+      type: 'select' as const,
+      required: true,
+      options: ['PLA', 'ABS'],
+      unit: null,
+    };
+    const NOTAS = {
+      id: 8,
+      key: 'notas',
+      label: 'Notas',
+      type: 'text' as const,
+      required: false,
+      options: [],
+      unit: null,
+    };
+
+    beforeEach(() => {
+      const areas = defaultAreaViews();
+      areas.push({
+        ...areas[0],
+        id: 9,
+        slug: 'impresion-3d',
+        name: 'Impresión 3D',
+        machines: [
+          { id: 31, name: 'Impresora 1' },
+          { id: 32, name: 'Impresora 2' },
+        ],
+        fields: [MATERIAL, NOTAS],
+      } as (typeof areas)[number]);
+      service = new OrderAreaTaskService(
+        prisma as unknown as PrismaService,
+        notificationService as unknown as NotificationService,
+        gateway as unknown as NotificationsGateway,
+        auditLog as unknown as AuditLogService,
+        undefined,
+        AreaService.inMemory(areas),
+      );
+      prisma.orderAreaTask.findUnique.mockResolvedValue({
+        id: 10,
+        orderId: 5,
+        area: 'impresion-3d',
+        status: AreaTaskStatus.pendiente,
+        stage: null,
+        fieldValues: null,
+        assignedUserId: null,
+      });
+      prisma.orderAreaTask.findUniqueOrThrow.mockResolvedValue({
+        fieldValues: { notas: 'viejo' },
+      });
+    });
+
+    it('asigna una máquina del área', async () => {
+      await service.setMachine(10, 31, operador, 5);
+      expect(prisma.orderAreaTask.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 10 }, data: { machineId: 31 } }),
+      );
+    });
+
+    it('rechaza una máquina de otra área y deja quitarla con null', async () => {
+      await expect(service.setMachine(10, 99, operador, 5)).rejects.toThrow(
+        /no pertenece al área/,
+      );
+      await service.setMachine(10, null, operador, 5);
+      expect(prisma.orderAreaTask.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ data: { machineId: null } }),
+      );
+    });
+
+    it('otra área no puede tocar la máquina ni los datos', async () => {
+      await expect(service.setMachine(10, 31, otro, 5)).rejects.toThrow(
+        HttpException,
+      );
+      await expect(
+        service.setFieldValues(10, { notas: 'x' }, otro, 5),
+      ).rejects.toThrow(HttpException);
+    });
+
+    it('mezcla los datos nuevos con los guardados y borra los vacíos', async () => {
+      await service.setFieldValues(
+        10,
+        { material: 'PLA', notas: null },
+        operador,
+        5,
+      );
+      expect(prisma.orderAreaTask.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { fieldValues: { material: 'PLA' } } }),
+      );
+    });
+
+    it('valida contra los datos del área', async () => {
+      await expect(
+        service.setFieldValues(10, { material: 'PETG' }, operador, 5),
+      ).rejects.toThrow(/debe ser una de/);
+      await expect(
+        service.setFieldValues(10, { color: 'rojo' }, operador, 5),
+      ).rejects.toThrow(/no existe/);
+      expect(prisma.orderAreaTask.update).not.toHaveBeenCalled();
+    });
+
+    it('no deja empezar sin los datos obligatorios', async () => {
+      await expect(
+        service.updateStatus(10, AreaTaskStatus.en_proceso, operador),
+      ).rejects.toThrow(/Falta capturar "Material" para empezar/);
+      expect(prisma.orderAreaTask.update).not.toHaveBeenCalled();
+    });
+
+    it('con los obligatorios capturados sí empieza', async () => {
+      prisma.orderAreaTask.findUnique.mockResolvedValue({
+        id: 10,
+        orderId: 5,
+        area: 'impresion-3d',
+        status: AreaTaskStatus.pendiente,
+        stage: null,
+        fieldValues: { material: 'ABS' },
+        assignedUserId: null,
+      });
+      await service.updateStatus(10, AreaTaskStatus.en_proceso, operador);
       expect(prisma.orderAreaTask.update).toHaveBeenCalled();
     });
   });

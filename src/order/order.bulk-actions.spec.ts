@@ -18,6 +18,7 @@ describe('OrderService.bulkUpdateStatusOrArea', () => {
   const requestingUser: RequestingUser = {
     userId: 1,
     roles: ['admin'],
+    areas: [],
     username: 'admin',
   };
 

@@ -97,6 +97,13 @@ describe('MaterialService', () => {
     );
   });
 
+  it('rechaza un área que no está en el catálogo', async () => {
+    await expect(
+      service.create({ name: 'Tornillería', areas: ['taller', 'cocina'] }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(prisma.material.create).not.toHaveBeenCalled();
+  });
+
   it('lanza 400 al borrar un material referenciado por una hoja de materiales', async () => {
     prisma.material.findUnique.mockResolvedValue({ id: 1 });
     prisma.material.delete.mockRejectedValue({ code: 'P2003' });

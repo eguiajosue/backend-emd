@@ -92,3 +92,73 @@ describe('Coordinación: tiempos', () => {
     });
   });
 });
+
+describe('Coordinación: capacidad y máquinas', () => {
+  const t = (o: Partial<LoadTask>): LoadTask => ({
+    area: 'bordado',
+    status: 'pendiente',
+    assignedUserId: null,
+    assigneeName: null,
+    sharedAccount: false,
+    deliveryDate: null,
+    ...o,
+  });
+
+  it('capacidad, horas en cola y carga por máquina', () => {
+    const settings = new Map([
+      [
+        'bordado',
+        {
+          capacity: 3,
+          turnaroundHours: 2,
+          machines: [
+            { id: 1, name: 'Máquina 1' },
+            { id: 2, name: 'Máquina 2' },
+          ],
+        },
+      ],
+    ]);
+    const [bordado, dtf] = loadByArea(
+      [
+        t({ machineId: 1 }),
+        t({ status: 'en_proceso', machineId: 1 }),
+        t({ status: 'en_proceso' }),
+        t({ status: 'pendiente' }),
+        t({ status: 'terminado', machineId: 2 }),
+      ],
+      NOW,
+      ['bordado', 'dtf'],
+      settings,
+    );
+    expect(bordado).toMatchObject({
+      capacity: 3,
+      loadPct: 133,
+      overloaded: true,
+      queueHours: 8,
+      machines: [
+        { id: 1, name: 'Máquina 1', tasks: 2 },
+        { id: 2, name: 'Máquina 2', tasks: 0 },
+      ],
+    });
+    // Sin configuración: sin tope, sin horas y sin máquinas.
+    expect(dtf).toMatchObject({
+      capacity: null,
+      loadPct: null,
+      overloaded: false,
+      queueHours: null,
+      machines: [],
+    });
+  });
+
+  it('al llegar justo a la capacidad todavía no está sobrecargada', () => {
+    const [laser] = loadByArea(
+      [t({ area: 'laser' }), t({ area: 'laser' })],
+      NOW,
+      ['laser'],
+      new Map([
+        ['laser', { capacity: 2, turnaroundHours: null, machines: [] }],
+      ]),
+    );
+    expect(laser).toMatchObject({ loadPct: 100, overloaded: false });
+  });
+});

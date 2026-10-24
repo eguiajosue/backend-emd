@@ -1,6 +1,7 @@
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { OrderController } from './order.controller';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AreaTaskStatus, Prisma } from '@prisma/client';
@@ -685,7 +686,7 @@ describe('Hoja de materiales por área (origen de insumos)', () => {
       await service.updateStatus(
         70,
         AreaTaskStatus.terminado,
-        { userId: 33, roles: ['bordado'] },
+        { userId: 33, roles: [], areas: ['bordado'] },
         5,
       );
 
@@ -706,7 +707,7 @@ describe('Hoja de materiales por área (origen de insumos)', () => {
       await service.updateStatus(
         70,
         AreaTaskStatus.terminado,
-        { userId: 33, roles: ['bordado'] },
+        { userId: 33, roles: [], areas: ['bordado'] },
         5,
       );
 
@@ -740,7 +741,7 @@ describe('Hoja de materiales por área (origen de insumos)', () => {
       await service.updateStatus(
         70,
         AreaTaskStatus.terminado,
-        { userId: 33, roles: ['bordado'] },
+        { userId: 33, roles: [], areas: ['bordado'] },
         5,
       );
 
@@ -764,7 +765,7 @@ describe('Hoja de materiales por área (origen de insumos)', () => {
         service.updateStatus(
           70,
           AreaTaskStatus.terminado,
-          { userId: 33, roles: ['bordado'] },
+          { userId: 33, roles: [], areas: ['bordado'] },
           5,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -791,12 +792,17 @@ describe('Hoja de materiales por área (origen de insumos)', () => {
       await service.discountPending(5, 'bordado', {
         userId: 1,
         roles: ['recepcion'],
+        areas: [],
       });
       expect(state.items.get(1)!.quantity).toBe(8);
 
       prisma.orderAreaTask.findFirst.mockResolvedValue(null);
       await expect(
-        service.discountPending(5, 'dtf', { userId: 1, roles: ['recepcion'] }),
+        service.discountPending(5, 'dtf', {
+          userId: 1,
+          roles: ['recepcion'],
+          areas: [],
+        }),
       ).rejects.toMatchObject({ status: 404 });
     });
 
@@ -813,7 +819,7 @@ describe('Hoja de materiales por área (origen de insumos)', () => {
         service.updateStatus(
           70,
           AreaTaskStatus.terminado,
-          { userId: 40, roles: ['dtf'] },
+          { userId: 40, roles: [], areas: ['dtf'] },
           5,
         ),
       ).rejects.toBeDefined();
@@ -846,7 +852,7 @@ describe('OrderController: roles de la hoja de materiales por área', () => {
 
   it('la consultan todos los que abren el pedido (Producción incluida)', () => {
     expect(rolesFor('getAreaSupplies')).toEqual(
-      expect.arrayContaining([Role.RECEPCION, Role.BORDADO, Role.DTF]),
+      expect.arrayContaining([Role.RECEPCION, AreaAccess.ANY]),
     );
   });
 });

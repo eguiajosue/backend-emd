@@ -1,53 +1,49 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { OPERATIONAL_ROLES } from 'src/order/role-stage-mapping';
+import { AreaService, type AreaView } from 'src/area/area.service';
 
+/** Forma histórica de `/area-visibility` (una fila por área). */
+export interface AreaVisibilityView {
+  id: number;
+  role: string;
+  generalViewEnabled: boolean;
+}
+
+function toView(area: AreaView): AreaVisibilityView {
+  return {
+    id: area.id,
+    role: area.slug,
+    generalViewEnabled: area.generalViewEnabled,
+  };
+}
+
+/**
+ * Visibilidad general de cada área. Vive en `Area.generalViewEnabled`; este
+ * servicio conserva la forma de respuesta de siempre (`role` = slug del área)
+ * para los clientes que todavía la consumen.
+ */
 @Injectable()
 export class AreaVisibilityService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly areaService: AreaService) {}
 
-  /**
-   * Devuelve la configuración de visibilidad de los 6 roles operativos,
-   * creando (con default generalViewEnabled=true) la de cualquiera que
-   * todavía no exista en la tabla.
-   */
-  async findAll() {
-    const existing = await this.prisma.areaVisibilitySetting.findMany();
-    const existingRoles = new Set(existing.map((s) => s.role));
-
-    const missing = OPERATIONAL_ROLES.filter((r) => !existingRoles.has(r));
-    if (missing.length > 0) {
-      await Promise.all(
-        missing.map((role) =>
-          this.prisma.areaVisibilitySetting.upsert({
-            where: { role },
-            update: {},
-            create: { role, generalViewEnabled: true },
-          }),
-        ),
-      );
-      return this.prisma.areaVisibilitySetting.findMany({
-        where: { role: { in: OPERATIONAL_ROLES } },
-      });
-    }
-
-    return existing;
+  async findAll(): Promise<AreaVisibilityView[]> {
+    return (await this.areaService.findAll()).map(toView);
   }
 
-  async update(role: string, generalViewEnabled: boolean) {
-    if (
-      !OPERATIONAL_ROLES.includes(role as (typeof OPERATIONAL_ROLES)[number])
-    ) {
+  async update(
+    role: string,
+    generalViewEnabled: boolean,
+  ): Promise<AreaVisibilityView> {
+    const area = await this.areaService.setGeneralView(
+      role,
+      generalViewEnabled,
+    );
+    if (!area) {
+      const valid = await this.areaService.slugs();
       throw new HttpException(
-        `Rol inválido: "${role}". Debe ser uno de: ${OPERATIONAL_ROLES.join(', ')}`,
+        `Área inválida: "${role}". Debe ser una de: ${valid.join(', ')}`,
         HttpStatus.BAD_REQUEST,
       );
     }
-
-    return this.prisma.areaVisibilitySetting.upsert({
-      where: { role },
-      update: { generalViewEnabled },
-      create: { role, generalViewEnabled },
-    });
+    return toView(area);
   }
 }

@@ -18,6 +18,7 @@ describe('AuthService', () => {
     firstName: 'Admin',
     lastName: 'User',
     roles: [{ id: 1, name: 'admin' }],
+    areas: [] as { slug: string }[],
   };
 
   beforeAll(async () => {
@@ -59,6 +60,7 @@ describe('AuthService', () => {
         username: mockUser.username,
         sub: mockUser.id,
         roles: ['admin'],
+        areas: [],
       });
       // El segundo token firmado es el refresh (marcado con type: 'refresh').
       expect(jwtService.signAsync).toHaveBeenNthCalledWith(
@@ -67,6 +69,7 @@ describe('AuthService', () => {
           username: mockUser.username,
           sub: mockUser.id,
           roles: ['admin'],
+          areas: [],
           type: 'refresh',
         },
         expect.objectContaining({ expiresIn: '7d' }),
@@ -81,6 +84,7 @@ describe('AuthService', () => {
         first_name: mockUser.firstName,
         last_name: mockUser.lastName,
         roles: ['admin'],
+        areas: [],
       });
     });
 
@@ -103,6 +107,27 @@ describe('AuthService', () => {
       ).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
       expect(jwtService.signAsync).not.toHaveBeenCalled();
     });
+
+    it('firma las áreas del usuario aparte de sus roles', async () => {
+      userService.findOneByUsername.mockResolvedValue({
+        ...mockUser,
+        roles: [],
+        areas: [{ slug: 'diseno' }, { slug: 'bordado' }],
+      } as any);
+
+      const result = await authService.login({
+        username: 'admin',
+        password: 'correct-password',
+      });
+
+      expect(jwtService.signAsync).toHaveBeenNthCalledWith(1, {
+        username: mockUser.username,
+        sub: mockUser.id,
+        roles: [],
+        areas: ['diseno', 'bordado'],
+      });
+      expect(result).toMatchObject({ roles: [], areas: ['diseno', 'bordado'] });
+    });
   });
 
   describe('refresh', () => {
@@ -111,6 +136,7 @@ describe('AuthService', () => {
         username: 'admin',
         sub: 1,
         roles: ['admin'],
+        areas: [],
         type: 'refresh',
       });
       userService.findOneByUsername.mockResolvedValue(mockUser as any);
@@ -127,6 +153,7 @@ describe('AuthService', () => {
         first_name: mockUser.firstName,
         last_name: mockUser.lastName,
         roles: ['admin'],
+        areas: [],
       });
     });
 
@@ -135,6 +162,7 @@ describe('AuthService', () => {
         username: 'admin',
         sub: 1,
         roles: ['admin'],
+        areas: [],
       });
 
       await expect(

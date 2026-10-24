@@ -13,10 +13,10 @@ import { NotificationService } from '../notification/notification.service';
  * artículos, cada cambio deja bitácora y avisa a Recepción, y las
  * solicitudes de reabasto recorren pendiente → en camino/comprado → resuelto.
  */
-const recepcion = { sub: 1, roles: ['recepcion'] };
-const bordado = { sub: 20, roles: ['bordado'] };
-const dtf = { sub: 30, roles: ['dtf'] };
-const multi = { sub: 40, roles: ['taller', 'laser'] };
+const recepcion = { sub: 1, roles: ['recepcion'], areas: [] };
+const bordado = { sub: 20, roles: [], areas: ['bordado'] };
+const dtf = { sub: 30, roles: [], areas: ['dtf'] };
+const multi = { sub: 40, roles: [], areas: ['taller', 'laser'] };
 
 const itemRow = (overrides: Record<string, unknown> = {}) => ({
   id: 7,
@@ -139,7 +139,7 @@ describe('Inventario por área', () => {
       await expect(service.findAll(bordado, 'dtf')).rejects.toThrow(
         ForbiddenException,
       );
-      expect(service.areasFor(multi.roles)).toEqual(['taller', 'laser']);
+      expect(await service.areasFor(multi)).toEqual(['taller', 'laser']);
     });
 
     it('GET /inventory/:id de otra área da 403', async () => {

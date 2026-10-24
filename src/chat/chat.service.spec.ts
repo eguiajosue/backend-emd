@@ -109,13 +109,21 @@ describe('ChatService - autorización', () => {
 
   it('un usuario operativo NO puede leer el canal de otra área', async () => {
     await expect(
-      chatService.assertConversationAccess(2, { userId: 7, roles: ['taller'] }),
+      chatService.assertConversationAccess(2, {
+        userId: 7,
+        roles: [],
+        areas: ['taller'],
+      }),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it('un usuario operativo SÍ puede leer el canal de su propia área', async () => {
     await expect(
-      chatService.assertConversationAccess(1, { userId: 7, roles: ['taller'] }),
+      chatService.assertConversationAccess(1, {
+        userId: 7,
+        roles: [],
+        areas: ['taller'],
+      }),
     ).resolves.toMatchObject({ id: 1, area: 'taller' });
   });
 
@@ -124,6 +132,7 @@ describe('ChatService - autorización', () => {
       chatService.assertConversationAccess(2, {
         userId: 5,
         roles: ['recepcion'],
+        areas: [],
       }),
     ).resolves.toMatchObject({ id: 2 });
   });
@@ -133,24 +142,33 @@ describe('ChatService - autorización', () => {
       chatService.assertConversationAccess(3, {
         userId: 5,
         roles: ['recepcion'],
+        areas: [],
       }),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it('un no miembro es rechazado de un DM ajeno', async () => {
     await expect(
-      chatService.assertConversationAccess(3, { userId: 7, roles: ['taller'] }),
+      chatService.assertConversationAccess(3, {
+        userId: 7,
+        roles: [],
+        areas: ['taller'],
+      }),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it('un participante SÍ accede a su DM', async () => {
     await expect(
-      chatService.assertConversationAccess(3, { userId: 11, roles: ['dtf'] }),
+      chatService.assertConversationAccess(3, {
+        userId: 11,
+        roles: [],
+        areas: ['dtf'],
+      }),
     ).resolves.toMatchObject({ id: 3 });
   });
 
   it('el admin es miembro de TODO canal de área, pero NO de un DM ajeno', async () => {
-    const admin = { userId: 99, roles: ['admin'] };
+    const admin = { userId: 99, roles: ['admin'], areas: [] };
     await expect(
       chatService.assertConversationAccess(1, admin),
     ).resolves.toBeTruthy();
@@ -167,7 +185,11 @@ describe('ChatService - autorización', () => {
 
   it('el admin SÍ accede al DM en el que él mismo es participante', async () => {
     await expect(
-      chatService.assertConversationAccess(3, { userId: 10, roles: ['admin'] }),
+      chatService.assertConversationAccess(3, {
+        userId: 10,
+        roles: ['admin'],
+        areas: [],
+      }),
     ).resolves.toBeTruthy();
   });
 
@@ -176,12 +198,14 @@ describe('ChatService - autorización', () => {
       chatService.assertConversationAccess(1, {
         userId: 98,
         roles: ['superuser'],
+        areas: [],
       }),
     ).resolves.toBeTruthy();
     await expect(
       chatService.assertConversationAccess(3, {
         userId: 98,
         roles: ['superuser'],
+        areas: [],
       }),
     ).rejects.toMatchObject({ status: 403 });
   });
@@ -189,7 +213,8 @@ describe('ChatService - autorización', () => {
   it('un usuario de taller sólo ve su canal en la lista de conversaciones', async () => {
     const conversations = await chatService.findConversationsForUser({
       userId: 7,
-      roles: ['taller'],
+      roles: [],
+      areas: ['taller'],
     });
     expect(conversations.map((c) => c.id)).toEqual([1]);
   });
@@ -215,7 +240,11 @@ describe('ChatService - autorización', () => {
 
   it('enviar un mensaje a una conversación ajena no persiste ni emite nada', async () => {
     await expect(
-      chatService.sendMessage(3, 'hola', { userId: 7, roles: ['taller'] }),
+      chatService.sendMessage(3, 'hola', {
+        userId: 7,
+        roles: [],
+        areas: ['taller'],
+      }),
     ).rejects.toMatchObject({ status: 403 });
     expect(prisma.chatMessage.create).not.toHaveBeenCalled();
     expect(gateway.emitChatMessage).not.toHaveBeenCalled();
@@ -225,6 +254,7 @@ describe('ChatService - autorización', () => {
     await chatService.sendMessage(1, 'hola', {
       userId: 5,
       roles: ['recepcion'],
+      areas: [],
     });
     expect(prisma.chatMessage.create).toHaveBeenCalled();
     expect(gateway.emitChatMessage).toHaveBeenCalledWith(
@@ -237,6 +267,7 @@ describe('ChatService - autorización', () => {
     await chatService.sendMessage(1, 'hola', {
       userId: 5,
       roles: ['recepcion'],
+      areas: [],
     });
 
     expect(
@@ -251,7 +282,7 @@ describe('ChatService - autorización', () => {
 
   it('leer el historial de una conversación ajena es rechazado', async () => {
     await expect(
-      chatService.findMessages(2, { userId: 7, roles: ['taller'] }),
+      chatService.findMessages(2, { userId: 7, roles: [], areas: ['taller'] }),
     ).rejects.toMatchObject({ status: 403 });
     expect(prisma.chatMessage.findMany).not.toHaveBeenCalled();
   });
@@ -261,6 +292,7 @@ describe('ChatService - autorización', () => {
       chatService.assertConversationAccess(999, {
         userId: 99,
         roles: ['admin'],
+        areas: [],
       }),
     ).rejects.toMatchObject({ status: 404 });
   });
@@ -355,7 +387,11 @@ describe('ChatService - checks y presencia', () => {
     ]);
     gateway.isUserOnline.mockReturnValue(true);
 
-    const result = await chatService.findMembers(3, { userId: 11, roles: [] });
+    const result = await chatService.findMembers(3, {
+      userId: 11,
+      roles: [],
+      areas: [],
+    });
 
     expect(result[0]).toMatchObject({
       id: 10,
@@ -367,7 +403,11 @@ describe('ChatService - checks y presencia', () => {
   });
 
   it('markConversationAsRead emite chatRead a los demás miembros, no a quien marcó', async () => {
-    await chatService.markConversationAsRead(3, { userId: 10, roles: [] });
+    await chatService.markConversationAsRead(3, {
+      userId: 10,
+      roles: [],
+      areas: [],
+    });
 
     expect(gateway.emitChatRead).toHaveBeenCalledTimes(1);
     const [userIds, payload] = gateway.emitChatRead.mock.calls[0];
@@ -403,6 +443,7 @@ describe('ChatService - checks y presencia', () => {
     const conversations = await chatService.findConversationsForUser({
       userId: 10,
       roles: [],
+      areas: [],
     });
 
     expect(conversations[0].otherUser).toMatchObject({
@@ -448,6 +489,7 @@ describe('ChatService - checks y presencia', () => {
     const conversations = await chatService.findConversationsForUser({
       userId: 5,
       roles: ['recepcion'],
+      areas: [],
     });
 
     // Una sola llamada a cada uno, con `in: [ids visibles]` -- no N llamadas.
@@ -489,6 +531,7 @@ describe('ChatService - checks y presencia', () => {
     const conversations = await chatService.findConversationsForUser({
       userId: 10,
       roles: [],
+      areas: [],
     });
 
     expect(conversations[0].otherUser).toMatchObject({

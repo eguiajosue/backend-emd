@@ -83,6 +83,20 @@ describe('CalendarEventService', () => {
     );
   });
 
+  it('rechaza un área que no está en el catálogo', async () => {
+    await expect(
+      service.create(
+        {
+          title: 'Instalar anuncio',
+          eventDate: '2026-09-15T15:00:00.000Z',
+          area: 'cocina',
+        },
+        7,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(prisma.calendarEvent.create).not.toHaveBeenCalled();
+  });
+
   it('permite cambiar la categoría de un evento existente', async () => {
     prisma.calendarEvent.findUnique.mockResolvedValue({
       id: 1,

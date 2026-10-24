@@ -2,7 +2,6 @@ import {
   ArrayMaxSize,
   IsArray,
   IsEnum,
-  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -14,7 +13,8 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { SupplySource } from '@prisma/client';
-import { PRODUCTION_AREAS } from './create-order.dto';
+import { MAX_ORDER_AREAS } from './create-order.dto';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
 
 /** Cantidad máxima por línea de insumo / movimiento de inventario. */
@@ -49,8 +49,8 @@ export class AreaSupplyLineDto {
 
 /** Origen de los insumos de UNA tarea de área del pedido. */
 export class AreaSupplyDto {
-  @IsIn(PRODUCTION_AREAS)
-  area: (typeof PRODUCTION_AREAS)[number];
+  @IsAreaSlug()
+  area: string;
 
   @IsEnum(SupplySource)
   source: SupplySource;
@@ -65,7 +65,7 @@ export class AreaSupplyDto {
 /** Body de `PUT /orders/:id/area-supplies`. */
 export class SaveAreaSuppliesDto {
   @IsArray()
-  @ArrayMaxSize(PRODUCTION_AREAS.length)
+  @ArrayMaxSize(MAX_ORDER_AREAS)
   @ValidateNested({ each: true })
   @Type(() => AreaSupplyDto)
   supplies: AreaSupplyDto[];

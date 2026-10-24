@@ -4,8 +4,8 @@ import {
   ArrayNotEmpty,
   IsArray,
   IsEnum,
-  IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsPositive,
   IsString,
@@ -13,21 +13,36 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { PRODUCTION_AREAS, OrderFileDto } from './create-order.dto';
+import { MAX_ORDER_AREAS, OrderFileDto } from './create-order.dto';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 
 /** Áreas de producción que van a trabajar un pedido (WORKFLOW.md §3). */
 export class SetOrderAreasDto {
   @IsArray()
   @ArrayNotEmpty()
-  @ArrayMaxSize(PRODUCTION_AREAS.length)
-  @IsIn(PRODUCTION_AREAS, { each: true })
-  areas: (typeof PRODUCTION_AREAS)[number][];
+  @ArrayMaxSize(MAX_ORDER_AREAS)
+  @IsAreaSlug({ each: true })
+  areas: string[];
 }
 
 /** Avance de una tarea: pendiente → en_proceso → terminado. */
 export class UpdateAreaTaskStatusDto {
   @IsEnum(AreaTaskStatus)
   status: AreaTaskStatus;
+}
+
+/** Máquina del área que trabaja la tarea; `null` la quita. */
+export class SetAreaTaskMachineDto {
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  machineId?: number | null;
+}
+
+/** Datos propios del área capturados en la tarea: { [clave]: valor }; null o "" borra el dato. */
+export class SetAreaTaskFieldsDto {
+  @IsObject()
+  values: Record<string, unknown>;
 }
 
 /** Responsable de una tarea. `null` la deja libre para que la tome el área. */
@@ -38,7 +53,7 @@ export class AssignAreaTaskDto {
   assignedUserId?: number | null;
 }
 
-/** Mandar la digitalización de Bordado a pruebas (WORKFLOW.md §3.1). */
+/** Pasar la tarea a la siguiente etapa; en Bordado, mandar la digitalización a pruebas (WORKFLOW.md §3.1). */
 export class SendToTestDto {
   /** Qué se corrigió o con qué parámetros se hace la prueba. */
   @IsOptional()
@@ -53,7 +68,7 @@ export class SendToTestDto {
   photo?: OrderFileDto;
 }
 
-/** Resultado de la prueba de bordado abierta. */
+/** Resultado de la revisión abierta (en Bordado, la prueba). */
 export class SampleTestResultDto {
   @IsEnum(SampleTestResult)
   result: SampleTestResult;

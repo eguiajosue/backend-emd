@@ -5,20 +5,10 @@ import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 
-@Auth(
-  Role.ADMIN,
-  Role.RECEPCION,
-  Role.SUPERUSER,
-  Role.TALLER,
-  Role.DTF,
-  Role.BORDADO,
-  Role.DISENO,
-  Role.LASER,
-  Role.IMPRESIONES,
-  Role.SUCURSAL,
-)
+@Auth(Role.ADMIN, Role.RECEPCION, Role.SUPERUSER, AreaAccess.ANY, Role.SUCURSAL)
 @ApiTags('notifications')
 @Controller('notifications')
 export class NotificationController {
@@ -29,12 +19,12 @@ export class NotificationController {
     @Query() query: PaginationQueryDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.notificationService.findAllForUser(user.sub, query, user.roles);
+    return this.notificationService.findAllForUser(user.sub, query, user);
   }
 
   @Get('unread-count')
   unreadCount(@ActiveUser() user: AccessTokenPayload) {
-    return this.notificationService.unreadCount(user.sub, user.roles);
+    return this.notificationService.unreadCount(user.sub, user);
   }
 
   @Patch(':id/read')

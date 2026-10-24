@@ -14,6 +14,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateUserPreferencesDto } from './dto/update-user-preferences.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import type { AccessTokenPayload } from 'src/auth/auth.service';
@@ -61,12 +62,7 @@ export class UserController {
     Role.ADMIN,
     Role.SUPERUSER,
     Role.RECEPCION,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
+    AreaAccess.ANY,
     // Alta de pedidos desde la sucursal: elige diseñador responsable.
     Role.SUCURSAL,
   )
@@ -75,17 +71,7 @@ export class UserController {
     return this.userService.findAll();
   }
 
-  @Auth(
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.RECEPCION,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.ADMIN, Role.SUPERUSER, Role.RECEPCION, AreaAccess.ANY)
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.userService.findOne(+id);

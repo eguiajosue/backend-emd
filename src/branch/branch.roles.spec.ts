@@ -1,6 +1,7 @@
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { OrderController } from 'src/order/order.controller';
 import { OrderMockupController } from 'src/order-mockup/order-mockup.controller';
 import { MockupTemplateController } from 'src/mockup-template/mockup-template.controller';
@@ -109,8 +110,8 @@ describe('Rol sucursal: rutas permitidas y prohibidas', () => {
       expect([...roles].sort()).toEqual([Role.ADMIN, Role.SUPERUSER].sort());
       for (const denied of [
         Role.RECEPCION,
-        Role.DISENO,
-        Role.TALLER,
+        'diseno',
+        'taller',
         Role.SUCURSAL,
       ]) {
         expect(roles).not.toContain(denied);
@@ -122,7 +123,9 @@ describe('Rol sucursal: rutas permitidas y prohibidas', () => {
     const roles =
       reflector.get<Role[]>(ROLES_KEY, BranchController.prototype.findLogos) ??
       [];
-    expect([...roles].sort()).toEqual(Object.values(Role).sort());
+    expect([...roles].sort()).toEqual(
+      [...Object.values(Role), AreaAccess.ANY].sort(),
+    );
   });
 
   it('PUT del logo tiene throttle estricto (20/min) y el GET de logos cache privada', () => {

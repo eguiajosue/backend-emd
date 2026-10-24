@@ -8,9 +8,11 @@ import { UserService } from './user.service';
 function makePrisma(overrides: Record<string, any> = {}) {
   const prisma: any = {
     user: {
-      findUnique: jest
-        .fn()
-        .mockResolvedValue({ branchId: null, roles: [{ name: 'taller' }] }),
+      findUnique: jest.fn().mockResolvedValue({
+        branchId: null,
+        roles: [],
+        areas: [{ slug: 'taller' }],
+      }),
       delete: jest.fn(),
     },
     order: {

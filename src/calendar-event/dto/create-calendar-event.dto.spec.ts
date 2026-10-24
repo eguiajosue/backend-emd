@@ -80,10 +80,11 @@ describe('CreateCalendarEventDto', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('rechaza un área que no existe', async () => {
+  // Que el área exista lo valida CalendarEventService contra el catálogo.
+  it('rechaza un área con formato inválido', async () => {
     const dto = plainToInstance(CreateCalendarEventDto, {
       ...base,
-      area: 'cocina',
+      area: 'Cocina Industrial',
     });
     const errors = await validate(dto);
     expect(errors.some((e) => e.property === 'area')).toBe(true);

@@ -1,6 +1,5 @@
 import { Transform } from 'class-transformer';
 import {
-  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -17,8 +16,8 @@ import {
   BARCODE_MAX_LENGTH,
   BARCODE_MIN_LENGTH,
   BARCODE_PATTERN,
-  INVENTORY_AREAS,
 } from '../inventory.constants';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 
 /**
  * Alta de un artículo en el inventario de un departamento.
@@ -32,8 +31,8 @@ import {
  * stock cambia únicamente con movimientos (ver CreateInventoryMovementDto).
  */
 export class CreateInventoryItemDto {
-  @IsIn(INVENTORY_AREAS)
-  area: (typeof INVENTORY_AREAS)[number];
+  @IsAreaSlug()
+  area: string;
 
   @TrimString()
   @IsNotEmpty()

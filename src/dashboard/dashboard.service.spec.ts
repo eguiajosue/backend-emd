@@ -362,7 +362,7 @@ describe('DashboardService', () => {
       prisma.orderAreaTask.count.mockResolvedValue(4);
 
       const d = await service.production(
-        { userId: ANA.id, roles: ['taller'] },
+        { userId: ANA.id, roles: [], areas: ['taller'] },
         DAY_START,
         NOW,
       );
@@ -407,7 +407,7 @@ describe('DashboardService', () => {
         }),
       ]);
       const d = await service.production(
-        { userId: SHARED_TALLER.id, roles: ['taller'] },
+        { userId: SHARED_TALLER.id, roles: [], areas: ['taller'] },
         DAY_START,
         NOW,
       );
@@ -416,7 +416,7 @@ describe('DashboardService', () => {
 
     it('admin sin áreas ve todas las de producción', async () => {
       const d = await service.production(
-        { userId: 1, roles: ['admin'] },
+        { userId: 1, roles: ['admin'], areas: [] },
         DAY_START,
         NOW,
       );
@@ -477,7 +477,7 @@ describe('DashboardService', () => {
       ]);
 
       const d = await service.design(
-        { userId: ANA.id, roles: ['diseno'] },
+        { userId: ANA.id, roles: [], areas: ['diseno'] },
         DAY_START,
         NOW,
       );

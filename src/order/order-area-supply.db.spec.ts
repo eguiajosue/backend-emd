@@ -35,7 +35,7 @@ describeDb('Hoja de materiales: concurrencia real en Postgres', () => {
   const itemIds: number[] = [];
   const orderIds: number[] = [];
   const createdStatusIds: number[] = [];
-  const actor = { userId: 0, roles: ['recepcion'] };
+  const actor = { userId: 0, roles: ['recepcion'], areas: [] };
 
   beforeAll(async () => {
     process.env.DATABASE_URL = URL;

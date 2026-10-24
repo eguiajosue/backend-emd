@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { PRODUCTION_AREAS } from 'src/order/dto/create-order.dto';
+import { AreaService } from 'src/area/area.service';
+import { DESIGN_AREA } from 'src/area/area-access';
 import {
   StatusIdResolver,
   STATUS_NAME_AUTORIZADO,
@@ -29,7 +30,12 @@ const STAGE_WINDOW_DAYS = 30;
 export class CoordinationService {
   private readonly statusIds: StatusIdResolver;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
+  ) {
     this.statusIds = new StatusIdResolver(prisma);
   }
 
@@ -39,30 +45,42 @@ export class CoordinationService {
       this.statusIds.idFor(STATUS_NAME_CANCELADO),
     ]);
     const closed = [entregado, cancelado];
+    const areas = await this.areaService.slugs('production');
     const [load, stageTimes, overdue] = await Promise.all([
-      this.load(closed, now),
-      this.stageTimes(now),
+      this.load(closed, now, areas),
+      this.stageTimes(now, areas),
       this.overdue(closed, now),
     ]);
     return { generatedAt: now.toISOString(), load, stageTimes, overdue };
   }
 
-  private async load(closed: number[], now: Date) {
+  private async load(closed: number[], now: Date, areas: string[]) {
     const tasks = await this.prisma.orderAreaTask.findMany({
       where: {
         status: { not: 'terminado' },
-        order: { statusId: { notIn: closed }, NOT: { area: 'diseno' } },
+        order: { statusId: { notIn: closed }, NOT: { area: DESIGN_AREA } },
       },
       select: {
         area: true,
         status: true,
         assignedUserId: true,
+        machineId: true,
         assignedUser: {
           select: { firstName: true, lastName: true, isSharedAccount: true },
         },
         order: { select: { deliveryDate: true } },
       },
     });
+    const settings = new Map(
+      (await this.areaService.findAll()).map((a) => [
+        a.slug,
+        {
+          capacity: a.capacity,
+          turnaroundHours: a.turnaroundHours,
+          machines: a.machines,
+        },
+      ]),
+    );
     return loadByArea(
       tasks.map((t) => ({
         area: t.area,
@@ -75,9 +93,11 @@ export class CoordinationService {
           : null,
         sharedAccount: !!t.assignedUser?.isSharedAccount,
         deliveryDate: t.order.deliveryDate,
+        machineId: t.machineId,
       })),
       now,
-      PRODUCTION_AREAS,
+      areas,
+      settings,
     );
   }
 
@@ -87,7 +107,7 @@ export class CoordinationService {
    * en cada área (autorizado/asignado → la empiezan), producción por área
    * (empieza → termina) y entrega (listo → entregado).
    */
-  private async stageTimes(now: Date) {
+  private async stageTimes(now: Date, areas: string[]) {
     const since = new Date(now.getTime() - STAGE_WINDOW_DAYS * 86_400_000);
     const [esperando, autorizado, terminado, entregado] = await Promise.all(
       [
@@ -187,7 +207,7 @@ export class CoordinationService {
         },
         { key: 'entrega', label: 'Listo → entregado', ...summarize(handover) },
       ],
-      areas: PRODUCTION_AREAS.map((area) => ({
+      areas: areas.map((area) => ({
         area,
         espera: summarize(queue.get(area) ?? []),
         produccion: summarize(work.get(area) ?? []),
@@ -215,7 +235,7 @@ export class CoordinationService {
           select: {
             area: true,
             status: true,
-            prepStage: true,
+            stage: { select: { key: true, name: true, kind: true } },
             assignedUser: {
               select: { firstName: true, isSharedAccount: true },
             },
@@ -242,7 +262,7 @@ export class CoordinationService {
         areas: o.areaTasks.map((t) => ({
           area: t.area,
           status: t.status,
-          prepStage: t.prepStage,
+          stage: t.stage,
           assignee:
             t.assignedUser && !t.assignedUser.isSharedAccount
               ? t.assignedUser.firstName

@@ -16,6 +16,7 @@ import { Auth } from 'src/common/decorators/auth.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import {
   CreateMockupTemplateDto,
@@ -30,7 +31,13 @@ import { MockupTemplateService } from './mockup-template.service';
  */
 @ApiTags('mockup-templates')
 // La sucursal usa Mockups: lee, guarda y usa; renombrar/borrar no.
-@Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO, Role.SUCURSAL)
+@Auth(
+  Role.RECEPCION,
+  Role.ADMIN,
+  Role.SUPERUSER,
+  AreaAccess.DESIGN,
+  Role.SUCURSAL,
+)
 @Controller('mockup-templates')
 export class MockupTemplateController {
   constructor(private readonly mockupTemplateService: MockupTemplateService) {}
@@ -56,7 +63,7 @@ export class MockupTemplateController {
     return this.mockupTemplateService.create(dto, user.sub);
   }
 
-  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO)
+  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.DESIGN)
   @Patch(':id')
   rename(
     @Param('id', ParseIntPipe) id: number,
@@ -66,7 +73,7 @@ export class MockupTemplateController {
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO)
+  @Roles(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.DESIGN)
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.mockupTemplateService.remove(id);

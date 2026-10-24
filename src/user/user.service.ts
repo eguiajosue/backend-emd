@@ -22,6 +22,10 @@ const USER_SAFE_SELECT = {
   lastName: true,
   username: true,
   roles: true,
+  areas: {
+    select: { id: true, slug: true, name: true },
+    orderBy: { sortOrder: 'asc' },
+  },
   isSharedAccount: true,
   branchId: true,
   branch: { select: { id: true, name: true } },
@@ -91,10 +95,61 @@ export class UserService {
     }
   }
 
+  /**
+   * Las áreas que se asignan a alguien tienen que existir y estar activas: un
+   * área desactivada no se ofrece ni da acceso.
+   */
+  private async assertAssignableAreas(areaIds: number[] | undefined) {
+    if (!areaIds || areaIds.length === 0) return;
+    const found = await this.prisma.area.count({
+      where: { id: { in: areaIds }, active: true },
+    });
+    if (found !== areaIds.length) {
+      throw new HttpException(
+        'Una de las áreas elegidas no existe o está desactivada',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  /** Una edición no puede dejar a alguien sin ningún rol ni área. */
+  private async assertKeepsSomeAccess(
+    id: number,
+    roleIds: number[] | undefined,
+    areaIds: number[] | undefined,
+  ) {
+    const current = await this.prisma.user.findUnique({
+      where: { id },
+      select: { _count: { select: { roles: true, areas: true } } },
+    });
+    if (!current) return; // el update responde 404
+    const roles = roleIds?.length ?? current._count.roles;
+    const areas = areaIds?.length ?? current._count.areas;
+    if (roles === 0 && areas === 0) {
+      throw new HttpException(
+        'Asigna al menos un rol o un área',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   async create(createUserDto: CreateUserDto) {
     try {
-      const { roleIds, password, branchId, ...rest } = createUserDto;
+      const {
+        roleIds = [],
+        areaIds = [],
+        password,
+        branchId,
+        ...rest
+      } = createUserDto;
+      if (roleIds.length === 0 && areaIds.length === 0) {
+        throw new HttpException(
+          'Asigna al menos un rol o un área',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       await this.assertBranchForRoles(roleIds, branchId);
+      await this.assertAssignableAreas(areaIds);
       const hashedPassword = await bcryptjs.hash(password, 10);
 
       const data: Prisma.UserCreateInput = {
@@ -102,6 +157,9 @@ export class UserService {
         password: hashedPassword,
         roles: {
           connect: roleIds.map((id) => ({ id })),
+        },
+        areas: {
+          connect: areaIds.map((id) => ({ id })),
         },
         ...(branchId && { branch: { connect: { id: branchId } } }),
       };
@@ -112,6 +170,9 @@ export class UserService {
       });
       return user;
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       if (error.code === 'P2002') {
         // Violación de restricción única (por ejemplo, username ya existe)
         throw new HttpException(
@@ -177,6 +238,8 @@ export class UserService {
         where: { username },
         include: {
           roles: true,
+          // Sólo las activas: un área desactivada no da acceso (ver Area.active).
+          areas: { where: { active: true }, orderBy: { sortOrder: 'asc' } },
         },
       });
       return user || null;
@@ -189,8 +252,15 @@ export class UserService {
 
   async update(id: number, updateUserDto: UpdateUserDto) {
     try {
-      const { roleIds, password, firstName, lastName, branchId, ...rest } =
-        updateUserDto;
+      const {
+        roleIds,
+        areaIds,
+        password,
+        firstName,
+        lastName,
+        branchId,
+        ...rest
+      } = updateUserDto;
 
       // Obtiene el usuario actual si firstName o lastName no están definidos
       let currentUser;
@@ -217,6 +287,11 @@ export class UserService {
         await this.assertBranchForRoles(roleIds, effectiveBranchId);
       }
 
+      await this.assertAssignableAreas(areaIds);
+      if (roleIds?.length === 0 || areaIds?.length === 0) {
+        await this.assertKeepsSomeAccess(id, roleIds, areaIds);
+      }
+
       let hashedPassword;
       if (password) {
         hashedPassword = await bcryptjs.hash(password, 10);
@@ -230,6 +305,11 @@ export class UserService {
         ...(roleIds && {
           roles: {
             set: roleIds.map((id) => ({ id })),
+          },
+        }),
+        ...(areaIds && {
+          areas: {
+            set: areaIds.map((id) => ({ id })),
           },
         }),
         ...(branchId !== undefined && {
