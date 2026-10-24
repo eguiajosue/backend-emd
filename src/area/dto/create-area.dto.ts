@@ -7,6 +7,8 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  Max,
+  Min,
   IsNotEmpty,
   IsOptional,
   IsPositive,
@@ -21,6 +23,17 @@ import {
   TrimStringList,
 } from 'src/common/transformers/empty-to-undefined';
 import { AREA_ICONS } from '../area-icons';
+import {
+  AREA_FIELD_TYPES,
+  CONFIG_NAME_MAX_LENGTH,
+  CONFIG_NAME_MIN_LENGTH,
+  MAX_AREA_FIELDS,
+  MAX_AREA_MACHINES,
+  MAX_CAPACITY,
+  MAX_FIELD_OPTIONS,
+  MAX_TURNAROUND_HOURS,
+  type AreaFieldType,
+} from '../area-config';
 import {
   AREA_STAGE_KINDS,
   MAX_AREA_STAGES,
@@ -60,6 +73,107 @@ export class AreaStageInputDto {
   kind: AreaStageKind;
 }
 
+/** Una máquina o equipo del área. Sin `id` es nueva. */
+export class AreaMachineInputDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  id?: number;
+
+  @ApiProperty({ example: 'Impresora 1' })
+  @TrimString()
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(CONFIG_NAME_MIN_LENGTH)
+  @MaxLength(CONFIG_NAME_MAX_LENGTH)
+  name: string;
+}
+
+/** Reemplaza las máquinas de un área (PUT /areas/:id/machines). */
+export class SetAreaMachinesDto {
+  @ApiProperty({ type: [AreaMachineInputDto] })
+  @IsArray()
+  @ArrayMaxSize(MAX_AREA_MACHINES)
+  @ValidateNested({ each: true })
+  @Type(() => AreaMachineInputDto)
+  machines: AreaMachineInputDto[];
+}
+
+/** Un dato propio que se captura en cada tarea del área. Sin `id` es nuevo. */
+export class AreaFieldInputDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  id?: number;
+
+  @ApiProperty({ example: 'Material' })
+  @TrimString()
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(CONFIG_NAME_MIN_LENGTH)
+  @MaxLength(CONFIG_NAME_MAX_LENGTH)
+  label: string;
+
+  @ApiProperty({ enum: AREA_FIELD_TYPES })
+  @IsIn(AREA_FIELD_TYPES)
+  type: AreaFieldType;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  required?: boolean;
+
+  /** Sólo `select`: opciones permitidas. */
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @TrimStringList()
+  @IsArray()
+  @ArrayMaxSize(MAX_FIELD_OPTIONS)
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(CONFIG_NAME_MAX_LENGTH, { each: true })
+  options?: string[];
+
+  /** Sólo `number`: unidad que se muestra ("cm"). */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(10)
+  unit?: string;
+}
+
+/** Reemplaza los datos propios de un área (PUT /areas/:id/fields). */
+export class SetAreaFieldsDto {
+  @ApiProperty({ type: [AreaFieldInputDto] })
+  @IsArray()
+  @ArrayMaxSize(MAX_AREA_FIELDS)
+  @ValidateNested({ each: true })
+  @Type(() => AreaFieldInputDto)
+  fields: AreaFieldInputDto[];
+}
+
+/** Capacidad y tiempos de un área: se aceptan en el alta y en la edición (null los borra). */
+export class AreaCapacityFields {
+  /** Tareas abiertas que el área puede llevar a la vez. */
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_CAPACITY)
+  capacity?: number | null;
+
+  /** Horas típicas de producción por tarea. */
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_TURNAROUND_HOURS)
+  turnaroundHours?: number | null;
+}
+
 /** Reemplaza la lista de etapas de un área (PUT /areas/:id/stages). */
 export class SetAreaStagesDto {
   @ApiProperty({ type: [AreaStageInputDto] })
@@ -71,7 +185,7 @@ export class SetAreaStagesDto {
 }
 
 /** Alta de un área desde el wizard (POST /areas). */
-export class CreateAreaDto {
+export class CreateAreaDto extends AreaCapacityFields {
   @ApiProperty({ example: 'Impresión 3D' })
   @TrimString()
   @IsString()
@@ -154,4 +268,22 @@ export class CreateAreaDto {
   @ValidateNested({ each: true })
   @Type(() => AreaStageInputDto)
   stages?: AreaStageInputDto[];
+
+  /** Máquinas o equipos del área (opcional). */
+  @ApiPropertyOptional({ type: [AreaMachineInputDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_AREA_MACHINES)
+  @ValidateNested({ each: true })
+  @Type(() => AreaMachineInputDto)
+  machines?: AreaMachineInputDto[];
+
+  /** Datos propios que se capturan en cada tarea del área (opcional). */
+  @ApiPropertyOptional({ type: [AreaFieldInputDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_AREA_FIELDS)
+  @ValidateNested({ each: true })
+  @Type(() => AreaFieldInputDto)
+  fields?: AreaFieldInputDto[];
 }

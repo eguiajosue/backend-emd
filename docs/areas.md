@@ -4,6 +4,7 @@ Las áreas dejan de estar fijas en el código y pasan a ser un catálogo en la
 base: todo el sistema lee las áreas de la tabla `Area`. Fase 1: el catálogo y
 su uso. Fase 2: alta (wizard), edición y desactivación desde la app.
 Fase 3: etapas previas a producción configurables por área.
+Fase 4: capacidad y tiempos, máquinas y datos propios por área.
 
 ## Modelo
 
@@ -123,3 +124,37 @@ producir. Un área sin etapas funciona igual que antes: las tareas nacen listas.
   al pasar entre etapas de trabajo. Las revisiones conservan los tipos
   `embroidery_test_sent` / `_approved` / `_rejected` (de las pruebas de
   Bordado) por compatibilidad con la bandeja de notificaciones.
+
+## Capacidad, máquinas y datos propios (fase 4)
+
+Tres parámetros opcionales del área, que el wizard captura y la edición cambia.
+Diseño no los lleva.
+
+- **Capacidad y tiempos** (`Area.capacity`, `Area.turnaroundHours`, `null` =
+  sin dato): cuántas tareas abiertas puede llevar el área a la vez y cuántas
+  horas tarda una en producirse. Coordinación (`GET /coordination`) los usa en
+  cada área de `load`: `loadPct` (abiertas / capacidad), `overloaded` (abiertas
+  por encima de la capacidad) y `queueHours` (abiertas × horas típicas).
+  Se envían en `POST /areas` y `PATCH /areas/:id` (`null` los borra).
+- **Máquinas** (`AreaMachine`): equipos del área (hasta 12, nombres
+  distintos). `PUT /areas/:id/machines` `{ machines: [{ id?, name }] }`
+  reemplaza la lista; las quitadas se desactivan y se rechaza (409) quitar una
+  con tareas abiertas asignadas. Una tarea se asigna a una con
+  `PATCH /orders/:id/area-tasks/:taskId/machine` `{ machineId | null }`
+  (el área, Recepción y administración). Coordinación suma `machines:
+  [{ id, name, tasks }]` por área.
+- **Datos propios** (`AreaField`): lo que se captura en cada tarea del área
+  (hasta 10), de tipo `text`, `number` (con `unit`), `select` (2 a 10
+  opciones) o `boolean`; pueden ser obligatorios (no los sí/no).
+  `PUT /areas/:id/fields` `{ fields: [{ id?, label, type, required?, options?,
+  unit? }] }` reemplaza la lista: la clave se genera del nombre y no cambia, el
+  tipo de un dato existente tampoco, y los quitados se desactivan (los valores
+  ya capturados se conservan). Los valores viven en `OrderAreaTask.fieldValues`
+  y se capturan con `PATCH .../area-tasks/:taskId/fields` `{ values: { clave:
+  valor } }` (se mezclan con lo guardado; `null` o `""` borra un dato). Con un
+  dato obligatorio sin valor la tarea no pasa a `en_proceso` (400).
+- `GET /areas` trae `capacity`, `turnaroundHours`, `machines` y `fields`
+  (sólo lo activo); las tareas traen `machine` y `fieldValues`.
+- Migración `20261027120000_area_capacity_machines_fields`. Bitácora:
+  `area.machines` y `area.fields`.
+

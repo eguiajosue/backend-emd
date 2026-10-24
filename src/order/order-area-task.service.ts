@@ -36,6 +36,11 @@ import {
   previousStage,
   type AreaStageView,
 } from 'src/area/area-stages';
+import {
+  missingRequired,
+  validateFieldValues,
+  type FieldValues,
+} from 'src/area/area-config';
 import { AreaSupplyDto } from './dto/order-area-supply.dto';
 import {
   SUPPLY_TX_OPTIONS,
@@ -189,6 +194,8 @@ export class OrderAreaTaskService {
       startedAt: true,
       completedAt: true,
       stage: { select: AREA_STAGE_SELECT },
+      machine: { select: { id: true, name: true } },
+      fieldValues: true,
       // Registro de rondas de revisión (en Bordado, las pruebas; vacío si el área no tiene revisiones).
       sampleTests: {
         orderBy: { round: 'asc' as const },
@@ -853,6 +860,7 @@ export class OrderAreaTaskService {
         area: true,
         status: true,
         stage: { select: AREA_STAGE_SELECT },
+        fieldValues: true,
         assignedUserId: true,
       },
     });
@@ -862,6 +870,9 @@ export class OrderAreaTaskService {
     this.assertCanWorkArea(task.area, requestingUser);
     this.assertValidTransition(task.status, status);
     this.assertNotInStage(task.stage, status);
+    if (status === AreaTaskStatus.en_proceso) {
+      await this.assertRequiredFields(task);
+    }
 
     // "Empezar" es "tomar" (WORKFLOW.md §3, paso 7): si la tarea está sin
     // asignar o todavía en la cuenta compartida del área, al pasarla a
@@ -1480,6 +1491,82 @@ export class OrderAreaTaskService {
         HttpStatus.FORBIDDEN,
       );
     }
+  }
+
+  /** Los datos obligatorios del área tienen que estar capturados para empezar. */
+  private async assertRequiredFields(task: {
+    area: string;
+    fieldValues: unknown;
+  }) {
+    const fields = (await this.areaService.findBySlug(task.area))?.fields ?? [];
+    const missing = missingRequired(
+      fields,
+      (task.fieldValues as FieldValues | null) ?? null,
+    );
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Falta capturar ${missing.map((f) => `"${f.label}"`).join(', ')} para empezar`,
+      );
+    }
+  }
+
+  /** Asigna (o quita, con null) la máquina del área que trabaja la tarea. */
+  async setMachine(
+    taskId: number,
+    machineId: number | null,
+    requestingUser: RequestingUser,
+    orderId?: number,
+  ) {
+    const task = await this.loadStageTask(taskId, requestingUser, orderId);
+    if (machineId !== null) {
+      const machines =
+        (await this.areaService.findBySlug(task.area))?.machines ?? [];
+      if (!machines.some((m) => m.id === machineId)) {
+        throw new BadRequestException(
+          `La máquina no pertenece al área ${await this.areaService.labelOf(task.area)}`,
+        );
+      }
+    }
+    const updated = await this.prisma.orderAreaTask.update({
+      where: { id: taskId },
+      data: { machineId },
+      select: this.taskSelect(),
+    });
+    return this.stripSupplyForBranch(updated, requestingUser);
+  }
+
+  /**
+   * Captura los datos propios del área en la tarea. Lo que viene se mezcla
+   * con lo ya guardado; un valor vacío (null o "") borra ese dato.
+   */
+  async setFieldValues(
+    taskId: number,
+    values: Record<string, unknown>,
+    requestingUser: RequestingUser,
+    orderId?: number,
+  ) {
+    const task = await this.loadStageTask(taskId, requestingUser, orderId);
+    const fields = (await this.areaService.findBySlug(task.area))?.fields ?? [];
+    const clean = validateFieldValues(fields, values);
+    const current = await this.prisma.orderAreaTask.findUniqueOrThrow({
+      where: { id: taskId },
+      select: { fieldValues: true },
+    });
+    const merged: FieldValues = {
+      ...((current.fieldValues as FieldValues | null) ?? {}),
+      ...clean,
+    };
+    for (const [key, raw] of Object.entries(values)) {
+      if (raw === null || raw === '') delete merged[key];
+    }
+    const updated = await this.prisma.orderAreaTask.update({
+      where: { id: taskId },
+      data: {
+        fieldValues: Object.keys(merged).length > 0 ? merged : Prisma.JsonNull,
+      },
+      select: this.taskSelect(),
+    });
+    return this.stripSupplyForBranch(updated, requestingUser);
   }
 
   /** Rechaza saltos de estado que no existen en el ciclo de la tarea. */

@@ -5,6 +5,7 @@ import {
   IsArray,
   IsEnum,
   IsInt,
+  IsObject,
   IsOptional,
   IsPositive,
   IsString,
@@ -28,6 +29,20 @@ export class SetOrderAreasDto {
 export class UpdateAreaTaskStatusDto {
   @IsEnum(AreaTaskStatus)
   status: AreaTaskStatus;
+}
+
+/** Máquina del área que trabaja la tarea; `null` la quita. */
+export class SetAreaTaskMachineDto {
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  machineId?: number | null;
+}
+
+/** Datos propios del área capturados en la tarea: { [clave]: valor }; null o "" borra el dato. */
+export class SetAreaTaskFieldsDto {
+  @IsObject()
+  values: Record<string, unknown>;
 }
 
 /** Responsable de una tarea. `null` la deja libre para que la tome el área. */

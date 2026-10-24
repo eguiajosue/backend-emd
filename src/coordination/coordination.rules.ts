@@ -47,6 +47,15 @@ export interface LoadTask {
   /** La cuenta compartida del área cuenta como "sin asignar a alguien". */
   sharedAccount: boolean;
   deliveryDate: Date | null;
+  /** Máquina del área asignada (si se asignó una). */
+  machineId?: number | null;
+}
+
+/** Capacidad, tiempos y máquinas de un área (ver model Area). */
+export interface AreaLoadSettings {
+  capacity: number | null;
+  turnaroundHours: number | null;
+  machines: { id: number; name: string }[];
 }
 
 export interface Counts {
@@ -67,16 +76,23 @@ export function loadByArea(
   tasks: LoadTask[],
   now: Date,
   areas: readonly string[],
+  settings: ReadonlyMap<string, AreaLoadSettings> = new Map(),
 ) {
   const byArea = new Map<
     string,
     Counts & {
+      machines: Map<number, number>;
       sinPersona: number;
       people: Map<number, Counts & { userId: number; name: string }>;
     }
   >();
   for (const area of areas) {
-    byArea.set(area, { ...zero(), sinPersona: 0, people: new Map() });
+    byArea.set(area, {
+      ...zero(),
+      sinPersona: 0,
+      people: new Map(),
+      machines: new Map(),
+    });
   }
   for (const t of tasks) {
     if (t.status === 'terminado') continue;
@@ -90,6 +106,9 @@ export function loadByArea(
       if (state === 'pronto') c.pronto += 1;
     };
     bump(a);
+    if (t.machineId != null) {
+      a.machines.set(t.machineId, (a.machines.get(t.machineId) ?? 0) + 1);
+    }
     if (t.assignedUserId == null || t.sharedAccount) {
       a.sinPersona += 1;
       continue;
@@ -101,17 +120,35 @@ export function loadByArea(
     }
     bump(p);
   }
-  return Array.from(byArea.entries()).map(([area, a]) => ({
-    area,
-    pendiente: a.pendiente,
-    enProceso: a.enProceso,
-    atrasadas: a.atrasadas,
-    pronto: a.pronto,
-    sinPersona: a.sinPersona,
-    people: Array.from(a.people.values()).sort(
-      (x, y) => y.pendiente + y.enProceso - (x.pendiente + x.enProceso),
-    ),
-  }));
+  return Array.from(byArea.entries()).map(([area, a]) => {
+    const config = settings.get(area);
+    const open = a.pendiente + a.enProceso;
+    const capacity = config?.capacity ?? null;
+    const turnaroundHours = config?.turnaroundHours ?? null;
+    return {
+      area,
+      pendiente: a.pendiente,
+      enProceso: a.enProceso,
+      atrasadas: a.atrasadas,
+      pronto: a.pronto,
+      sinPersona: a.sinPersona,
+      /** Tareas abiertas que el área puede llevar a la vez (null = sin tope). */
+      capacity,
+      /** Abiertas / capacidad en %, o null sin capacidad. */
+      loadPct: capacity ? Math.round((open / capacity) * 100) : null,
+      overloaded: capacity != null && open > capacity,
+      /** Horas de trabajo en cola (abiertas × horas típicas), o null sin dato. */
+      queueHours: turnaroundHours != null ? open * turnaroundHours : null,
+      machines: (config?.machines ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        tasks: a.machines.get(m.id) ?? 0,
+      })),
+      people: Array.from(a.people.values()).sort(
+        (x, y) => y.pendiente + y.enProceso - (x.pendiente + x.enProceso),
+      ),
+    };
+  });
 }
 
 /** Mediana y percentil 75 (en horas) de una lista de duraciones en ms. */

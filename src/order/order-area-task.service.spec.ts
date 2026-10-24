@@ -1499,4 +1499,131 @@ describe('OrderAreaTaskService', () => {
       expect(prisma.orderAreaTask.update).toHaveBeenCalled();
     });
   });
+
+  describe('máquina y datos propios del área', () => {
+    const operador = { userId: 3, roles: [], areas: ['impresion-3d'] };
+    const otro = { userId: 4, roles: [], areas: ['dtf'] };
+    const MATERIAL = {
+      id: 7,
+      key: 'material',
+      label: 'Material',
+      type: 'select' as const,
+      required: true,
+      options: ['PLA', 'ABS'],
+      unit: null,
+    };
+    const NOTAS = {
+      id: 8,
+      key: 'notas',
+      label: 'Notas',
+      type: 'text' as const,
+      required: false,
+      options: [],
+      unit: null,
+    };
+
+    beforeEach(() => {
+      const areas = defaultAreaViews();
+      areas.push({
+        ...areas[0],
+        id: 9,
+        slug: 'impresion-3d',
+        name: 'Impresión 3D',
+        machines: [
+          { id: 31, name: 'Impresora 1' },
+          { id: 32, name: 'Impresora 2' },
+        ],
+        fields: [MATERIAL, NOTAS],
+      } as (typeof areas)[number]);
+      service = new OrderAreaTaskService(
+        prisma as unknown as PrismaService,
+        notificationService as unknown as NotificationService,
+        gateway as unknown as NotificationsGateway,
+        auditLog as unknown as AuditLogService,
+        undefined,
+        AreaService.inMemory(areas),
+      );
+      prisma.orderAreaTask.findUnique.mockResolvedValue({
+        id: 10,
+        orderId: 5,
+        area: 'impresion-3d',
+        status: AreaTaskStatus.pendiente,
+        stage: null,
+        fieldValues: null,
+        assignedUserId: null,
+      });
+      prisma.orderAreaTask.findUniqueOrThrow.mockResolvedValue({
+        fieldValues: { notas: 'viejo' },
+      });
+    });
+
+    it('asigna una máquina del área', async () => {
+      await service.setMachine(10, 31, operador, 5);
+      expect(prisma.orderAreaTask.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 10 }, data: { machineId: 31 } }),
+      );
+    });
+
+    it('rechaza una máquina de otra área y deja quitarla con null', async () => {
+      await expect(service.setMachine(10, 99, operador, 5)).rejects.toThrow(
+        /no pertenece al área/,
+      );
+      await service.setMachine(10, null, operador, 5);
+      expect(prisma.orderAreaTask.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ data: { machineId: null } }),
+      );
+    });
+
+    it('otra área no puede tocar la máquina ni los datos', async () => {
+      await expect(service.setMachine(10, 31, otro, 5)).rejects.toThrow(
+        HttpException,
+      );
+      await expect(
+        service.setFieldValues(10, { notas: 'x' }, otro, 5),
+      ).rejects.toThrow(HttpException);
+    });
+
+    it('mezcla los datos nuevos con los guardados y borra los vacíos', async () => {
+      await service.setFieldValues(
+        10,
+        { material: 'PLA', notas: null },
+        operador,
+        5,
+      );
+      expect(prisma.orderAreaTask.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { fieldValues: { material: 'PLA' } } }),
+      );
+    });
+
+    it('valida contra los datos del área', async () => {
+      await expect(
+        service.setFieldValues(10, { material: 'PETG' }, operador, 5),
+      ).rejects.toThrow(/debe ser una de/);
+      await expect(
+        service.setFieldValues(10, { color: 'rojo' }, operador, 5),
+      ).rejects.toThrow(/no existe/);
+      expect(prisma.orderAreaTask.update).not.toHaveBeenCalled();
+    });
+
+    it('no deja empezar sin los datos obligatorios', async () => {
+      await expect(
+        service.updateStatus(10, AreaTaskStatus.en_proceso, operador),
+      ).rejects.toThrow(/Falta capturar "Material" para empezar/);
+      expect(prisma.orderAreaTask.update).not.toHaveBeenCalled();
+    });
+
+    it('con los obligatorios capturados sí empieza', async () => {
+      prisma.orderAreaTask.findUnique.mockResolvedValue({
+        id: 10,
+        orderId: 5,
+        area: 'impresion-3d',
+        status: AreaTaskStatus.pendiente,
+        stage: null,
+        fieldValues: { material: 'ABS' },
+        assignedUserId: null,
+      });
+      await service.updateStatus(10, AreaTaskStatus.en_proceso, operador);
+      expect(prisma.orderAreaTask.update).toHaveBeenCalled();
+    });
+  });
 });
