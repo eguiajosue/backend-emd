@@ -22,6 +22,7 @@ import {
   AREA_NAME_MAX_LENGTH,
   AREA_NAME_MIN_LENGTH,
   MAX_INVENTORY_SUGGESTIONS,
+  AreaCapacityFields,
   MAX_INVENTORY_SUGGESTION_LENGTH,
 } from './create-area.dto';
 
@@ -29,7 +30,7 @@ import {
  * Edición de un área (PATCH /areas/:id). El slug no cambia nunca: es lo que
  * guardan pedidos, tareas e inventario.
  */
-export class UpdateAreaDto {
+export class UpdateAreaDto extends AreaCapacityFields {
   @ApiPropertyOptional()
   @IsOptional()
   @TrimString()

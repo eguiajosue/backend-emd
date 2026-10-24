@@ -350,4 +350,423 @@ describe('AreaAdminService', () => {
       });
     });
   });
+
+  describe('etapas', () => {
+    const stored = (over: Record<string, unknown> = {}) => ({
+      slug: 'bordado',
+      isDesign: false,
+      stages: [
+        {
+          id: 11,
+          key: 'digitalizado',
+          name: 'Digitalizado',
+          kind: 'work',
+          active: true,
+        },
+        {
+          id: 12,
+          key: 'en_pruebas',
+          name: 'En pruebas',
+          kind: 'review',
+          active: true,
+        },
+      ],
+      ...over,
+    });
+    const work = (name: string, id?: number) => ({
+      id,
+      name,
+      kind: 'work' as const,
+    });
+    const review = (name: string, id?: number) => ({
+      id,
+      name,
+      kind: 'review' as const,
+    });
+
+    beforeEach(() => {
+      prisma.area.findUnique.mockResolvedValue(stored());
+      prisma.area.findUniqueOrThrow = jest.fn().mockResolvedValue(area());
+      tx.areaStage = {
+        update: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({}),
+      };
+    });
+
+    it('crear un área con etapas las guarda en orden con claves estables', async () => {
+      await service.create(
+        dto({
+          stages: [
+            work('Slicing'),
+            review('Prueba de impresión'),
+            work('Post-proceso'),
+          ],
+        }),
+        5,
+      );
+
+      const { stages } = tx.area.create.mock.calls[0][0].data;
+      expect(stages.create).toEqual([
+        { key: 'slicing', name: 'Slicing', kind: 'work', sortOrder: 10 },
+        {
+          key: 'prueba-de-impresion',
+          name: 'Prueba de impresión',
+          kind: 'review',
+          sortOrder: 20,
+        },
+        {
+          key: 'post-proceso',
+          name: 'Post-proceso',
+          kind: 'work',
+          sortOrder: 30,
+        },
+      ]);
+    });
+
+    it('sin etapas el área nace sin ellas', async () => {
+      await service.create(dto(), 5);
+      expect(tx.area.create.mock.calls[0][0].data).not.toHaveProperty('stages');
+    });
+
+    it.each([
+      [
+        'la primera es una revisión',
+        [review('Prueba'), work('Producir')],
+        /primera etapa/,
+      ],
+      [
+        'dos revisiones seguidas',
+        [work('A1'), review('Prueba 1'), review('Prueba 2')],
+        /después de otra revisión/,
+      ],
+      ['nombres repetidos', [work('Corte'), work('corte')], /repetida/],
+      [
+        'demasiadas',
+        Array.from({ length: 7 }, (_, i) => work(`Etapa ${i}`)),
+        /hasta 6/,
+      ],
+    ])('rechaza %s', async (_label, stages, message) => {
+      await expect(service.create(dto({ stages }), 5)).rejects.toThrow(message);
+      expect(tx.area.create).not.toHaveBeenCalled();
+    });
+
+    it('un área nueva no puede traer ids de etapas', async () => {
+      await expect(
+        service.create(dto({ stages: [work('Corte', 3)] }), 5),
+      ).rejects.toThrow(/nueva/);
+    });
+
+    it('setStages renombra, reordena, agrega y desactiva las que ya no vienen', async () => {
+      await service.setStages(
+        1,
+        {
+          stages: [
+            work('Digitalizar', 11),
+            work('Bastidor'),
+            review('Pruebas', 12),
+          ],
+        },
+        5,
+      );
+
+      expect(tx.areaStage.update).toHaveBeenCalledWith({
+        where: { id: 11 },
+        data: { name: 'Digitalizar', kind: 'work', sortOrder: 10 },
+      });
+      expect(tx.areaStage.create).toHaveBeenCalledWith({
+        data: {
+          key: 'bastidor',
+          name: 'Bastidor',
+          kind: 'work',
+          sortOrder: 20,
+          areaId: 1,
+        },
+      });
+      expect(tx.areaStage.update).toHaveBeenCalledWith({
+        where: { id: 12 },
+        data: { name: 'Pruebas', kind: 'review', sortOrder: 30 },
+      });
+      expect(areaService.invalidate).toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'area.stages', entityId: 1 }),
+      );
+    });
+
+    it('quitar una etapa la desactiva (no se borra)', async () => {
+      await service.setStages(1, { stages: [work('Digitalizado', 11)] }, 5);
+      expect(tx.areaStage.update).toHaveBeenCalledWith({
+        where: { id: 12 },
+        data: { active: false },
+      });
+    });
+
+    it('una clave nueva no choca con las de etapas ya desactivadas', async () => {
+      prisma.area.findUnique.mockResolvedValue(
+        stored({
+          stages: [
+            { id: 11, key: 'corte', name: 'Corte', kind: 'work', active: true },
+            {
+              id: 13,
+              key: 'empaque',
+              name: 'Empaque',
+              kind: 'work',
+              active: false,
+            },
+          ],
+        }),
+      );
+      await service.setStages(
+        1,
+        { stages: [work('Corte', 11), work('Empaque')] },
+        5,
+      );
+      expect(tx.areaStage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ key: 'empaque-2' }),
+      });
+    });
+
+    it('no quita una etapa con tareas abiertas y dice cuántas', async () => {
+      prisma.orderAreaTask.count.mockResolvedValue(2);
+      await expect(
+        service.setStages(1, { stages: [work('Digitalizado', 11)] }, 5),
+      ).rejects.toThrow(/quitar la etapa "En pruebas".*2 tareas/);
+      expect(tx.areaStage.update).not.toHaveBeenCalled();
+    });
+
+    it('no cambia el tipo de una etapa con tareas abiertas', async () => {
+      prisma.orderAreaTask.count.mockResolvedValue(1);
+      await expect(
+        service.setStages(
+          1,
+          { stages: [work('Digitalizado', 11), work('En pruebas', 12)] },
+          5,
+        ),
+      ).rejects.toThrow(/cambiar el tipo de la etapa "En pruebas"/);
+    });
+
+    it('rechaza ids que no son de esta área o ya están desactivados', async () => {
+      await expect(
+        service.setStages(1, { stages: [work('Otra', 99)] }, 5),
+      ).rejects.toThrow(/no existe/);
+    });
+
+    it('Diseño no lleva etapas y un área inexistente da 404', async () => {
+      prisma.area.findUnique.mockResolvedValue(stored({ isDesign: true }));
+      await expect(service.setStages(4, { stages: [] }, 5)).rejects.toThrow(
+        /Diseño/,
+      );
+      prisma.area.findUnique.mockResolvedValue(null);
+      await expect(service.setStages(9, { stages: [] }, 5)).rejects.toThrow(
+        HttpException,
+      );
+    });
+
+    it('vaciar la lista deja al área sin etapas', async () => {
+      await service.setStages(1, { stages: [] }, 5);
+      expect(tx.areaStage.update).toHaveBeenCalledTimes(2);
+      expect(tx.areaStage.update).toHaveBeenCalledWith({
+        where: { id: 11 },
+        data: { active: false },
+      });
+    });
+  });
+
+  describe('capacidad, máquinas y datos propios', () => {
+    beforeEach(() => {
+      prisma.area.findUniqueOrThrow = jest.fn().mockResolvedValue(area());
+      tx.areaMachine = {
+        update: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({}),
+      };
+      tx.areaField = {
+        update: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({}),
+      };
+    });
+
+    it('crear un área guarda capacidad, tiempos, máquinas y datos', async () => {
+      await service.create(
+        dto({
+          capacity: 6,
+          turnaroundHours: 4,
+          machines: [{ name: 'Impresora 1' }, { name: 'Impresora 2' }],
+          fields: [
+            {
+              label: 'Material',
+              type: 'select',
+              options: ['PLA', 'ABS'],
+              required: true,
+            },
+            { label: 'Alto', type: 'number', unit: 'cm' },
+          ],
+        }),
+        5,
+      );
+      const { data } = tx.area.create.mock.calls[0][0];
+      expect(data).toMatchObject({ capacity: 6, turnaroundHours: 4 });
+      expect(data.machines.create).toEqual([
+        { name: 'Impresora 1', sortOrder: 10 },
+        { name: 'Impresora 2', sortOrder: 20 },
+      ]);
+      expect(data.fields.create).toEqual([
+        {
+          key: 'material',
+          label: 'Material',
+          type: 'select',
+          required: true,
+          options: ['PLA', 'ABS'],
+          unit: null,
+          sortOrder: 10,
+        },
+        {
+          key: 'alto',
+          label: 'Alto',
+          type: 'number',
+          required: false,
+          options: [],
+          unit: 'cm',
+          sortOrder: 20,
+        },
+      ]);
+    });
+
+    it('sin capacidad ni nada de esto el área nace limpia', async () => {
+      await service.create(dto(), 5);
+      const { data } = tx.area.create.mock.calls[0][0];
+      expect(data).toMatchObject({ capacity: null, turnaroundHours: null });
+      expect(data).not.toHaveProperty('machines');
+      expect(data).not.toHaveProperty('fields');
+    });
+
+    it('editar capacidad y tiempos (null los borra)', async () => {
+      prisma.area.findUnique.mockResolvedValue({ ...area(), id: 1 });
+      await service.update(1, { capacity: 4, turnaroundHours: null }, 5);
+      expect(prisma.area.update.mock.calls[0][0].data).toMatchObject({
+        capacity: 4,
+        turnaroundHours: null,
+      });
+    });
+
+    describe('setMachines', () => {
+      const stored = (over: Record<string, unknown> = {}) => ({
+        slug: 'laser',
+        isDesign: false,
+        machines: [
+          { id: 1, name: 'Láser A', active: true },
+          { id: 2, name: 'Láser B', active: true },
+        ],
+        ...over,
+      });
+      beforeEach(() => prisma.area.findUnique.mockResolvedValue(stored()));
+
+      it('renombra, agrega y desactiva las que ya no vienen', async () => {
+        await service.setMachines(
+          5,
+          { machines: [{ id: 1, name: 'Láser CO2' }, { name: 'Láser C' }] },
+          9,
+        );
+        expect(tx.areaMachine.update).toHaveBeenCalledWith({
+          where: { id: 1 },
+          data: { name: 'Láser CO2', sortOrder: 10 },
+        });
+        expect(tx.areaMachine.create).toHaveBeenCalledWith({
+          data: { name: 'Láser C', sortOrder: 20, areaId: 5 },
+        });
+        expect(tx.areaMachine.update).toHaveBeenCalledWith({
+          where: { id: 2 },
+          data: { active: false },
+        });
+        expect(areaService.invalidate).toHaveBeenCalled();
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'area.machines' }),
+        );
+      });
+
+      it('no quita una máquina con tareas abiertas asignadas', async () => {
+        prisma.orderAreaTask.count.mockResolvedValue(2);
+        await expect(
+          service.setMachines(5, { machines: [{ id: 1, name: 'Láser A' }] }, 9),
+        ).rejects.toThrow(/quitar la máquina "Láser B".*2 tareas asignadas/);
+        expect(tx.areaMachine.update).not.toHaveBeenCalled();
+      });
+
+      it('rechaza ids ajenos y Diseño', async () => {
+        await expect(
+          service.setMachines(5, { machines: [{ id: 99, name: 'Otra' }] }, 9),
+        ).rejects.toThrow(/no existe/);
+        prisma.area.findUnique.mockResolvedValue(stored({ isDesign: true }));
+        await expect(
+          service.setMachines(4, { machines: [] }, 9),
+        ).rejects.toThrow(/Diseño/);
+      });
+    });
+
+    describe('setFields', () => {
+      const stored = () => ({
+        slug: 'impresion-3d',
+        isDesign: false,
+        fields: [
+          {
+            id: 1,
+            key: 'material',
+            label: 'Material',
+            type: 'select',
+            active: true,
+          },
+          { id: 2, key: 'alto', label: 'Alto', type: 'number', active: true },
+        ],
+      });
+      beforeEach(() => prisma.area.findUnique.mockResolvedValue(stored()));
+
+      it('edita, agrega y desactiva; el valor ya capturado no se toca', async () => {
+        await service.setFields(
+          5,
+          {
+            fields: [
+              {
+                id: 1,
+                label: 'Filamento',
+                type: 'select',
+                options: ['PLA', 'PETG'],
+                required: true,
+              },
+              { label: 'Color', type: 'text' },
+            ],
+          },
+          9,
+        );
+        expect(tx.areaField.update).toHaveBeenCalledWith({
+          where: { id: 1 },
+          data: {
+            label: 'Filamento',
+            required: true,
+            options: ['PLA', 'PETG'],
+            unit: null,
+            sortOrder: 10,
+          },
+        });
+        expect(tx.areaField.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            key: 'color',
+            areaId: 5,
+            sortOrder: 20,
+          }),
+        });
+        expect(tx.areaField.update).toHaveBeenCalledWith({
+          where: { id: 2 },
+          data: { active: false },
+        });
+      });
+
+      it('el tipo de un dato existente no cambia', async () => {
+        await expect(
+          service.setFields(
+            5,
+            { fields: [{ id: 2, label: 'Alto', type: 'text' }] },
+            9,
+          ),
+        ).rejects.toThrow(/no se puede cambiar/);
+      });
+    });
+  });
 });

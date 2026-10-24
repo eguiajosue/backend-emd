@@ -211,7 +211,7 @@ async function main() {
 
   console.log('Seeding areas...');
   const areas: Record<string, { id: number }> = {};
-  for (const area of AREA_SEEDS) {
+  for (const { stages = [], ...area } of AREA_SEEDS) {
     const row = await prisma.area.upsert({
       where: { slug: area.slug },
       update: {},
@@ -219,6 +219,13 @@ async function main() {
     });
     areas[area.slug] = row;
     console.log(`  area "${area.slug}" ready (id=${row.id})`);
+    for (const [index, stage] of stages.entries()) {
+      await prisma.areaStage.upsert({
+        where: { areaId_key: { areaId: row.id, key: stage.key } },
+        update: {},
+        create: { ...stage, areaId: row.id, sortOrder: (index + 1) * 10 },
+      });
+    }
   }
 
   console.log('Seeding admin user...');

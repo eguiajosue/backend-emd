@@ -137,10 +137,14 @@ paralelo**, no en secuencia.
   entregar", el pedido vuelve a **autorizado**: sin tareas no hay nada
   terminado.
 
-### 3.1 Bordado: digitalizado → pruebas → producción
+### 3.1 Etapas previas a producción (Bordado: digitalizado → pruebas → producción)
 
-Las tareas de **Bordado** no arrancan directo en producción: antes pasan por
-dos etapas previas (`OrderAreaTask.prepStage`). Las demás áreas no cambian.
+Las áreas pueden tener **etapas previas a producción** configurables
+(`AreaStage`, ver `docs/areas.md`); la tarea guarda en cuál va en
+`OrderAreaTask.stageId`. Hoy sólo **Bordado** las usa, con dos: digitalizado
+(trabajo) y pruebas (revisión). Lo que sigue describe ese caso; en otra área
+con etapas, "enviar a pruebas" es pasar a su etapa de revisión y "digitalizado"
+es la etapa de trabajo anterior.
 
 ```
 digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en proceso → terminado)
@@ -148,10 +152,10 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
       └─ rechazada ─┘
 ```
 
-- Una tarea nueva de Bordado nace en **digitalizado** (`prepStage = digitalizado`)
+- Una tarea nueva de Bordado nace en **digitalizado** (`stageId` = esa etapa)
   con `status = pendiente`. Mientras tenga una etapa **no se puede empezar ni
   terminar** (`PATCH .../status` responde 400).
-- **Enviar a pruebas** (`POST /orders/:id/area-tasks/:taskId/send-to-test`,
+- **Enviar a pruebas** (`POST /orders/:id/area-tasks/:taskId/advance-stage`, antes `send-to-test`,
   `notes` opcional): abre una **ronda de prueba** y la tarea pasa a **en pruebas**.
   - Puede llevar una **foto de la prueba hecha** (`photo`, PNG o JPEG, hasta
     5MB; en el celular se toma con la cámara). Es opcional y queda en la ronda
@@ -161,9 +165,9 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
   - **Aviso a Recepción**: al mandar a pruebas le llega a la recepcionista que
     atiende el pedido (`attendedByUserId ?? userId`, §2) para que la revise y
     autorice. Nadie recibe el aviso de su propia acción.
-- **Resultado** (`POST /orders/:id/area-tasks/:taskId/test-result`,
+- **Resultado** (`POST /orders/:id/area-tasks/:taskId/stage-result`, antes `test-result`,
   `{ result: 'aprobada' | 'rechazada', notes }`):
-  - **aprobada**: `prepStage = null`; la tarea queda `pendiente` y el área ya
+  - **aprobada**: `stageId = null`; la tarea queda `pendiente` y el área ya
     puede empezar la producción.
   - **rechazada**: las `notes` son **obligatorias** (qué corregir); la tarea
     **regresa a digitalizado**. Al corregir, se vuelve a enviar a pruebas y se
@@ -178,7 +182,7 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
   recibe el aviso de su propia acción.
 - **Permisos**: el área Bordado y Recepción/admin/superuser.
 - Las tareas de Bordado que **ya existían** al desplegar quedan con
-  `prepStage = null`: siguen su curso sin pasar por las etapas nuevas.
+  `stageId = null`: siguen su curso sin pasar por las etapas nuevas.
 - Para el tablero y los conteos, una tarea en digitalizado/pruebas sigue siendo
   `pendiente` (todavía no es trabajo en curso del área).
 - **Tablero de Bordado (frontend)**: en "Tareas asignadas" y en el Modo TV,
@@ -186,9 +190,9 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
   etapas: **Digitalizado → En pruebas → En producción** (pendiente + en proceso)
   **→ Terminado**. Cada tarjeta trae el botón de su siguiente paso (mandar a
   pruebas, aprobar/rechazar, empezar, terminar) y, si la prueba anterior se
-  rechazó, el motivo. Para eso `GET /orders/my-tasks` manda `prepStage` y
+  rechazó, el motivo. Para eso `GET /orders/my-tasks` manda `stage` y
   `lastTest` (última ronda: `round`, `result`, `sentNotes`, `resultNotes`);
-  `GET /orders/my-area-tasks` ya traía `prepStage` y `sampleTests`.
+  `GET /orders/my-area-tasks` ya traía `stage` y `sampleTests`.
 
 ### Hoja de materiales al autorizar (origen de insumos)
 

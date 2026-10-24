@@ -4,6 +4,22 @@
  * lee SIEMPRE de la tabla Area; esta lista sólo sirve para sembrar y como
  * catálogo por defecto de los tests que construyen servicios a mano.
  */
+export interface AreaStageSeed {
+  key: string;
+  name: string;
+  kind: 'work' | 'review';
+}
+
+/**
+ * Etapas previas a producción de Bordado (WORKFLOW.md §3.1): digitalizar,
+ * mandar una prueba y, con la prueba aprobada, producir. Las demás áreas
+ * arrancan sin etapas.
+ */
+export const BORDADO_STAGES: readonly AreaStageSeed[] = [
+  { key: 'digitalizado', name: 'Digitalizado', kind: 'work' },
+  { key: 'en_pruebas', name: 'En pruebas', kind: 'review' },
+];
+
 export interface AreaSeed {
   slug: string;
   name: string;
@@ -11,6 +27,7 @@ export interface AreaSeed {
   color: string;
   isDesign: boolean;
   sortOrder: number;
+  stages?: readonly AreaStageSeed[];
 }
 
 export const DEFAULT_AREAS: readonly AreaSeed[] = [
@@ -37,6 +54,7 @@ export const DEFAULT_AREAS: readonly AreaSeed[] = [
     color: '#e24091',
     isDesign: false,
     sortOrder: 30,
+    stages: BORDADO_STAGES,
   },
   {
     slug: 'diseno',
