@@ -222,7 +222,7 @@ export class CoordinationService {
           select: {
             area: true,
             status: true,
-            prepStage: true,
+            stage: { select: { key: true, name: true, kind: true } },
             assignedUser: {
               select: { firstName: true, isSharedAccount: true },
             },
@@ -249,7 +249,7 @@ export class CoordinationService {
         areas: o.areaTasks.map((t) => ({
           area: t.area,
           status: t.status,
-          prepStage: t.prepStage,
+          stage: t.stage,
           assignee:
             t.assignedUser && !t.assignedUser.isSharedAccount
               ? t.assignedUser.firstName

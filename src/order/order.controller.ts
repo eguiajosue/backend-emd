@@ -542,20 +542,24 @@ export class OrderController {
   }
 
   /**
-   * Bordado: manda la digitalización a pruebas (abre una ronda en el registro
-   * de pruebas). WORKFLOW.md §3.1.
+   * Pasa la tarea a la siguiente etapa del área; si es una revisión (en
+   * Bordado, las pruebas) abre una ronda en el registro. WORKFLOW.md §3.1.
+   * `send-to-test` es el nombre que tenía cuando sólo existía en Bordado.
    */
   // Sube una foto (base64, hasta 5MB): throttle más estricto que el default.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.EMBROIDERY)
-  @Post(':id/area-tasks/:taskId/send-to-test')
-  sendAreaTaskToTest(
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.PRODUCTION)
+  @Post([
+    ':id/area-tasks/:taskId/advance-stage',
+    ':id/area-tasks/:taskId/send-to-test',
+  ])
+  advanceAreaTaskStage(
     @Param('id') id: string,
     @Param('taskId') taskId: string,
     @Body() dto: SendToTestDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.orderAreaTaskService.sendToTest(
+    return this.orderAreaTaskService.advanceStage(
       +taskId,
       dto.notes,
       { userId: user.sub, roles: user.roles, areas: user.areas },
@@ -564,8 +568,8 @@ export class OrderController {
     );
   }
 
-  /** Foto de una prueba de bordado (para revisarla y autorizarla). */
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.EMBROIDERY)
+  /** Foto de una ronda de revisión (para revisarla y autorizarla). */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.PRODUCTION)
   @Get(':id/area-tasks/:taskId/tests/:testId/photo')
   getAreaTaskTestPhoto(
     @Param('id') id: string,
@@ -576,18 +580,22 @@ export class OrderController {
   }
 
   /**
-   * Bordado: registra si la prueba abierta se aprobó (pasa a producción) o se
-   * rechazó (vuelve a digitalizado). WORKFLOW.md §3.1.
+   * Registra si la revisión abierta se aprobó (la tarea sigue su camino) o se
+   * rechazó (regresa a la etapa anterior). WORKFLOW.md §3.1. `test-result`
+   * es el nombre que tenía cuando sólo existía en Bordado.
    */
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.EMBROIDERY)
-  @Post(':id/area-tasks/:taskId/test-result')
-  decideAreaTaskTest(
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.PRODUCTION)
+  @Post([
+    ':id/area-tasks/:taskId/stage-result',
+    ':id/area-tasks/:taskId/test-result',
+  ])
+  decideAreaTaskStage(
     @Param('id') id: string,
     @Param('taskId') taskId: string,
     @Body() dto: SampleTestResultDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    return this.orderAreaTaskService.decideTest(
+    return this.orderAreaTaskService.decideStage(
       +taskId,
       dto.result,
       dto.notes,

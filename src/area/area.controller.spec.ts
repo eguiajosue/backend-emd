@@ -4,7 +4,7 @@ import { validate } from 'class-validator';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
 import { AreaController } from './area.controller';
-import { CreateAreaDto } from './dto/create-area.dto';
+import { CreateAreaDto, SetAreaStagesDto } from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 
 describe('AreaController: permisos', () => {
@@ -19,7 +19,7 @@ describe('AreaController: permisos', () => {
     expect(rolesFor('findAll')).toBeUndefined();
   });
 
-  it.each(['overview', 'create', 'update'] as const)(
+  it.each(['overview', 'create', 'update', 'setStages'] as const)(
     '%s sólo para admin y superuser',
     (method) => {
       expect([...rolesFor(method)].sort()).toEqual(
@@ -96,5 +96,35 @@ describe('UpdateAreaDto', () => {
     expect(await check({ active: false, color: '#112233' })).toEqual([]);
     expect(await check({ active: 'no' })).toContain('active');
     expect(await check({ color: 'rojo' })).toContain('color');
+  });
+});
+
+describe('SetAreaStagesDto', () => {
+  const errorsOf = async (body: object) =>
+    (await validate(plainToInstance(SetAreaStagesDto, body))).length;
+
+  it('acepta etapas con tipo válido, con o sin id', async () => {
+    expect(
+      await errorsOf({
+        stages: [
+          { id: 3, name: 'Digitalizado', kind: 'work' },
+          { name: 'En pruebas', kind: 'review' },
+        ],
+      }),
+    ).toBe(0);
+    expect(await errorsOf({ stages: [] })).toBe(0);
+  });
+
+  it('rechaza tipos desconocidos, nombres vacíos y más de 6 etapas', async () => {
+    expect(await errorsOf({ stages: [{ name: 'X1', kind: 'otro' }] })).toBe(1);
+    expect(await errorsOf({ stages: [{ name: ' ', kind: 'work' }] })).toBe(1);
+    expect(
+      await errorsOf({
+        stages: Array.from({ length: 7 }, (_, i) => ({
+          name: `Etapa ${i}`,
+          kind: 'work',
+        })),
+      }),
+    ).toBe(1);
   });
 });

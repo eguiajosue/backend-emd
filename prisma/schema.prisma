@@ -311,13 +311,14 @@ enum AreaTaskStatus {
   terminado
 }
 
-/// Etapa previa a producción de una tarea de Bordado (WORKFLOW.md §3.1).
-/// Mientras la tarea tiene una etapa, su `status` sigue en `pendiente` y no se
-/// puede empezar: primero se digitaliza el bordado, luego se hace una prueba y
-/// sólo con la prueba aprobada pasa a producción (`prepStage = null`).
-enum EmbroideryPrepStage {
-  digitalizado
-  en_pruebas
+/// Tipo de una etapa previa a producción (ver AreaStage).
+///  - work: un paso de trabajo; se avanza con "pasar a la siguiente etapa".
+///  - review: una revisión (en Bordado, la prueba): al entrar se abre una ronda
+///    y alguien la aprueba (sigue el flujo) o la rechaza (regresa a la etapa
+///    anterior con observaciones).
+enum AreaStageKind {
+  work
+  review
 }
 
 /// Resultado de una prueba de bordado. Una prueba abierta (en curso) no tiene
@@ -343,10 +344,11 @@ model OrderAreaTask {
   createdAt      DateTime             @default(now())
   startedAt      DateTime? // Cuándo pasó a en_proceso.
   completedAt    DateTime? // Cuándo pasó a terminado.
-  prepStage      EmbroideryPrepStage? // Sólo Bordado: etapa previa a producción (digitalizado → en_pruebas). null = ya puede producir (o no aplica al área).
+  stageId        Int? // Etapa previa a producción en la que está (AreaStage del área; en Bordado: digitalizado → en pruebas). null = ya puede producir (o el área no tiene etapas).
 
   order        Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
   assignedUser User?                @relation("AssignedAreaTasks", fields: [assignedUserId], references: [id])
+  stage        AreaStage?           @relation(fields: [stageId], references: [id])
   supply       OrderAreaSupply? // Hoja de materiales del área: de dónde salen los insumos (ver WORKFLOW.md §3).
   sampleTests  AreaTaskSampleTest[] // Registro de las pruebas de bordado, una por ronda.
 
@@ -356,6 +358,7 @@ model OrderAreaTask {
   @@index([area])
   @@index([assignedUserId])
   @@index([status])
+  @@index([stageId])
 }
 
 /// Una ronda de prueba de bordado de una tarea de Bordado. Se abre al mandar la
@@ -364,7 +367,7 @@ model OrderAreaTask {
 /// se hizo: nunca se borra una ronda, una prueba rechazada queda en el historial.
 model AreaTaskSampleTest {
   id              Int               @id @default(autoincrement())
-  areaTaskId      Int // Tarea de Bordado a la que pertenece.
+  areaTaskId      Int // Tarea a la que pertenece (ronda de una etapa de revisión; hoy sólo Bordado la usa).
   round           Int // 1, 2, 3... dentro de la tarea (max(round)+1 al abrirla).
   sentAt          DateTime          @default(now()) // Cuándo se mandó a pruebas.
   sentByUserId    Int? // Quién la mandó a pruebas.
@@ -517,7 +520,32 @@ model Area {
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
-  users User[] // Personas (y la cuenta compartida) que trabajan en el área.
+  users  User[] // Personas (y la cuenta compartida) que trabajan en el área.
+  stages AreaStage[] // Etapas previas a producción, en orden (vacío = las tareas nacen listas para producir).
+}
+
+/// Etapa previa a producción de las tareas de un área. Una tarea nueva nace en
+/// la primera etapa activa; mientras tenga una (`OrderAreaTask.stageId`) su
+/// `status` sigue en `pendiente` y no se puede empezar. Al agotarlas
+/// (`stageId = null`) pasa a producción. Una etapa nunca se borra: al quitarla
+/// del área se desactiva (las tareas de pedidos cerrados la conservan).
+/// Reglas: la primera es `work` y no hay dos `review` seguidas.
+model AreaStage {
+  id        Int           @id @default(autoincrement())
+  areaId    Int
+  key       String // Identificador estable dentro del área ('digitalizado'). No cambia al renombrar.
+  name      String // Nombre visible ("Digitalizado").
+  kind      AreaStageKind @default(work)
+  sortOrder Int // 10, 20, 30...
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  area  Area            @relation(fields: [areaId], references: [id])
+  tasks OrderAreaTask[]
+
+  @@unique([areaId, key])
+  @@index([areaId])
 }
 
 model AppSetting {

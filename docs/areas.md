@@ -3,6 +3,7 @@
 Las áreas dejan de estar fijas en el código y pasan a ser un catálogo en la
 base: todo el sistema lee las áreas de la tabla `Area`. Fase 1: el catálogo y
 su uso. Fase 2: alta (wizard), edición y desactivación desde la app.
+Fase 3: etapas previas a producción configurables por área.
 
 ## Modelo
 
@@ -16,8 +17,10 @@ su uso. Fase 2: alta (wizard), edición y desactivación desde la app.
   (admin, recepción, superusuario, sucursal), el área dónde trabaja.
 - Diseño sigue siendo especial (`isDesign`): fase previa con su propio
   circuito, nunca destino de producción. Su slug (`diseno`) está fijo en
-  `DESIGN_AREA`. Bordado conserva sus etapas de digitalizado y pruebas
-  (`EMBROIDERY_AREA`) hasta la fase 3 (etapas configurables).
+  `DESIGN_AREA`.
+- `AreaStage`: etapas previas a producción de un área (ver más abajo).
+  Bordado es un área más con dos etapas sembradas: `digitalizado` (trabajo) y
+  `en_pruebas` (revisión).
 
 ## Migración `20261024120000_areas_catalog`
 
@@ -84,3 +87,39 @@ memoria 30 s (`AreaService.CACHE_TTL_MS`) y se invalida en cada escritura.
 - Quien se asigna a un área nueva ve su bandeja en cuanto renueva su sesión
   (al volver a entrar o cuando su token se renueva): las áreas viajan en el
   token.
+
+## Etapas configurables (fase 3)
+
+Cada área puede tener una lista ordenada de etapas **previas a producción**
+(`AreaStage`). Una tarea nace en la primera etapa activa de su área y, mientras
+tenga una (`OrderAreaTask.stageId`), sigue `pendiente` y no se puede empezar
+(`PATCH .../status` responde 400). Al agotarlas (`stageId = null`) puede
+producir. Un área sin etapas funciona igual que antes: las tareas nacen listas.
+
+- Tipos (`kind`): `work` (paso de trabajo: se pasa a la siguiente con
+  `POST /orders/:id/area-tasks/:taskId/advance-stage`) y `review` (revisión:
+  al entrar se abre una ronda en `AreaTaskSampleTest`, con foto y comentarios
+  opcionales, y avisa a Recepción; se resuelve con
+  `POST .../stage-result` `{ result: 'aprobada' | 'rechazada', notes }`).
+  Aprobar lleva a la etapa que sigue (o a producción); rechazar (las
+  observaciones son obligatorias) regresa a la anterior. `send-to-test` y
+  `test-result` siguen funcionando como alias.
+- Reglas de la lista: hasta 6 etapas, nombres distintos, la primera es de
+  trabajo y no hay dos revisiones seguidas.
+- `PUT /areas/:id/stages` (admin/superuser) recibe `{ stages: [{ id?, name,
+  kind }] }` y reemplaza la lista (el orden es el del arreglo). Las que traen
+  `id` se renombran/reordenan, las nuevas se crean con clave estable (slug del
+  nombre) y las que ya no vienen se **desactivan** (nunca se borran). Una
+  etapa con tareas abiertas no se puede quitar ni cambiar de tipo (409). El
+  alta de un área (`POST /areas`) también acepta `stages`. Diseño no lleva
+  etapas.
+- `GET /areas` trae `stages` (sólo las activas, en orden); las tareas
+  (`GET /orders/my-tasks`, `my-area-tasks`, detalle del pedido) traen
+  `stage: { id, key, name, kind } | null`, que reemplaza a `prepStage`.
+- Migración `20261026120000_area_stages`: crea `AreaStage`, siembra las dos
+  etapas de Bordado y convierte `prepStage` en `stageId` conservando la etapa
+  de cada tarea en curso.
+- Bitácora y avisos: `area.stages` al editar la lista; `area_stage_advanced`
+  al pasar entre etapas de trabajo. Las revisiones conservan los tipos
+  `embroidery_test_sent` / `_approved` / `_rejected` (de las pruebas de
+  Bordado) por compatibilidad con la bandeja de notificaciones.

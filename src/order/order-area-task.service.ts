@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import {
   AreaTaskStatus,
-  EmbroideryPrepStage,
   Prisma,
   SampleTestResult,
   SupplySource,
@@ -29,9 +28,14 @@ import { AreaService } from 'src/area/area.service';
 import {
   belongsToArea,
   DESIGN_AREA,
-  EMBROIDERY_AREA,
   productionAreasOf,
 } from 'src/area/area-access';
+import {
+  AREA_STAGE_SELECT,
+  nextStage,
+  previousStage,
+  type AreaStageView,
+} from 'src/area/area-stages';
 import { AreaSupplyDto } from './dto/order-area-supply.dto';
 import {
   SUPPLY_TX_OPTIONS,
@@ -83,12 +87,6 @@ const ALLOWED_TASK_TRANSITIONS: Record<AreaTaskStatus, AreaTaskStatus[]> = {
   [AreaTaskStatus.terminado]: [AreaTaskStatus.en_proceso],
 };
 
-/**
- * Sólo Bordado pasa por las etapas previas a producción (digitalizado →
- * pruebas). WORKFLOW.md §3.1.
- */
-const PREP_STAGE_AREA = EMBROIDERY_AREA;
-
 /** La foto de la prueba la toma el celular: PNG o JPEG, hasta 5MB. */
 const SAMPLE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 const SAMPLE_PHOTO_MIME_TYPES = ['image/png', 'image/jpeg'] as const;
@@ -102,10 +100,10 @@ export interface MyTaskItem {
   taskId: number | null;
   /** Estado de la tarea de área, o nombre del estado de diseño del pedido. */
   status: string;
-  /** Etapa previa a producción de Bordado (digitalizado | en_pruebas); null si ya puede producir. */
-  prepStage?: EmbroideryPrepStage | null;
+  /** Etapa previa a producción en la que está (en Bordado: digitalizado | en pruebas); null si ya puede producir. */
+  stage?: AreaStageView | null;
   /**
-   * Última ronda de pruebas de Bordado (null si no hay): la tarjeta muestra por
+   * Última ronda de revisión de la tarea (en Bordado, la prueba; null si no hay): la tarjeta muestra por
    * qué se rechazó la prueba o cuántas rondas lleva.
    */
   lastTest?: {
@@ -190,8 +188,8 @@ export class OrderAreaTaskService {
       createdAt: true,
       startedAt: true,
       completedAt: true,
-      prepStage: true,
-      // Registro de pruebas de bordado (vacío fuera de Bordado).
+      stage: { select: AREA_STAGE_SELECT },
+      // Registro de rondas de revisión (en Bordado, las pruebas; vacío si el área no tiene revisiones).
       sampleTests: {
         orderBy: { round: 'asc' as const },
         select: {
@@ -305,15 +303,14 @@ export class OrderAreaTaskService {
     const created = await Promise.all(
       toCreate.map(async (area) => {
         const assignedUserId = await this.sharedAccountIdForArea(area, client);
+        const firstStageId = (await this.areaService.stagesOf(area))[0]?.id;
         return client.orderAreaTask.create({
           data: {
             orderId,
             area,
             assignedUserId,
-            // Bordado arranca en digitalización (WORKFLOW.md §3.1).
-            ...(area === PREP_STAGE_AREA && {
-              prepStage: EmbroideryPrepStage.digitalizado,
-            }),
+            // Arranca en la primera etapa del área, si tiene (WORKFLOW.md §3.1).
+            ...(firstStageId !== undefined && { stageId: firstStageId }),
           },
           select: this.taskSelect(),
         });
@@ -560,7 +557,7 @@ export class OrderAreaTaskService {
           id: true,
           area: true,
           status: true,
-          prepStage: true,
+          stage: { select: AREA_STAGE_SELECT },
           sampleTests: {
             orderBy: { round: 'desc' as const },
             take: 1,
@@ -586,7 +583,7 @@ export class OrderAreaTaskService {
           area: task.area,
           taskId: task.id,
           status: task.status,
-          prepStage: task.prepStage,
+          stage: task.stage,
           lastTest: task.sampleTests?.[0] ?? null,
           mine: isMine(task.assignedUserId),
           assignee: isFree(task.assignedUserId) ? null : task.assignedUser,
@@ -855,7 +852,7 @@ export class OrderAreaTaskService {
         orderId: true,
         area: true,
         status: true,
-        prepStage: true,
+        stage: { select: AREA_STAGE_SELECT },
         assignedUserId: true,
       },
     });
@@ -864,7 +861,7 @@ export class OrderAreaTaskService {
     }
     this.assertCanWorkArea(task.area, requestingUser);
     this.assertValidTransition(task.status, status);
-    this.assertNotInPrepStage(task.prepStage, status);
+    this.assertNotInStage(task.stage, status);
 
     // "Empezar" es "tomar" (WORKFLOW.md §3, paso 7): si la tarea está sin
     // asignar o todavía en la cuenta compartida del área, al pasarla a
@@ -942,45 +939,43 @@ export class OrderAreaTaskService {
   }
 
   /**
-   * Una tarea de Bordado que sigue en digitalización o en pruebas no puede
-   * empezar ni terminar: antes necesita la prueba aprobada (WORKFLOW.md §3.1).
-   * Quedarse en `pendiente` (o repetir el mismo estado) sí es válido.
+   * Una tarea que sigue en una etapa previa no puede empezar ni terminar:
+   * antes tiene que recorrerlas todas (en Bordado, digitalizar y tener la
+   * prueba aprobada; WORKFLOW.md §3.1). Quedarse en `pendiente` (o repetir el
+   * mismo estado) sí es válido.
    */
-  private assertNotInPrepStage(
-    prepStage: EmbroideryPrepStage | null,
-    to: AreaTaskStatus,
-  ) {
-    if (!prepStage || to === AreaTaskStatus.pendiente) return;
+  private assertNotInStage(stage: AreaStageView | null, to: AreaTaskStatus) {
+    if (!stage || to === AreaTaskStatus.pendiente) return;
     throw new BadRequestException(
-      prepStage === EmbroideryPrepStage.digitalizado
-        ? 'Bordado todavía está en digitalización: primero hay que mandarlo a pruebas y que la prueba se apruebe.'
-        : 'La prueba de bordado sigue pendiente: hay que aprobarla antes de empezar la producción.',
+      stage.kind === 'review'
+        ? `La etapa "${stage.name}" sigue pendiente: hay que aprobarla antes de empezar la producción.`
+        : `La tarea todavía está en la etapa "${stage.name}": hay que completar las etapas previas antes de empezar la producción.`,
     );
   }
 
-  /** Carga la tarea para las acciones de pruebas y valida pedido, área y permiso. */
-  private async loadBordadoTask(
+  /** Carga la tarea para las acciones de etapas y valida pedido y permiso. */
+  private async loadStageTask(
     taskId: number,
     requestingUser: RequestingUser,
     orderId?: number,
   ) {
     const task = await this.prisma.orderAreaTask.findUnique({
       where: { id: taskId },
-      select: { id: true, orderId: true, area: true, prepStage: true },
+      select: {
+        id: true,
+        orderId: true,
+        area: true,
+        stage: { select: AREA_STAGE_SELECT },
+      },
     });
     if (!task || !this.belongsToOrder(task.orderId, orderId)) {
       throw new HttpException('La tarea no existe', HttpStatus.NOT_FOUND);
-    }
-    if (task.area !== PREP_STAGE_AREA) {
-      throw new BadRequestException(
-        'Sólo Bordado pasa por digitalización y pruebas',
-      );
     }
     this.assertCanWorkArea(task.area, requestingUser);
     return task;
   }
 
-  /** Las pruebas de bordado empiezan cuando el cliente autoriza el diseño. */
+  /** Las revisiones empiezan cuando el cliente autoriza el diseño. */
   private async assertOrderAuthorized(orderId: number) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -999,26 +994,42 @@ export class OrderAreaTaskService {
   }
 
   /**
-   * Manda la digitalización a pruebas: abre una ronda nueva en el registro y
-   * la tarea pasa de `digitalizado` a `en_pruebas`. Se usa tanto la primera vez
-   * como después de corregir una prueba rechazada.
+   * Pasa la tarea a la siguiente etapa del área. Si la que sigue es una
+   * revisión (en Bordado, las pruebas), abre una ronda en el registro y avisa
+   * a Recepción; con foto y comentarios opcionales. Se usa tanto la primera
+   * vez como después de corregir una revisión rechazada. Al agotar las etapas
+   * la tarea queda lista para producir.
    */
-  async sendToTest(
+  async advanceStage(
     taskId: number,
     notes: string | undefined,
     requestingUser: RequestingUser,
     orderId?: number,
     photo?: OrderFileDto,
   ) {
-    const task = await this.loadBordadoTask(taskId, requestingUser, orderId);
-    await this.assertOrderAuthorized(task.orderId);
-    if (task.prepStage !== EmbroideryPrepStage.digitalizado) {
+    const task = await this.loadStageTask(taskId, requestingUser, orderId);
+    const stage = task.stage;
+    if (!stage) {
       throw new BadRequestException(
-        task.prepStage === EmbroideryPrepStage.en_pruebas
-          ? 'La tarea ya está en pruebas'
-          : 'La tarea ya pasó las pruebas',
+        'La tarea no tiene etapas pendientes: ya puede producirse',
       );
     }
+    if (stage.kind === 'review') {
+      throw new BadRequestException(
+        `La tarea ya está en "${stage.name}": falta registrar si se aprueba o se rechaza`,
+      );
+    }
+    const next = nextStage(await this.areaService.stagesOf(task.area), stage);
+    if (next?.kind !== 'review') {
+      if (photo) {
+        throw new BadRequestException(
+          'La foto sólo se adjunta al mandar a una revisión',
+        );
+      }
+      return this.moveToStage(task, stage, next, requestingUser);
+    }
+
+    await this.assertOrderAuthorized(task.orderId);
     const trimmed = notes?.trim() || null;
     if (photo) {
       await assertBase64FileValid(photo, {
@@ -1040,6 +1051,8 @@ export class OrderAreaTaskService {
     try {
       updated = await this.openSampleTestRound(
         taskId,
+        stage.id,
+        next.id,
         trimmed,
         requestingUser.userId,
         photo,
@@ -1054,11 +1067,14 @@ export class OrderAreaTaskService {
     const round = updated.sampleTests.at(-1)?.round;
     await this.recordSampleAudit('embroidery_test_sent', task, requestingUser, {
       round,
+      stage: next.key,
       notes: trimmed,
       hasPhoto: !!photo,
     });
     await this.notifyReceptionOfSampleSent(
       task.orderId,
+      task.area,
+      next,
       round ?? 1,
       !!photo,
       requestingUser.userId,
@@ -1066,8 +1082,38 @@ export class OrderAreaTaskService {
     return this.stripSupplyForBranch(updated, requestingUser);
   }
 
+  /** Pasa de una etapa de trabajo a la siguiente (o a producción si era la última). */
+  private async moveToStage(
+    task: { id: number; orderId: number },
+    from: AreaStageView,
+    to: AreaStageView | null,
+    requestingUser: RequestingUser,
+  ) {
+    // Condicional sobre la etapa: dos clics simultáneos no avanzan dos veces.
+    const { count } = await this.prisma.orderAreaTask.updateMany({
+      where: { id: task.id, stageId: from.id },
+      data: { stageId: to?.id ?? null },
+    });
+    if (count !== 1) {
+      throw new BadRequestException(
+        'La tarea ya cambió de etapa: actualiza e inténtalo de nuevo',
+      );
+    }
+    await this.recordSampleAudit('area_stage_advanced', task, requestingUser, {
+      from: from.key,
+      to: to?.key ?? null,
+    });
+    const updated = await this.prisma.orderAreaTask.findUniqueOrThrow({
+      where: { id: task.id },
+      select: this.taskSelect(),
+    });
+    return this.stripSupplyForBranch(updated, requestingUser);
+  }
+
   private async openSampleTestRound(
     taskId: number,
+    fromStageId: number,
+    toStageId: number,
     trimmed: string | null,
     userId: number,
     photo: OrderFileDto | undefined,
@@ -1076,11 +1122,11 @@ export class OrderAreaTaskService {
     return this.prisma.$transaction(async (tx) => {
       // Condicional sobre la etapa: dos clics simultáneos no abren dos rondas.
       const { count } = await tx.orderAreaTask.updateMany({
-        where: { id: taskId, prepStage: EmbroideryPrepStage.digitalizado },
-        data: { prepStage: EmbroideryPrepStage.en_pruebas },
+        where: { id: taskId, stageId: fromStageId },
+        data: { stageId: toStageId },
       });
       if (count !== 1) {
-        throw new BadRequestException('La tarea ya está en pruebas');
+        throw new BadRequestException('La tarea ya está en revisión');
       }
       const last = await tx.areaTaskSampleTest.aggregate({
         where: { areaTaskId: taskId },
@@ -1111,6 +1157,8 @@ export class OrderAreaTaskService {
   /** Aviso a Recepción: hay una prueba esperando revisión y autorización. */
   private async notifyReceptionOfSampleSent(
     orderId: number,
+    area: string,
+    stage: AreaStageView,
     round: number,
     hasPhoto: boolean,
     actorId: number,
@@ -1122,8 +1170,8 @@ export class OrderAreaTaskService {
       await this.notificationService.createNotification({
         userId: receptionOwnerId,
         type: 'embroidery_test_sent',
-        title: 'Prueba de bordado por revisar',
-        body: `Pedido #${orderId}: Bordado mandó la prueba ${round}${hasPhoto ? ' con foto' : ''} a revisión y autorización`,
+        title: `${stage.name} por revisar`,
+        body: `Pedido #${orderId}: ${await this.areaService.labelOf(area)} mandó la ronda ${round} de "${stage.name}"${hasPhoto ? ' con foto' : ''} a revisión y autorización`,
         orderId,
       });
     } catch (error) {
@@ -1166,22 +1214,24 @@ export class OrderAreaTaskService {
   }
 
   /**
-   * Registra el resultado de la prueba abierta.
-   * - `aprobada`: la tarea queda lista para producción (`prepStage = null`,
-   *   sigue `pendiente` hasta que el área la empiece).
-   * - `rechazada`: vuelve a `digitalizado` para corregir; las observaciones son
-   *   obligatorias para que quien digitaliza sepa qué corregir.
+   * Registra el resultado de la revisión abierta (en Bordado, la prueba).
+   * - `aprobada`: la tarea sigue a la etapa que viene o, si no hay más, queda
+   *   lista para producción (`stageId = null`, sigue `pendiente` hasta que el
+   *   área la empiece).
+   * - `rechazada`: regresa a la etapa anterior para corregir; las
+   *   observaciones son obligatorias para que se sepa qué corregir.
    */
-  async decideTest(
+  async decideStage(
     taskId: number,
     result: SampleTestResult,
     notes: string | undefined,
     requestingUser: RequestingUser,
     orderId?: number,
   ) {
-    const task = await this.loadBordadoTask(taskId, requestingUser, orderId);
-    if (task.prepStage !== EmbroideryPrepStage.en_pruebas) {
-      throw new BadRequestException('La tarea no está en pruebas');
+    const task = await this.loadStageTask(taskId, requestingUser, orderId);
+    const stage = task.stage;
+    if (stage?.kind !== 'review') {
+      throw new BadRequestException('La tarea no está en una revisión');
     }
     const trimmed = notes?.trim() || null;
     if (result === SampleTestResult.rechazada && !trimmed) {
@@ -1189,20 +1239,20 @@ export class OrderAreaTaskService {
         'Explica qué hay que corregir al rechazar la prueba',
       );
     }
+    const stages = await this.areaService.stagesOf(task.area);
+    const target =
+      result === SampleTestResult.aprobada
+        ? nextStage(stages, stage)
+        : previousStage(stages, stage);
 
     const { updated, round } = await this.prisma.$transaction(async (tx) => {
       // Condicional sobre la etapa: dos resultados simultáneos no se pisan.
       const { count } = await tx.orderAreaTask.updateMany({
-        where: { id: taskId, prepStage: EmbroideryPrepStage.en_pruebas },
-        data: {
-          prepStage:
-            result === SampleTestResult.aprobada
-              ? null
-              : EmbroideryPrepStage.digitalizado,
-        },
+        where: { id: taskId, stageId: stage.id },
+        data: { stageId: target?.id ?? null },
       });
       if (count !== 1) {
-        throw new BadRequestException('La tarea no está en pruebas');
+        throw new BadRequestException('La tarea no está en una revisión');
       }
       const open = await tx.areaTaskSampleTest.findFirst({
         where: { areaTaskId: taskId, result: null },
@@ -1236,10 +1286,12 @@ export class OrderAreaTaskService {
         : 'embroidery_test_rejected',
       task,
       requestingUser,
-      { round, notes: trimmed },
+      { round, stage: stage.key, notes: trimmed },
     );
     await this.notifySampleTestResult(
       task.orderId,
+      task.area,
+      stage,
       result,
       round,
       trimmed,
@@ -1249,15 +1301,17 @@ export class OrderAreaTaskService {
   }
 
   /**
-   * Avisos del resultado de una prueba de bordado (WORKFLOW.md §3.1):
-   * - rechazada: a Bordado, que tiene que corregir la digitalización;
-   * - aprobada: a Bordado (ya puede producir) y a la recepcionista que atiende
-   *   el pedido.
+   * Avisos del resultado de una revisión (WORKFLOW.md §3.1):
+   * - rechazada: al área, que tiene que corregir;
+   * - aprobada: al área (ya puede seguir) y a la recepcionista que atiende el
+   *   pedido.
    * Nadie recibe el aviso de su propia acción. Un fallo al avisar no revierte
    * el resultado, que ya quedó guardado.
    */
   private async notifySampleTestResult(
     orderId: number,
+    area: string,
+    stage: AreaStageView,
     result: SampleTestResult,
     round: number,
     notes: string | null,
@@ -1265,19 +1319,18 @@ export class OrderAreaTaskService {
   ) {
     try {
       const approved = result === SampleTestResult.aprobada;
+      const areaLabel = await this.areaService.labelOf(area);
       const areaUserIds = (
-        await this.notificationService.userIdsForArea(PREP_STAGE_AREA)
+        await this.notificationService.userIdsForArea(area)
       ).filter((id) => id !== actorId);
       await this.notificationService.createNotificationForUsers(areaUserIds, {
         type: approved
           ? 'embroidery_test_approved'
           : 'embroidery_test_rejected',
-        title: approved
-          ? 'Prueba de bordado aprobada'
-          : 'Prueba de bordado rechazada',
+        title: approved ? `${stage.name} aprobada` : `${stage.name} rechazada`,
         body: approved
-          ? `Pedido #${orderId}: la prueba ${round} se aprobó, ya se puede producir`
-          : `Pedido #${orderId}: la prueba ${round} se rechazó${notes ? ` — ${notes}` : ''}`,
+          ? `Pedido #${orderId}: la ronda ${round} de "${stage.name}" se aprobó, ya se puede seguir`
+          : `Pedido #${orderId}: la ronda ${round} de "${stage.name}" se rechazó${notes ? ` — ${notes}` : ''}`,
         orderId,
       });
       if (!approved) return;
@@ -1286,13 +1339,13 @@ export class OrderAreaTaskService {
       await this.notificationService.createNotification({
         userId: receptionOwnerId,
         type: 'embroidery_test_approved',
-        title: 'Prueba de bordado aprobada',
-        body: `Pedido #${orderId}: la prueba ${round} se aprobó, Bordado pasa a producción`,
+        title: `${stage.name} aprobada`,
+        body: `Pedido #${orderId}: la ronda ${round} de "${stage.name}" se aprobó, ${areaLabel} sigue adelante`,
         orderId,
       });
     } catch (error) {
       this.logger.warn(
-        `No se pudo avisar el resultado de la prueba: ${(error as Error)?.message}`,
+        `No se pudo avisar el resultado de la revisión: ${(error as Error)?.message}`,
       );
     }
   }

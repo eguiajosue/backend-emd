@@ -17,7 +17,8 @@ import {
   slugifyAreaName,
 } from './area-access';
 import { AREA_SELECT, AreaService, type AreaView } from './area.service';
-import { CreateAreaDto } from './dto/create-area.dto';
+import { assertValidStageList, stageKeyFor } from './area-stages';
+import { CreateAreaDto, SetAreaStagesDto } from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 
 /** Estados con los que un pedido ya no es trabajo en curso. */
@@ -108,6 +109,12 @@ export class AreaAdminService {
     const sharedAccount = dto.createSharedAccount ?? true;
     const userIds = [...new Set(dto.userIds ?? [])];
 
+    const stages = dto.stages ?? [];
+    if (stages.some((stage) => stage.id !== undefined)) {
+      throw new BadRequestException('Un área nueva no tiene etapas existentes');
+    }
+    assertValidStageList(stages);
+
     await this.assertNameFree(name, slug);
     if (sharedAccount) await this.assertUsernameFree(slug);
     if (userIds.length > 0) {
@@ -140,6 +147,11 @@ export class AreaAdminService {
             inventoryCategories: dto.inventoryCategories ?? [],
             inventoryUnits: dto.inventoryUnits ?? [],
             sortOrder: (_max.sortOrder ?? 0) + 10,
+            ...(stages.length > 0 && {
+              stages: {
+                create: this.newStages(stages, new Set()),
+              },
+            }),
             ...(userIds.length > 0 && {
               users: { connect: userIds.map((id) => ({ id })) },
             }),
@@ -171,6 +183,7 @@ export class AreaAdminService {
           name,
           sharedAccountId: created.sharedAccountId,
           userIds,
+          stages: stages.map((stage) => stage.name),
         },
       });
       return {
@@ -278,6 +291,140 @@ export class AreaAdminService {
         throw new ConflictException('Ya existe un área con ese nombre');
       }
       throw error;
+    }
+  }
+
+  /**
+   * Reemplaza las etapas previas a producción del área: las que traen `id`
+   * se renombran/reordenan, las demás se crean y las que ya no vienen se
+   * desactivan (nunca se borran). Lo que ya está en curso no se mueve: una
+   * etapa con tareas abiertas no se puede quitar ni cambiar de tipo.
+   */
+  async setStages(
+    id: number,
+    dto: SetAreaStagesDto,
+    actorUserId: number,
+  ): Promise<AreaView> {
+    const area = await this.prisma.area.findUnique({
+      where: { id },
+      select: {
+        slug: true,
+        isDesign: true,
+        stages: {
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+          select: { id: true, key: true, name: true, kind: true, active: true },
+        },
+      },
+    });
+    if (!area) throw new NotFoundException('El área no existe');
+    if (area.isDesign) {
+      throw new BadRequestException(
+        'Diseño tiene su propio circuito: no lleva etapas',
+      );
+    }
+    const drafts = dto.stages;
+    assertValidStageList(drafts);
+
+    const known = new Map(area.stages.map((stage) => [stage.id, stage]));
+    const kept = new Set<number>();
+    for (const draft of drafts) {
+      if (draft.id === undefined) continue;
+      const current = known.get(draft.id);
+      if (!current?.active || kept.has(draft.id)) {
+        throw new BadRequestException(
+          `La etapa "${draft.name}" no existe en esta área`,
+        );
+      }
+      kept.add(draft.id);
+    }
+    const removed = area.stages.filter(
+      (stage) => stage.active && !kept.has(stage.id),
+    );
+    const retyped = drafts.flatMap((draft) => {
+      const current = draft.id === undefined ? undefined : known.get(draft.id);
+      return current && current.kind !== draft.kind ? [current] : [];
+    });
+    for (const stage of removed) {
+      await this.assertStageEmpty(stage, 'quitar');
+    }
+    for (const stage of retyped) {
+      await this.assertStageEmpty(stage, 'cambiar el tipo de');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const taken = new Set(area.stages.map((stage) => stage.key));
+      for (const [index, draft] of drafts.entries()) {
+        const sortOrder = (index + 1) * 10;
+        if (draft.id !== undefined) {
+          await tx.areaStage.update({
+            where: { id: draft.id },
+            data: { name: draft.name.trim(), kind: draft.kind, sortOrder },
+          });
+        } else {
+          const [created] = this.newStages([draft], taken, sortOrder);
+          taken.add(created.key);
+          await tx.areaStage.create({ data: { ...created, areaId: id } });
+        }
+      }
+      for (const stage of removed) {
+        await tx.areaStage.update({
+          where: { id: stage.id },
+          data: { active: false },
+        });
+      }
+    });
+    this.areaService.invalidate();
+    await this.auditLog.record({
+      actorUserId,
+      action: 'area.stages',
+      entityType: 'area',
+      entityId: id,
+      metadata: {
+        slug: area.slug,
+        stages: drafts.map((draft) => draft.name),
+        removed: removed.map((stage) => stage.key),
+      },
+    });
+    return this.prisma.area.findUniqueOrThrow({
+      where: { id },
+      select: AREA_SELECT,
+    });
+  }
+
+  /** Filas de etapas nuevas, con clave estable que no choca con `taken`. */
+  private newStages(
+    drafts: readonly { name: string; kind: 'work' | 'review' }[],
+    taken: Set<string>,
+    firstSortOrder = 10,
+  ) {
+    return drafts.map((draft, index) => {
+      const key = stageKeyFor(draft.name, taken);
+      taken.add(key);
+      return {
+        key,
+        name: draft.name.trim(),
+        kind: draft.kind,
+        sortOrder: firstSortOrder + index * 10,
+      };
+    });
+  }
+
+  /** 409 si hay tareas abiertas en la etapa: se quedarían sin dónde estar. */
+  private async assertStageEmpty(
+    stage: { id: number; name: string },
+    action: string,
+  ) {
+    const tasks = await this.prisma.orderAreaTask.count({
+      where: {
+        stageId: stage.id,
+        status: { not: AreaTaskStatus.terminado },
+        order: { status: { name: { notIn: CLOSED_STATUS_NAMES } } },
+      },
+    });
+    if (tasks > 0) {
+      throw new ConflictException(
+        `No se puede ${action} la etapa "${stage.name}": tiene ${tasks} tarea${tasks === 1 ? '' : 's'} en ella. Pásalas a la siguiente etapa primero`,
+      );
     }
   }
 

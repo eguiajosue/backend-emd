@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DEFAULT_AREAS } from './default-areas';
+import { AREA_STAGES_INCLUDE, type AreaStageView } from './area-stages';
 
 /** Lo que el resto de la app necesita saber de un área (ver model Area). */
 export interface AreaView {
@@ -18,6 +19,8 @@ export interface AreaView {
   inventoryUnits: string[];
   sortOrder: number;
   active: boolean;
+  /** Etapas previas a producción (activas, en orden); vacío = las tareas nacen listas para producir. */
+  stages: AreaStageView[];
 }
 
 /**
@@ -41,6 +44,7 @@ export const AREA_SELECT = {
   inventoryUnits: true,
   sortOrder: true,
   active: true,
+  stages: AREA_STAGES_INCLUDE,
 } as const;
 
 /**
@@ -81,6 +85,11 @@ export class AreaService {
   async slugs(use: AreaUse = 'any'): Promise<string[]> {
     const areas = await this.findAll();
     return areas.filter((a) => fitsUse(a, use)).map((a) => a.slug);
+  }
+
+  /** Etapas previas a producción de un área; vacío si no tiene o no existe. */
+  async stagesOf(slug: string): Promise<AreaStageView[]> {
+    return (await this.findBySlug(slug))?.stages ?? [];
   }
 
   /** Slugs de las áreas activas con inventario propio. */
@@ -182,5 +191,9 @@ export function defaultAreaViews(): AreaView[] {
     inventoryCategories: [],
     inventoryUnits: [],
     active: true,
+    stages: (area.stages ?? []).map((stage, stageIndex) => ({
+      id: (index + 1) * 100 + stageIndex + 1,
+      ...stage,
+    })),
   }));
 }

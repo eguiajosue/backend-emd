@@ -38,7 +38,7 @@ export class AssignAreaTaskDto {
   assignedUserId?: number | null;
 }
 
-/** Mandar la digitalización de Bordado a pruebas (WORKFLOW.md §3.1). */
+/** Pasar la tarea a la siguiente etapa; en Bordado, mandar la digitalización a pruebas (WORKFLOW.md §3.1). */
 export class SendToTestDto {
   /** Qué se corrigió o con qué parámetros se hace la prueba. */
   @IsOptional()
@@ -53,7 +53,7 @@ export class SendToTestDto {
   photo?: OrderFileDto;
 }
 
-/** Resultado de la prueba de bordado abierta. */
+/** Resultado de la revisión abierta (en Bordado, la prueba). */
 export class SampleTestResultDto {
   @IsEnum(SampleTestResult)
   result: SampleTestResult;
