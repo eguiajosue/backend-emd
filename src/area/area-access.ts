@@ -44,6 +44,22 @@ export const AREA_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const AREA_SLUG_MAX_LENGTH = 40;
 
 /**
+ * Slug de un nombre de área: sin acentos, en minúsculas y con guiones
+ * ("Impresión 3D" → "impresion-3d"). Vacío si el nombre no tiene letras ni
+ * números.
+ */
+export function slugifyAreaName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, AREA_SLUG_MAX_LENGTH)
+    .replace(/-+$/, '');
+}
+
+/**
  * Roles que tenían las áreas antes de separarlas (migración
  * 20261024120000_areas_catalog). Sólo se usan para leer access tokens
  * emitidos antes del despliegue (ver `normalizeAccessPayload`); se puede

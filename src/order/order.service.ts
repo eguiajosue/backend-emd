@@ -1005,7 +1005,7 @@ export class OrderService {
           id: true,
           area: true,
           status: true,
-          prepStage: true,
+          stage: { select: { id: true, key: true, name: true, kind: true } },
           assignedUserId: true,
           supply: TASK_SUPPLY_SELECT,
         },

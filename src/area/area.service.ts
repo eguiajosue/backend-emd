@@ -1,6 +1,13 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DEFAULT_AREAS } from './default-areas';
+import { AREA_STAGES_INCLUDE, type AreaStageView } from './area-stages';
+import {
+  AREA_FIELDS_INCLUDE,
+  AREA_MACHINES_INCLUDE,
+  type AreaFieldView,
+  type AreaMachineView,
+} from './area-config';
 
 /** Lo que el resto de la app necesita saber de un área (ver model Area). */
 export interface AreaView {
@@ -13,8 +20,21 @@ export interface AreaView {
   isProductionDestination: boolean;
   hasInventory: boolean;
   generalViewEnabled: boolean;
+  /** Sugerencias de categoría/unidad al dar de alta artículos de inventario del área. */
+  inventoryCategories: string[];
+  inventoryUnits: string[];
   sortOrder: number;
   active: boolean;
+  /** Etapas previas a producción (activas, en orden); vacío = las tareas nacen listas para producir. */
+  stages: AreaStageView[];
+  /** Tareas abiertas que el área puede llevar a la vez (null = sin tope). */
+  capacity: number | null;
+  /** Horas típicas de producción por tarea (null = sin dato). */
+  turnaroundHours: number | null;
+  /** Máquinas o equipos activos del área. */
+  machines: AreaMachineView[];
+  /** Datos propios que se capturan en cada tarea del área (activos, en orden). */
+  fields: AreaFieldView[];
 }
 
 /**
@@ -24,7 +44,7 @@ export interface AreaView {
  */
 export type AreaUse = 'any' | 'production';
 
-const AREA_SELECT = {
+export const AREA_SELECT = {
   id: true,
   slug: true,
   name: true,
@@ -34,8 +54,15 @@ const AREA_SELECT = {
   isProductionDestination: true,
   hasInventory: true,
   generalViewEnabled: true,
+  inventoryCategories: true,
+  inventoryUnits: true,
   sortOrder: true,
   active: true,
+  stages: AREA_STAGES_INCLUDE,
+  capacity: true,
+  turnaroundHours: true,
+  machines: AREA_MACHINES_INCLUDE,
+  fields: AREA_FIELDS_INCLUDE,
 } as const;
 
 /**
@@ -76,6 +103,11 @@ export class AreaService {
   async slugs(use: AreaUse = 'any'): Promise<string[]> {
     const areas = await this.findAll();
     return areas.filter((a) => fitsUse(a, use)).map((a) => a.slug);
+  }
+
+  /** Etapas previas a producción de un área; vacío si no tiene o no existe. */
+  async stagesOf(slug: string): Promise<AreaStageView[]> {
+    return (await this.findBySlug(slug))?.stages ?? [];
   }
 
   /** Slugs de las áreas activas con inventario propio. */
@@ -174,6 +206,16 @@ export function defaultAreaViews(): AreaView[] {
     isProductionDestination: !area.isDesign,
     hasInventory: true,
     generalViewEnabled: true,
+    inventoryCategories: [],
+    inventoryUnits: [],
     active: true,
+    capacity: null,
+    turnaroundHours: null,
+    machines: [],
+    fields: [],
+    stages: (area.stages ?? []).map((stage, stageIndex) => ({
+      id: (index + 1) * 100 + stageIndex + 1,
+      ...stage,
+    })),
   }));
 }
