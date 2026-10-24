@@ -5,18 +5,14 @@ import { ExpoPushService } from './expo-push.service';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 
 const STAFF_ROLES = [
   Role.ADMIN,
   Role.RECEPCION,
   Role.SUPERUSER,
-  Role.TALLER,
-  Role.DTF,
-  Role.BORDADO,
-  Role.DISENO,
-  Role.LASER,
-  Role.IMPRESIONES,
+  AreaAccess.ANY,
 ] as const;
 
 @ApiTags('push')
@@ -38,17 +34,7 @@ export class PushController {
     return { publicKey: this.pushService.publicKey ?? null };
   }
 
-  @Auth(
-    Role.ADMIN,
-    Role.RECEPCION,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.ADMIN, Role.RECEPCION, Role.SUPERUSER, AreaAccess.ANY)
   @Post('subscribe')
   subscribe(
     @Body() body: SubscribeInput,
@@ -57,17 +43,7 @@ export class PushController {
     return this.pushService.subscribe(user.sub, body);
   }
 
-  @Auth(
-    Role.ADMIN,
-    Role.RECEPCION,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.ADMIN, Role.RECEPCION, Role.SUPERUSER, AreaAccess.ANY)
   @Delete('subscribe')
   async unsubscribe(
     @ActiveUser() user: AccessTokenPayload,

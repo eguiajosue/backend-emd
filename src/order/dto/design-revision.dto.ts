@@ -2,7 +2,6 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
-  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -10,7 +9,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { OrderFileDto, PRODUCTION_AREAS } from './create-order.dto';
+import { MAX_ORDER_AREAS, OrderFileDto } from './create-order.dto';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
 import { AreaSupplyDto } from './order-area-supply.dto';
 
@@ -77,23 +77,23 @@ export class AddDesignFeedbackDto {
  */
 export class ApproveDesignRevisionDto {
   @IsOptional()
-  @IsIn(PRODUCTION_AREAS)
-  productionArea?: (typeof PRODUCTION_AREAS)[number];
+  @IsAreaSlug()
+  productionArea?: string;
 
   // Áreas que van a trabajar el pedido una vez autorizado. Diseño puede definir
   // varias aquí si el montaje quedó con más de una técnica (WORKFLOW.md §3).
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(PRODUCTION_AREAS.length)
-  @IsIn(PRODUCTION_AREAS, { each: true })
-  productionAreas?: (typeof PRODUCTION_AREAS)[number][];
+  @ArrayMaxSize(MAX_ORDER_AREAS)
+  @IsAreaSlug({ each: true })
+  productionAreas?: string[];
 
   // Hoja de materiales: origen de los insumos de cada área (cliente o
   // nosotros). Es obligatoria: el pedido pasa a producción al guardarla, en
   // la misma transacción que la autorización (WORKFLOW.md §3).
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(PRODUCTION_AREAS.length)
+  @ArrayMaxSize(MAX_ORDER_AREAS)
   @ValidateNested({ each: true })
   @Type(() => AreaSupplyDto)
   supplies?: AreaSupplyDto[];

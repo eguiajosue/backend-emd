@@ -18,7 +18,7 @@ const PNG =
 const PNG_DATA_URL = `data:image/png;base64,${PNG}`;
 const CREATED_AT = new Date('2026-10-05T12:00:00.000Z');
 const AUTHOR = { id: 7, firstName: 'Ana', lastName: 'Ruiz', username: 'ana' };
-const RECEPCION = { userId: 7, roles: ['recepcion'] };
+const RECEPCION = { userId: 7, roles: ['recepcion'], areas: [] };
 
 const studioConfig = () => ({
   garment: 'tshirt',

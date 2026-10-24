@@ -58,6 +58,7 @@ model User {
   lastSeenAt      DateTime? // Última vez que se desconectó el último socket vivo de este usuario (ver NotificationsGateway.handleDisconnect). Null si nunca se conectó por WebSocket.
 
   roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.
+  areas                   Area[] // Áreas de trabajo del usuario (ver Area). Separadas de los roles: el rol dice QUÉ puede hacer, el área DÓNDE trabaja.
   branch                  Branch?                  @relation(fields: [branchId], references: [id], onDelete: SetNull) // Sucursal de la cuenta (ver Branch).
   orders                  Order[] // Relación uno a muchos con Order (pedidos creados por el usuario).
   assignedOrders          Order[]                  @relation("AssignedOrders") // Pedidos asignados a este usuario para trabajarlos.
@@ -495,10 +496,26 @@ model CalendarTask {
   @@index([orderId])
 }
 
-model AreaVisibilitySetting {
-  id                 Int     @id @default(autoincrement()) // Identificador único de la configuración.
-  role               String  @unique // Rol operativo ('taller' | 'dtf' | 'bordado' | 'diseno' | 'laser' | 'impresiones').
-  generalViewEnabled Boolean @default(true) // Si es true, todos los usuarios del rol ven todos los pedidos de su etapa; si es false, solo ven los pedidos sin asignar o asignados a ellos mismos.
+/// Área de trabajo (departamento): Taller, DTF, Bordado, Diseño, Láser,
+/// Impresiones y las que se den de alta desde Configuración. Es el catálogo
+/// del que salen las áreas válidas de un pedido, de una tarea, del inventario
+/// y de los canales de chat (ver docs/areas.md).
+model Area {
+  id                      Int      @id @default(autoincrement())
+  slug                    String   @unique // Identificador estable en ASCII ('taller', 'impresion-3d'). Es lo que se guarda en Order.area, OrderAreaTask.area, InventoryItem.area y ChatConversation.area, y viaja en el JWT: no cambia nunca.
+  name                    String   @unique // Nombre visible ("Láser").
+  icon                    String // Nombre del ícono de lucide-react ("Zap"). El frontend lo traduce con su catálogo de íconos.
+  color                   String // Color base #rrggbb. El frontend deriva el tinte y el texto legible, en claro y en oscuro.
+  isDesign                Boolean  @default(false) // Sólo Diseño: fase previa con su propio circuito, nunca destino de producción.
+  isProductionDestination Boolean  @default(true) // Si un pedido puede ir a producirse aquí (Order.productionArea / OrderAreaTask).
+  hasInventory            Boolean  @default(true) // Si lleva inventario propio (InventoryItem.area).
+  generalViewEnabled      Boolean  @default(true) // Si es true, todos los usuarios del área ven todos los pedidos de su etapa; si es false, sólo los sin asignar o asignados a ellos mismos.
+  sortOrder               Int      @default(0) // Orden en listas y selectores.
+  active                  Boolean  @default(true) // Un área desactivada no se borra (sus pedidos, tareas e inventario se conservan), pero deja de ofrecerse y no da acceso.
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  users User[] // Personas (y la cuenta compartida) que trabajan en el área.
 }
 
 model AppSetting {

@@ -94,6 +94,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     const result = await orderService.findAll(undefined, {
       userId: 99,
       roles: ['admin'],
+      areas: [],
     });
     expect(result as any[]).toHaveLength(orders.length);
     expect(areaVisibilityService.findAll).not.toHaveBeenCalled();
@@ -103,6 +104,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     const result = await orderService.findAll(undefined, {
       userId: 99,
       roles: ['recepcion'],
+      areas: [],
     });
     expect(result as any[]).toHaveLength(orders.length);
   });
@@ -110,7 +112,8 @@ describe('OrderService - visibilidad por área (findAll)', () => {
   it('rol operativo: ve todos los pedidos de su área, asignados o no, sin consultar AreaVisibilitySetting', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
-      roles: ['taller'],
+      roles: [],
+      areas: ['taller'],
     });
 
     // Todos los pedidos del área "taller" (ids 1, 2 y 3), incluido el
@@ -123,7 +126,8 @@ describe('OrderService - visibilidad por área (findAll)', () => {
   it('diseñador: ve cualquier pedido de "diseno", esté o no asignado a él', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
-      roles: ['diseno'],
+      roles: [],
+      areas: ['diseno'],
     });
 
     // Solo el área "diseno" (id 4). id 5 (area: null) queda fuera.
@@ -133,7 +137,8 @@ describe('OrderService - visibilidad por área (findAll)', () => {
   it('usuario con múltiples roles operativos: ve todos los pedidos de todas sus áreas', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
-      roles: ['taller', 'diseno'],
+      roles: [],
+      areas: ['taller', 'diseno'],
     });
 
     expect((result as any[]).map((o: any) => o.id).sort()).toEqual([
@@ -144,7 +149,8 @@ describe('OrderService - visibilidad por área (findAll)', () => {
   it('pedidos con area null no son visibles para roles operativos', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
-      roles: ['taller'],
+      roles: [],
+      areas: ['taller'],
     });
 
     expect((result as any[]).map((o: any) => o.id)).not.toContain(5);
@@ -154,20 +160,22 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     const result = await orderService.findAll(undefined, {
       userId: 99,
       roles: ['superuser'],
+      areas: [],
     });
     expect(result as any[]).toHaveLength(orders.length);
   });
 
   it.each(['taller', 'dtf', 'bordado', 'diseno', 'laser', 'impresiones'])(
-    'rol operativo "%s" no ve pedidos de otras áreas',
-    async (role) => {
+    'quien trabaja en "%s" no ve pedidos de otras áreas',
+    async (area) => {
       const result = await orderService.findAll(undefined, {
         userId: 7,
-        roles: [role],
+        roles: [],
+        areas: [area],
       });
       const visibleAreas = new Set((result as any[]).map((o: any) => o.area));
-      for (const area of visibleAreas) {
-        expect(area).toBe(role);
+      for (const visible of visibleAreas) {
+        expect(visible).toBe(area);
       }
     },
   );
@@ -175,7 +183,8 @@ describe('OrderService - visibilidad por área (findAll)', () => {
   it('usuario con roles diseno+bordado+dtf (caso reportado) ve las órdenes de esas áreas sin ser bloqueado', async () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
-      roles: ['diseno', 'bordado', 'dtf'],
+      roles: [],
+      areas: ['diseno', 'bordado', 'dtf'],
     });
 
     // Sólo hay pedidos de "diseno" en el fixture (id 4); no debe lanzar ni
@@ -187,6 +196,7 @@ describe('OrderService - visibilidad por área (findAll)', () => {
     const result = await orderService.findAll(undefined, {
       userId: 7,
       roles: [],
+      areas: [],
     });
     expect(result as any[]).toEqual([]);
   });
@@ -273,7 +283,7 @@ describe('OrderService - exportOrders no permite saltar el filtro de área con ?
   it('rol operativo: pedir ?area=otraArea no devuelve pedidos de esa otra área (sin bypass)', async () => {
     const result = await orderService.exportOrders(
       { area: 'diseno' },
-      { userId: 7, roles: ['taller'] },
+      { userId: 7, roles: [], areas: ['taller'] },
     );
     expect(result).toEqual([]);
   });
@@ -281,7 +291,7 @@ describe('OrderService - exportOrders no permite saltar el filtro de área con ?
   it('rol operativo: sin filtro explícito, sólo exporta los pedidos de su propia área', async () => {
     const result = await orderService.exportOrders(
       {},
-      { userId: 7, roles: ['taller'] },
+      { userId: 7, roles: [], areas: ['taller'] },
     );
     expect((result as any[]).map((o: any) => o.id)).toEqual([1]);
   });
@@ -289,7 +299,7 @@ describe('OrderService - exportOrders no permite saltar el filtro de área con ?
   it('admin: ?area= sí filtra (visibilidad total, sin restricción propia que combinar)', async () => {
     const result = await orderService.exportOrders(
       { area: 'diseno' },
-      { userId: 99, roles: ['admin'] },
+      { userId: 99, roles: ['admin'], areas: [] },
     );
     expect((result as any[]).map((o: any) => o.id)).toEqual([2]);
   });
@@ -323,7 +333,7 @@ describe('OrderService - findHistory con filtros', () => {
         deliveryFrom: '2026-10-01T06:00:00.000Z',
         deliveryTo: '2026-10-31T05:59:59.999Z',
       },
-      { userId: 1, roles: ['admin'] },
+      { userId: 1, roles: ['admin'], areas: [] },
     );
 
     const where = findMany.mock.calls[0][0].where;

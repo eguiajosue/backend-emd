@@ -9,6 +9,7 @@ describe('OrderService - sucursal', () => {
   const branchUser = {
     userId: 7,
     roles: ['sucursal'],
+    areas: [],
     username: 'puntomadero',
   };
   const dto: any = {
@@ -149,7 +150,7 @@ describe('OrderService - sucursal', () => {
   });
 
   it('Recepción no necesita empleado y el pedido queda sin sucursal', async () => {
-    await service.create(dto, { userId: 2, roles: ['recepcion'] });
+    await service.create(dto, { userId: 2, roles: ['recepcion'], areas: [] });
     const data = prisma.order.create.mock.calls[0][0].data;
     expect(data.branch).toBeUndefined();
     expect(data.branchEmployee).toBeUndefined();
@@ -246,7 +247,11 @@ describe('OrderService - sucursal', () => {
     });
 
     it('el orden por id se conserva para la matriz', async () => {
-      await service.findAll(undefined, { userId: 2, roles: ['recepcion'] });
+      await service.findAll(undefined, {
+        userId: 2,
+        roles: ['recepcion'],
+        areas: [],
+      });
       expect(prisma.order.findMany.mock.calls[0][0].orderBy).toEqual([
         { id: 'desc' },
       ]);
@@ -285,7 +290,7 @@ describe('OrderService - sucursal', () => {
     it('Recepción puede usar cualquier cliente (no se valida sucursal)', async () => {
       await service.create(
         { ...dto, clientId: 10 },
-        { userId: 2, roles: ['recepcion'] },
+        { userId: 2, roles: ['recepcion'], areas: [] },
       );
       expect(prisma.client.findUnique).not.toHaveBeenCalled();
     });

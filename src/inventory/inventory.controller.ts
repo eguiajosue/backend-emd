@@ -16,6 +16,7 @@ import { Auth } from 'src/common/decorators/auth.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { InventoryService } from './inventory.service';
 import { CreateInventoryItemDto } from './dto/create-inventory-item.dto';
@@ -38,14 +39,8 @@ export const INVENTORY_MANAGER_ROLES = [
   Role.SUPERUSER,
 ] as const;
 
-/** Áreas de producción con acceso a SU inventario (Diseño no lleva insumos aquí). */
-export const INVENTORY_AREA_ROLES = [
-  Role.TALLER,
-  Role.DTF,
-  Role.BORDADO,
-  Role.LASER,
-  Role.IMPRESIONES,
-] as const;
+/** Las áreas de producción entran a SU inventario (Diseño no lleva insumos aquí). */
+export const INVENTORY_AREA_ROLES = [AreaAccess.PRODUCTION] as const;
 
 /**
  * Inventario por departamento. Recepción, admin y superuser lo gestionan
@@ -64,7 +59,7 @@ export class InventoryController {
   /** Departamentos que el usuario puede gestionar (para armar las pestañas). */
   @Get('areas')
   areas(@ActiveUser() user: AccessTokenPayload) {
-    return this.inventoryService.areasFor(user.roles);
+    return this.inventoryService.areasFor(user);
   }
 
   @Get()

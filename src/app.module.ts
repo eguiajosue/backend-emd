@@ -19,6 +19,7 @@ import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationModule } from './notification/notification.module';
 import { HealthModule } from './health/health.module';
+import { AreaModule } from './area/area.module';
 import { AreaVisibilityModule } from './area-visibility/area-visibility.module';
 import { OrderProductPresetModule } from './order-product-preset/order-product-preset.module';
 import { PerformanceModule } from './performance/performance.module';
@@ -81,6 +82,7 @@ import { AppController } from './app.controller';
     NotificationsModule,
     NotificationModule,
     HealthModule,
+    AreaModule,
     AreaVisibilityModule,
     OrderProductPresetModule,
     PerformanceModule,

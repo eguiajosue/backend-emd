@@ -81,7 +81,7 @@ describe('Hoja de materiales: visibilidad y descuento pendiente', () => {
 
   it('sucursal: 403 al consultar los insumos', async () => {
     await expect(
-      service.getSupplySheet(5, { userId: 7, roles: ['sucursal'] }),
+      service.getSupplySheet(5, { userId: 7, roles: ['sucursal'], areas: [] }),
     ).rejects.toMatchObject({ status: 403 });
     expect(prisma.orderAreaTask.findMany).not.toHaveBeenCalled();
   });
@@ -89,7 +89,8 @@ describe('Hoja de materiales: visibilidad y descuento pendiente', () => {
   it('un área sólo recibe las hojas (y movimientos) de SUS áreas', async () => {
     const sheet = await service.getSupplySheet(5, {
       userId: 20,
-      roles: ['dtf'],
+      roles: [],
+      areas: ['dtf'],
     });
     expect(sheet.areas.map((a) => a.area)).toEqual(['dtf']);
     expect(prisma.orderAreaTask.findMany.mock.calls[0][0].where).toEqual({
@@ -105,6 +106,7 @@ describe('Hoja de materiales: visibilidad y descuento pendiente', () => {
     const sheet = await service.getSupplySheet(5, {
       userId: 1,
       roles: ['recepcion'],
+      areas: [],
     });
     expect(sheet.areas.map((a) => a.area)).toEqual(['bordado', 'dtf']);
   });
@@ -113,6 +115,7 @@ describe('Hoja de materiales: visibilidad y descuento pendiente', () => {
     const sheet = await service.getSupplySheet(5, {
       userId: 1,
       roles: ['admin'],
+      areas: [],
     });
     const [bordado, dtf] = sheet.areas;
     expect(bordado.pendingDiscount).toBe(true);
@@ -141,6 +144,7 @@ describe('Hoja de materiales: visibilidad y descuento pendiente', () => {
     const sheet = await service.getSupplySheet(5, {
       userId: 1,
       roles: ['admin'],
+      areas: [],
     });
     expect(sheet.areas[0].pendingDiscount).toBe(false);
     expect(sheet.areas[0].supply!.lines[0]).toMatchObject({
@@ -162,11 +166,13 @@ describe('Hoja de materiales: visibilidad y descuento pendiente', () => {
       const branch = await service.findByOrder(5, {
         userId: 7,
         roles: ['sucursal'],
+        areas: [],
       });
       expect(branch[0]).not.toHaveProperty('supply');
       const manager = await service.findByOrder(5, {
         userId: 1,
         roles: ['recepcion'],
+        areas: [],
       });
       expect(manager[0]).toHaveProperty('supply');
     });
@@ -185,12 +191,14 @@ describe('Hoja de materiales: visibilidad y descuento pendiente', () => {
       const branchSelect = (orderService as any).orderListSelect({
         userId: 7,
         roles: ['sucursal'],
+        areas: [],
       });
       expect(branchSelect.areaTasks.select).not.toHaveProperty('supply');
       expect(branchSelect.areaTasks.select).toHaveProperty('status');
       const managerSelect = (orderService as any).orderListSelect({
         userId: 1,
         roles: ['recepcion'],
+        areas: [],
       });
       expect(managerSelect.areaTasks.select).toHaveProperty('supply');
     });

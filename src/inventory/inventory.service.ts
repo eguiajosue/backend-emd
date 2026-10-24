@@ -16,14 +16,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { AccessTokenPayload } from '../auth/auth.service';
 import { isFullVisibilityRole } from '../order/role-stage-mapping';
+import { AreaService } from '../area/area.service';
+import { belongsToArea, RECEPTION_INVENTORY_AREA } from '../area/area-access';
 import { toCsv } from '../common/utils/csv';
 import { reservedByItem } from '../order/order-area-supply';
 import {
   BARCODE_MAX_LENGTH,
   BARCODE_MIN_LENGTH,
   BARCODE_PATTERN,
-  INVENTORY_AREAS,
-  InventoryArea,
   InventoryStockStatus,
   RESERVED_BARCODE_PATTERN,
   defaultBarcode,
@@ -57,17 +57,7 @@ export interface InventoryMovementsFilter {
   limit?: number;
 }
 
-type Actor = Pick<AccessTokenPayload, 'sub' | 'roles'>;
-
-export const AREA_LABELS: Record<InventoryArea, string> = {
-  taller: 'Taller',
-  dtf: 'DTF',
-  bordado: 'Bordado',
-  diseno: 'Diseño',
-  laser: 'Láser',
-  impresiones: 'Impresiones',
-  recepcion: 'Recepción',
-};
+type Actor = Pick<AccessTokenPayload, 'sub' | 'roles' | 'areas'>;
 
 const ITEM_SELECT = {
   id: true,
@@ -207,9 +197,9 @@ export function stockStatusOf(
  * bordado, tintas) sólo existen aquí.
  *
  * Acceso: admin/superuser/recepción ven y gestionan (crean, editan, borran,
- * ajustan y consultan la bitácora) todos los departamentos. Cada rol de
- * producción (taller, dtf, bordado, láser, impresiones) sólo ve los artículos
- * de su(s) área(s) y puede registrar entradas y consumos de ellos y avisar
+ * ajustan y consultan la bitácora) todos los departamentos: las áreas con
+ * inventario propio (`Area.hasInventory`) más Recepción. Quien trabaja en un
+ * área de producción sólo ve los artículos de su(s) área(s) y puede registrar entradas y consumos de ellos y avisar
  * que algo requiere reabasto; cada uno de esos cambios avisa a Recepción.
  * Un artículo de otra área da 403 (por id) o 404 (por código de barras).
  */
@@ -220,16 +210,37 @@ export class InventoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
   ) {}
 
-  /** Departamentos cuyo inventario puede ver/gestionar este usuario. */
-  areasFor(roles: string[] | undefined): InventoryArea[] {
-    if (isFullVisibilityRole(roles)) return [...INVENTORY_AREAS];
-    return INVENTORY_AREAS.filter((area) => roles?.includes(area));
+  /**
+   * Departamentos con inventario: las áreas activas con inventario propio
+   * (Area.hasInventory) más Recepción.
+   */
+  private async inventoryAreas(): Promise<string[]> {
+    return [
+      ...(await this.areaService.inventorySlugs()),
+      RECEPTION_INVENTORY_AREA,
+    ];
   }
 
-  private assertArea(actor: Actor, area: string) {
-    if (!this.areasFor(actor.roles).includes(area as InventoryArea)) {
+  /** Departamentos cuyo inventario puede ver/gestionar este usuario. */
+  async areasFor(actor: Pick<Actor, 'roles' | 'areas'>): Promise<string[]> {
+    const all = await this.inventoryAreas();
+    if (isFullVisibilityRole(actor.roles)) return all;
+    return all.filter((area) => belongsToArea(actor, area));
+  }
+
+  /** Nombre visible del departamento ("Recepción", "Bordado"). */
+  private async areaLabel(area: string): Promise<string> {
+    if (area === RECEPTION_INVENTORY_AREA) return 'Recepción';
+    return this.areaService.labelOf(area);
+  }
+
+  private async assertArea(actor: Actor, area: string) {
+    if (!(await this.areasFor(actor)).includes(area)) {
       throw new ForbiddenException(
         'No tienes acceso al inventario de ese departamento',
       );
@@ -253,12 +264,12 @@ export class InventoryService {
   }
 
   /** Áreas a consultar: la pedida (si tiene acceso) o todas las suyas. */
-  private scopeAreas(actor: Actor, area?: string): string[] {
+  private async scopeAreas(actor: Actor, area?: string): Promise<string[]> {
     if (area) {
-      this.assertArea(actor, area);
+      await this.assertArea(actor, area);
       return [area];
     }
-    return this.areasFor(actor.roles);
+    return this.areasFor(actor);
   }
 
   /**
@@ -347,7 +358,7 @@ export class InventoryService {
   }
 
   async findAll(actor: Actor, area?: string) {
-    const areas = this.scopeAreas(actor, area);
+    const areas = await this.scopeAreas(actor, area);
     const items = await this.prisma.inventoryItem.findMany({
       where: { area: { in: areas } },
       select: ITEM_SELECT,
@@ -369,7 +380,7 @@ export class InventoryService {
 
   async findOne(id: number, actor: Actor) {
     const item = await this.findRowOrThrow(id);
-    this.assertArea(actor, item.area);
+    await this.assertArea(actor, item.area);
     return this.serializeItem(item, await this.reservedOf(id));
   }
 
@@ -393,10 +404,7 @@ export class InventoryService {
       where: { barcode: code },
       select: ITEM_SELECT,
     });
-    if (
-      !item ||
-      !this.areasFor(actor.roles).includes(item.area as InventoryArea)
-    ) {
+    if (!item || !(await this.areasFor(actor)).includes(item.area)) {
       throw new NotFoundException(
         `No hay ningún artículo con el código ${code}`,
       );
@@ -420,7 +428,7 @@ export class InventoryService {
 
   async create(dto: CreateInventoryItemDto, actor: Actor) {
     this.assertCanManage(actor);
-    this.assertArea(actor, dto.area);
+    await this.assertArea(actor, dto.area);
     const initial = dto.initialQuantity ?? 0;
     const customBarcode =
       dto.barcode === undefined || dto.barcode === null || dto.barcode === ''
@@ -489,9 +497,9 @@ export class InventoryService {
   async update(id: number, dto: UpdateInventoryItemDto, actor: Actor) {
     this.assertCanManage(actor);
     const before = await this.findRowOrThrow(id);
-    this.assertArea(actor, before.area);
+    await this.assertArea(actor, before.area);
     if (dto.area !== undefined && dto.area !== before.area) {
-      this.assertArea(actor, dto.area);
+      await this.assertArea(actor, dto.area);
     }
     // undefined: no se toca; null / "": vuelve al código por omisión.
     let barcode: string | undefined;
@@ -557,7 +565,7 @@ export class InventoryService {
       );
     }
     const item = await this.findRowOrThrow(id);
-    this.assertArea(actor, item.area);
+    await this.assertArea(actor, item.area);
     const source: InventoryMovementSource = manager
       ? (via ?? 'recepcion')
       : 'area';
@@ -698,7 +706,7 @@ export class InventoryService {
     actor: Actor,
   ) {
     const recipients = await this.managerRecipients(actor.sub);
-    const areaLabel = AREA_LABELS[item.area as InventoryArea] ?? item.area;
+    const areaLabel = await this.areaLabel(item.area);
     const who = await this.actorName(actor.sub);
     const amount = Math.abs(after - before);
     await this.notificationService.createNotificationForUsers(recipients, {
@@ -720,7 +728,7 @@ export class InventoryService {
    */
   private async notifyLowStock(item: ItemRow, after: number, actorId: number) {
     const recipients = await this.managerRecipients(actorId);
-    const areaLabel = AREA_LABELS[item.area as InventoryArea] ?? item.area;
+    const areaLabel = await this.areaLabel(item.area);
     await this.notificationService.createNotificationForUsers(recipients, {
       type: 'inventory_low_stock',
       title:
@@ -742,10 +750,10 @@ export class InventoryService {
     const where: Prisma.InventoryMovementWhereInput = {};
     if (filter.itemId !== undefined) {
       const item = await this.findRowOrThrow(filter.itemId);
-      this.assertArea(actor, item.area);
+      await this.assertArea(actor, item.area);
       where.itemId = filter.itemId;
     }
-    const areas = this.scopeAreas(actor, filter.area);
+    const areas = await this.scopeAreas(actor, filter.area);
     if (filter.itemId === undefined || filter.area) {
       where.OR = [
         { area: { in: areas } },
@@ -800,7 +808,7 @@ export class InventoryService {
     let unit = dto.unit ?? null;
     if (dto.itemId !== undefined) {
       const item = await this.findRowOrThrow(dto.itemId);
-      this.assertArea(actor, item.area);
+      await this.assertArea(actor, item.area);
       if (dto.area && dto.area !== item.area) {
         throw new BadRequestException(
           'El artículo no pertenece al departamento indicado',
@@ -817,12 +825,12 @@ export class InventoryService {
       }
       itemName = dto.itemName;
       if (dto.area) {
-        this.assertArea(actor, dto.area);
+        await this.assertArea(actor, dto.area);
         area = dto.area;
       } else {
         const own = this.isManager(actor)
           ? ['recepcion']
-          : this.areasFor(actor.roles);
+          : await this.areasFor(actor);
         if (own.length !== 1) {
           throw new BadRequestException('Indica de qué departamento es');
         }
@@ -852,7 +860,7 @@ export class InventoryService {
 
   private async notifyRestockCreated(row: RestockRow, actor: Actor) {
     const recipients = await this.managerRecipients(actor.sub);
-    const areaLabel = AREA_LABELS[row.area as InventoryArea] ?? row.area;
+    const areaLabel = await this.areaLabel(row.area);
     const qty =
       row.quantity !== null
         ? ` · ${Number(row.quantity)}${row.unit ? ` ${row.unit}` : ''}`
@@ -874,7 +882,7 @@ export class InventoryService {
    */
   async findRestockRequests(actor: Actor, query: RestockRequestsQueryDto) {
     const where: Prisma.RestockRequestWhereInput = {
-      area: { in: this.scopeAreas(actor, query.area) },
+      area: { in: await this.scopeAreas(actor, query.area) },
     };
     if (query.status) where.status = query.status;
     else if (query.open === 'true')
@@ -892,13 +900,13 @@ export class InventoryService {
   async restockPendingCount(actor: Actor) {
     const pending = await this.prisma.restockRequest.count({
       where: {
-        area: { in: this.areasFor(actor.roles) },
+        area: { in: await this.areasFor(actor) },
         status: RestockRequestStatus.PENDIENTE,
       },
     });
     const open = await this.prisma.restockRequest.count({
       where: {
-        area: { in: this.areasFor(actor.roles) },
+        area: { in: await this.areasFor(actor) },
         status: { not: RestockRequestStatus.RESUELTO },
       },
     });
@@ -947,6 +955,10 @@ export class InventoryService {
 
   async exportCsv(actor: Actor, area?: string) {
     const items = await this.findAll(actor, area);
+    const labels = new Map<string, string>();
+    for (const slug of new Set(items.map((item) => item.area))) {
+      labels.set(slug, await this.areaLabel(slug));
+    }
     const statusLabel: Record<InventoryStockStatus, string> = {
       ok: 'Disponible',
       low: 'Bajo stock',
@@ -970,7 +982,7 @@ export class InventoryService {
         'Proveedor',
       ],
       items.map((item) => [
-        AREA_LABELS[item.area as InventoryArea] ?? item.area,
+        labels.get(item.area) ?? item.area,
         item.name,
         item.sku,
         item.barcode,

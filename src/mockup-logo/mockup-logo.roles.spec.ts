@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { HTTP_CODE_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { MockupLogoController } from './mockup-logo.controller';
 
 /**
@@ -26,7 +27,7 @@ describe('MockupLogoController: roles y contrato de rutas', () => {
     Role.RECEPCION,
     Role.ADMIN,
     Role.SUPERUSER,
-    Role.DISENO,
+    AreaAccess.DESIGN,
   ].sort();
 
   // La cuenta de sucursal usa Mockups: lee, guarda y usa; renombrar y borrar

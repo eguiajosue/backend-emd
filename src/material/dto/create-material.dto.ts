@@ -1,7 +1,6 @@
 import {
   ArrayMaxSize,
   IsArray,
-  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -15,7 +14,8 @@ import {
   EmptyToUndefined,
   TrimString,
 } from 'src/common/transformers/empty-to-undefined';
-import { ORDER_AREAS } from 'src/order/dto/create-order.dto';
+import { MAX_ORDER_AREAS } from 'src/order/dto/create-order.dto';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 
 /**
  * Alta de un material/insumo del catálogo (PVC, acrílico, MDF, perfiles
@@ -70,9 +70,9 @@ export class CreateMaterialDto {
   /** Áreas de producción donde se suele usar este material. */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(ORDER_AREAS.length)
-  @IsIn(ORDER_AREAS, { each: true })
-  areas?: (typeof ORDER_AREAS)[number][];
+  @ArrayMaxSize(MAX_ORDER_AREAS)
+  @IsAreaSlug({ each: true })
+  areas?: string[];
 
   /** Precio de referencia, en pesos mexicanos. Opcional: no todos los materiales lo tienen cargado todavía. */
   @IsOptional()

@@ -16,7 +16,7 @@ import {
   EmptyToUndefined,
   TrimString,
 } from 'src/common/transformers/empty-to-undefined';
-import { INVENTORY_AREAS } from '../inventory.constants';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 
 /**
  * Aviso "se acabó / requiere reabasto". Se indica un artículo del inventario
@@ -37,8 +37,8 @@ export class CreateRestockRequestDto {
   itemName?: string;
 
   @IsOptional()
-  @IsIn(INVENTORY_AREAS)
-  area?: (typeof INVENTORY_AREAS)[number];
+  @IsAreaSlug()
+  area?: string;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 3 })
@@ -90,8 +90,8 @@ export class RestockRequestsQueryDto {
   open?: 'true' | 'false';
 
   @IsOptional()
-  @IsIn(INVENTORY_AREAS)
-  area?: (typeof INVENTORY_AREAS)[number];
+  @IsAreaSlug()
+  area?: string;
 
   @IsOptional()
   @Type(() => Number)

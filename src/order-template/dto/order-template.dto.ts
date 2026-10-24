@@ -5,7 +5,6 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
-  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -17,7 +16,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
-import { PRODUCTION_AREAS } from 'src/order/dto/create-order.dto';
+import { MAX_ORDER_AREAS } from 'src/order/dto/create-order.dto';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 
 /** Mismos límites que el alta de pedido (`CreateOrderDto`). */
 export const MAX_TEMPLATE_PRODUCTS = 100;
@@ -72,8 +72,8 @@ export class CreateOrderTemplateDto {
   /** Áreas de producción, la principal primero. Diseño no es un área de producción. */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(PRODUCTION_AREAS.length)
-  @IsIn(PRODUCTION_AREAS, { each: true })
+  @ArrayMaxSize(MAX_ORDER_AREAS)
+  @IsAreaSlug({ each: true })
   productionAreas?: string[];
 
   @IsOptional()

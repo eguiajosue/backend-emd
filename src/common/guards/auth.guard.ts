@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
+import { normalizeAccessPayload } from 'src/area/area-access';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -30,7 +31,7 @@ export class AuthGuard implements CanActivate {
         // Un refresh token no habilita acceso a los endpoints protegidos.
         throw new UnauthorizedException();
       }
-      request.user = payload;
+      request.user = normalizeAccessPayload(payload);
     } catch {
       throw new UnauthorizedException();
     }

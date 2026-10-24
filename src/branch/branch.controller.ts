@@ -17,6 +17,7 @@ import { Throttle } from '@nestjs/throttler';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { BranchService } from './branch.service';
 import { BranchLogoVariant, ParseBranchLogoVariantPipe } from './branch-logo';
@@ -53,7 +54,7 @@ export class BranchController {
    * porque lo necesitan las tarjetas de producción y el Modo TV. Express
    * agrega el ETag; `max-age` evita pedirlo en cada pantalla.
    */
-  @Auth(...Object.values(Role))
+  @Auth(...Object.values(Role), AreaAccess.ANY)
   @Header('Cache-Control', 'private, max-age=300')
   @Get('logos')
   findLogos() {

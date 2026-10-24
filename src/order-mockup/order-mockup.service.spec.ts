@@ -17,7 +17,11 @@ const MINIMAL_JPEG_BASE64 = Buffer.from([
   0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
 ]).toString('base64');
 
-const RECEPCION: RequestingUser = { userId: 7, roles: ['recepcion'] };
+const RECEPCION: RequestingUser = {
+  userId: 7,
+  roles: ['recepcion'],
+  areas: [],
+};
 const CREATED_AT = new Date('2026-10-05T12:00:00.000Z');
 
 const config = (overrides: Record<string, unknown> = {}) => ({

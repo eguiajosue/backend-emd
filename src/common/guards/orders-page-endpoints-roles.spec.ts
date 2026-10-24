@@ -1,6 +1,7 @@
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { UserController } from 'src/user/user.controller';
 import { ClientController } from 'src/client/client.controller';
 import { OrderController } from 'src/order/order.controller';
@@ -30,12 +31,7 @@ describe('Endpoints consultados por la pantalla de Pedidos: paridad de roles', (
     Role.RECEPCION,
     Role.ADMIN,
     Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
+    AreaAccess.ANY,
   ].sort();
 
   it('la constante compartida ORDER_VIEWING_ROLES contiene los 9 roles', () => {

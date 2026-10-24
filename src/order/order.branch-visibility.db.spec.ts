@@ -53,10 +53,22 @@ describeDb('Visibilidad de pedidos por sucursal (Postgres real)', () => {
   let statusId: number;
   const createdStatusIds: number[] = [];
 
-  const asBranchA = () => ({ userId: ids.userA, roles: ['sucursal'] });
-  const asBranchB = () => ({ userId: ids.userB, roles: ['sucursal'] });
-  const asRecep = () => ({ userId: ids.recep, roles: ['recepcion'] });
-  const asAdmin = () => ({ userId: ids.admin, roles: ['admin'] });
+  const asBranchA = () => ({
+    userId: ids.userA,
+    roles: ['sucursal'],
+    areas: [],
+  });
+  const asBranchB = () => ({
+    userId: ids.userB,
+    roles: ['sucursal'],
+    areas: [],
+  });
+  const asRecep = () => ({
+    userId: ids.recep,
+    roles: ['recepcion'],
+    areas: [],
+  });
+  const asAdmin = () => ({ userId: ids.admin, roles: ['admin'], areas: [] });
   const token = (u: { userId: number; roles: string[] }) => ({
     sub: u.userId,
     username: 'x',
@@ -324,6 +336,7 @@ describeDb('Visibilidad de pedidos por sucursal (Postgres real)', () => {
         const result = await orders.findAll(query(), {
           userId: orphan.id,
           roles: ['sucursal'],
+          areas: [],
         });
         expect(mine(result)).toEqual([]);
       } finally {
@@ -511,15 +524,25 @@ describeDb('Visibilidad de pedidos por sucursal (Postgres real)', () => {
       const list: any[] = (await notifications.findAllForUser(
         ids.userA,
         undefined,
-        ['sucursal'],
+        { roles: ['sucursal'], areas: [] },
       )) as any[];
       expect(list.map((n) => n.title).sort()).toEqual(['general', 'propio']);
       expect(
-        (await notifications.unreadCount(ids.userA, ['sucursal'])).unreadCount,
+        (
+          await notifications.unreadCount(ids.userA, {
+            roles: ['sucursal'],
+            areas: [],
+          })
+        ).unreadCount,
       ).toBe(2);
       // Un usuario de matriz con las mismas filas vería todas (no se filtra).
       expect(
-        (await notifications.unreadCount(ids.userA, ['recepcion'])).unreadCount,
+        (
+          await notifications.unreadCount(ids.userA, {
+            roles: ['recepcion'],
+            areas: [],
+          })
+        ).unreadCount,
       ).toBe(4);
     });
 

@@ -1,5 +1,4 @@
 import {
-  ArrayNotEmpty,
   ArrayUnique,
   IsBoolean,
   IsInt,
@@ -47,10 +46,20 @@ export class CreateUserDto {
   @Matches(/(?=.*[A-Z])(?=.*\d)/, { message: PASSWORD_POLICY_MESSAGE })
   password: string;
 
-  @ArrayNotEmpty()
+  /**
+   * Roles (admin, recepción, sucursal...). Puede ir vacío si la persona sólo
+   * trabaja en áreas; el service exige al menos un rol o un área.
+   */
+  @IsOptional()
   @ArrayUnique()
   @IsInt({ each: true })
-  roleIds: number[];
+  roleIds?: number[];
+
+  /** Áreas de trabajo (ids de Area activas). Ver model Area. */
+  @IsOptional()
+  @ArrayUnique()
+  @IsInt({ each: true })
+  areaIds?: number[];
 
   /**
    * Cuenta compartida por varias personas de un área (ej. "Taller"). Cuando

@@ -8,6 +8,7 @@ import {
 import { RequestMethod } from '@nestjs/common';
 import { ROLES_KEY } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { QuoteController } from './quote.controller';
 
 /**
@@ -59,6 +60,16 @@ describe('QuoteController: roles y contrato de rutas', () => {
       expect(rolesFor(method)).not.toContain(role);
     }
   });
+
+  // Producción y Diseño tampoco: ningún acceso por área en Cotizaciones.
+  it.each(Object.values(AreaAccess))(
+    'el acceso por área %s no entra a ninguna ruta (403)',
+    (access) => {
+      for (const [, method] of ROUTES) {
+        expect(rolesFor(method)).not.toContain(access);
+      }
+    },
+  );
 
   it.each(ROUTES)(
     '%s (contrato con el frontend)',

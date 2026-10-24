@@ -3,6 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { DashboardService } from './dashboard.service';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
@@ -21,35 +22,27 @@ export class DashboardController {
   }
 
   /** Bandeja y circuito de Diseño. */
-  @Auth(Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Auth(AreaAccess.DESIGN, Role.ADMIN, Role.SUPERUSER)
   @Get('design')
   design(
     @Query() query: DashboardQueryDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
     return this.dashboardService.design(
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       query.dayStart,
     );
   }
 
   /** Trabajos de las áreas de producción del usuario. */
-  @Auth(
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.LASER,
-    Role.IMPRESIONES,
-    Role.ADMIN,
-    Role.SUPERUSER,
-  )
+  @Auth(AreaAccess.PRODUCTION, Role.ADMIN, Role.SUPERUSER)
   @Get('production')
   production(
     @Query() query: DashboardQueryDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
     return this.dashboardService.production(
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       query.dayStart,
     );
   }

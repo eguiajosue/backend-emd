@@ -17,6 +17,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 import {
   EmptyToUndefined,
   TrimString,
@@ -76,27 +77,8 @@ export class OrderProductDto {
   sizes?: Record<string, Record<string, number>> | null;
 }
 
-/** Áreas/departamentos operativos válidos para un pedido. Coincide 1:1 con
- * los roles operativos (ver Role en roles.enum.ts) y con
- * AreaVisibilitySetting.role. */
-export const ORDER_AREAS = [
-  'taller',
-  'dtf',
-  'bordado',
-  'diseno',
-  'laser',
-  'impresiones',
-] as const;
-
-/** Áreas de producción válidas como destino final de un pedido: ORDER_AREAS
- * sin 'diseno' (Diseño es una fase previa, no un destino de producción). */
-export const PRODUCTION_AREAS = [
-  'taller',
-  'dtf',
-  'bordado',
-  'laser',
-  'impresiones',
-] as const;
+/** Tope de áreas de producción por pedido (hoy hay cinco; holgura para las nuevas). */
+export const MAX_ORDER_AREAS = 20;
 
 export class CreateOrderDto {
   @IsOptional()
@@ -127,8 +109,8 @@ export class CreateOrderDto {
       dto.requiresDesign === false || dto.area !== undefined,
   )
   @IsNotEmpty({ message: 'area es requerida cuando requiresDesign es false' })
-  @IsIn(ORDER_AREAS)
-  area?: (typeof ORDER_AREAS)[number];
+  @IsAreaSlug()
+  area?: string;
 
   // Con montaje (requiresDesign !== false) el pedido arranca en Diseño y
   // necesita responsable sí o sí: un diseñador concreto o la cuenta compartida
@@ -198,8 +180,8 @@ export class CreateOrderDto {
   // Área de producción destino una vez autorizado el diseño. Puede venir
   // vacía al crear (se define después, por Recepción o por Diseño).
   @IsOptional()
-  @IsIn(PRODUCTION_AREAS)
-  productionArea?: (typeof PRODUCTION_AREAS)[number];
+  @IsAreaSlug()
+  productionArea?: string;
 
   // Áreas de producción que van a trabajar el pedido. Un pedido puede necesitar
   // varias (ej. bordado + dtf) y todas avanzan en paralelo, cada una con su
@@ -207,9 +189,9 @@ export class CreateOrderDto {
   // como el destino "principal" para compatibilidad.
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(PRODUCTION_AREAS.length)
-  @IsIn(PRODUCTION_AREAS, { each: true })
-  productionAreas?: (typeof PRODUCTION_AREAS)[number][];
+  @ArrayMaxSize(MAX_ORDER_AREAS)
+  @IsAreaSlug({ each: true })
+  productionAreas?: string[];
 
   // Empleado de la sucursal que levanta el pedido. Obligatorio desde la
   // cuenta de sucursal (lo valida OrderService.create: activo y de esa

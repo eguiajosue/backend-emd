@@ -14,15 +14,16 @@ import {
   normalizeBarcode,
   stockStatusOf,
 } from './inventory.service';
+import { AreaService, defaultAreaViews } from '../area/area.service';
 import { defaultBarcode } from './inventory.constants';
 import { CreateInventoryItemDto } from './dto/create-inventory-item.dto';
 import { UpdateInventoryItemDto } from './dto/update-inventory-item.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 
-const admin = { sub: 1, roles: ['admin'] };
-const bordado = { sub: 2, roles: ['bordado'] };
-const recepcion = { sub: 2, roles: ['recepcion'] };
+const admin = { sub: 1, roles: ['admin'], areas: [] };
+const bordado = { sub: 2, roles: [], areas: ['bordado'] };
+const recepcion = { sub: 2, roles: ['recepcion'], areas: [] };
 
 const itemRow = (overrides: Record<string, unknown> = {}) => ({
   id: 7,
@@ -204,13 +205,33 @@ describe('InventoryService', () => {
   });
 
   describe('alcance por departamento', () => {
-    it('admin/recepción ven todos los departamentos', () => {
-      expect(service.areasFor(['recepcion'])).toContain('impresiones');
-      expect(service.areasFor(['admin'])).toHaveLength(7);
+    it('admin/recepción ven todos los departamentos', async () => {
+      expect(
+        await service.areasFor({ roles: ['recepcion'], areas: [] }),
+      ).toContain('impresiones');
+      expect(
+        await service.areasFor({ roles: ['admin'], areas: [] }),
+      ).toHaveLength(7);
     });
 
-    it('un rol de área sólo ve el suyo', () => {
-      expect(service.areasFor(['bordado', 'dtf'])).toEqual(['dtf', 'bordado']);
+    it('quien trabaja en un área sólo ve la suya', async () => {
+      expect(
+        await service.areasFor({ roles: [], areas: ['bordado', 'dtf'] }),
+      ).toEqual(['dtf', 'bordado']);
+    });
+
+    it('un área sin inventario propio no aparece', async () => {
+      const areas = defaultAreaViews().map((area) =>
+        area.slug === 'laser' ? { ...area, hasInventory: false } : area,
+      );
+      const scoped = new InventoryService(
+        prisma as unknown as PrismaService,
+        notifications as unknown as NotificationService,
+        AreaService.inMemory(areas),
+      );
+      expect(
+        await scoped.areasFor({ roles: ['admin'], areas: [] }),
+      ).not.toContain('laser');
     });
 
     it('el listado se recorta a las áreas del usuario', async () => {
@@ -654,7 +675,7 @@ describe('InventoryService', () => {
           service.registerMovementByBarcode(
             'EMD-000007',
             { type: 'ENTRADA', quantity: 1 },
-            { sub: 5, roles: ['dtf'] },
+            { sub: 5, roles: [], areas: ['dtf'] },
           ),
         ).rejects.toThrow(NotFoundException);
         expect(prisma.inventoryMovement.create).not.toHaveBeenCalled();

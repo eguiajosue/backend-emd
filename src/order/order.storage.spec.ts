@@ -24,8 +24,8 @@ const pngFile = (filename: string) => ({
 });
 const PNG_DATA_URL = `data:image/png;base64,${PNG}`;
 
-const ADMIN: RequestingUser = { userId: 1, roles: ['admin'] };
-const DESIGNER: RequestingUser = { userId: 5, roles: ['diseno'] };
+const ADMIN: RequestingUser = { userId: 1, roles: ['admin'], areas: [] };
+const DESIGNER: RequestingUser = { userId: 5, roles: [], areas: ['diseno'] };
 
 /**
  * Archivos de un pedido con almacenamiento de objetos: filas legacy (base64
@@ -282,7 +282,7 @@ describe('OrderService - almacenamiento de archivos (R2/S3)', () => {
         1,
         100,
         { feedbackText: 'más grande', feedbackFiles: [pngFile('f.png')] },
-        { userId: 2, roles: ['recepcion'] },
+        { userId: 2, roles: ['recepcion'], areas: [] },
       );
 
       const data = prisma.designRevision.update.mock.calls[0][0].data;

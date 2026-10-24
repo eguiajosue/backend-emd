@@ -27,6 +27,11 @@ export interface AccessTokenPayload {
   username: string;
   sub: number;
   roles: string[];
+  /**
+   * Slugs de las áreas ACTIVAS en las que trabaja (ver model Area). Separadas
+   * de `roles`: el rol dice qué puede hacer, el área dónde trabaja.
+   */
+  areas: string[];
 }
 
 @Injectable()
@@ -52,6 +57,17 @@ export class AuthService {
         'JWT_REFRESH_EXPIRES_IN',
       ) ?? '7d'
     );
+  }
+
+  /** Roles y áreas activas de un usuario leído con `findOneByUsername`. */
+  private accessOf(user: {
+    roles: { name: string }[];
+    areas?: { slug: string }[];
+  }): Pick<AccessTokenPayload, 'roles' | 'areas'> {
+    return {
+      roles: user.roles.map((role) => role.name),
+      areas: (user.areas ?? []).map((area) => area.slug),
+    };
   }
 
   private async signTokens(payload: AccessTokenPayload) {
@@ -89,12 +105,13 @@ export class AuthService {
       );
     }
 
-    const roleNames = user.roles.map((role) => role.name);
+    const { roles, areas } = this.accessOf(user);
 
     const { token, refreshToken } = await this.signTokens({
       username: user.username,
       sub: user.id,
-      roles: roleNames,
+      roles,
+      areas,
     });
 
     return {
@@ -104,13 +121,14 @@ export class AuthService {
       username: user.username,
       first_name: user.firstName,
       last_name: user.lastName,
-      roles: roleNames,
+      roles,
+      areas,
     };
   }
 
   /**
    * Canjea un refresh token válido por un nuevo par de tokens.
-   * Los roles se releen de la base, así un cambio de permisos se aplica
+   * Los roles y las áreas se releen de la base, así un cambio de permisos se aplica
    * en el siguiente refresh en vez de esperar a que expire el token largo.
    */
   async refresh({ refreshToken }: RefreshTokenDto) {
@@ -133,11 +151,12 @@ export class AuthService {
       throw new UnauthorizedException('Usuario no encontrado');
     }
 
-    const roleNames = user.roles.map((role) => role.name);
+    const { roles, areas } = this.accessOf(user);
     const tokens = await this.signTokens({
       username: user.username,
       sub: user.id,
-      roles: roleNames,
+      roles,
+      areas,
     });
 
     return {
@@ -148,7 +167,8 @@ export class AuthService {
       username: user.username,
       first_name: user.firstName,
       last_name: user.lastName,
-      roles: roleNames,
+      roles,
+      areas,
     };
   }
 

@@ -105,6 +105,8 @@ describe('Visibilidad de sucursales: superficie de rutas', () => {
       .map((h) => h.id)
       .sort();
     expect(noRoles).toEqual([
+      // Catálogo de áreas: nombres, íconos y colores, sin datos de pedidos.
+      'AreaController.findAll',
       'AuthController.login',
       'AuthController.refresh',
       'BugReportController.create',
@@ -151,7 +153,7 @@ describe('Visibilidad de sucursales: where de GET /orders', () => {
   });
 
   it('cuenta de sucursal: branchId/origin se IGNORAN y el where es exactamente el de su sucursal', async () => {
-    const user = { userId: 7, roles: ['sucursal'] };
+    const user = { userId: 7, roles: ['sucursal'], areas: [] };
     for (const q of [
       { branchId: 99 },
       { origin: 'matriz' as const },
@@ -165,7 +167,7 @@ describe('Visibilidad de sucursales: where de GET /orders', () => {
   it('cuenta de sucursal: sus filtros propios (q, estado) van en AND sin quitar su sucursal', async () => {
     await run(
       { statusId: 4, branchId: 99 },
-      { userId: 7, roles: ['sucursal'] },
+      { userId: 7, roles: ['sucursal'], areas: [] },
     );
     expect(lastWhere()).toEqual({
       AND: [branchOrdersWhere(7), { statusId: 4 }],
@@ -190,7 +192,10 @@ describe('Visibilidad de sucursales: where de GET /orders', () => {
   );
 
   it('un rol de área mantiene su filtro por área y le suma el origen en AND', async () => {
-    await run({ origin: 'matriz' }, { userId: 3, roles: ['taller'] });
+    await run(
+      { origin: 'matriz' },
+      { userId: 3, roles: [], areas: ['taller'] },
+    );
     expect(lastWhere()).toEqual({
       AND: [{ area: { in: ['taller'] } }, { AND: [{ branchId: null }] }],
     });
@@ -198,7 +203,7 @@ describe('Visibilidad de sucursales: where de GET /orders', () => {
 
   it('un usuario sin ningún rol que dé acceso no consulta nada', async () => {
     await expect(
-      run({ origin: 'sucursal' }, { userId: 3, roles: [] }),
+      run({ origin: 'sucursal' }, { userId: 3, roles: [], areas: [] }),
     ).resolves.toEqual([]);
     expect(prisma.order.findMany).not.toHaveBeenCalled();
   });
@@ -234,7 +239,7 @@ describe('Visibilidad de sucursales: where de GET /orders/history', () => {
   });
 
   it('cuenta de sucursal: origin y branchId se IGNORAN; sigue limitada a su sucursal', async () => {
-    const user = { userId: 7, roles: ['sucursal'] };
+    const user = { userId: 7, roles: ['sucursal'], areas: [] };
     for (const q of [
       { branchId: 99 },
       { origin: 'matriz' as const },
@@ -267,7 +272,7 @@ describe('Visibilidad de sucursales: where de GET /orders/history', () => {
   it('se combina en AND con los filtros propios del historial (cliente)', async () => {
     await run(
       { origin: 'matriz', clientId: 4 },
-      { userId: 1, roles: ['recepcion'] },
+      { userId: 1, roles: ['recepcion'], areas: [] },
     );
     expect(lastWhere()).toEqual({
       AND: [{}, { AND: [{ branchId: null }], clientId: 4 }],

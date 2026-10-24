@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { AreaTaskStatus, CalendarEventCategory, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AreaService } from 'src/area/area.service';
 import { CreateCalendarEventDto } from './dto/create-calendar-event.dto';
 import { UpdateCalendarEventDto } from './dto/update-calendar-event.dto';
 import { CalendarEventQueryDto } from './dto/calendar-event-query.dto';
@@ -33,7 +34,12 @@ const ALLOWED_TRANSITIONS: Record<AreaTaskStatus, AreaTaskStatus[]> = {
  */
 @Injectable()
 export class CalendarEventService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
+  ) {}
 
   private select() {
     return {
@@ -60,6 +66,7 @@ export class CalendarEventService {
   }
 
   async create(dto: CreateCalendarEventDto, createdById: number) {
+    await this.areaService.assertArea(dto.area);
     const created = await this.prisma.calendarEvent.create({
       data: {
         title: dto.title,
@@ -151,6 +158,7 @@ export class CalendarEventService {
 
   async update(id: number, dto: UpdateCalendarEventDto) {
     await this.findOrThrow(id);
+    await this.areaService.assertArea(dto.area);
     return this.prisma.calendarEvent.update({
       where: { id },
       data: {

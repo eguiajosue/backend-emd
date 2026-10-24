@@ -14,7 +14,7 @@ Al crear un pedido, Recepción decide primero si **requiere montaje/diseño**.
 - La asignación a un diseñador es **obligatoria**: no se puede guardar sin
   elegir. Una de las opciones válidas es **"Cualquier diseñador"**, que se
   materializa asignando el pedido a la **cuenta compartida del área Diseño**
-  (`User.isSharedAccount = true` con rol `diseno`), no dejándolo sin asignar.
+  (`User.isSharedAccount = true` que pertenece al área `diseno`), no dejándolo sin asignar.
 - El selector muestra **solo diseñadores** (más la cuenta de área). Nunca el
   resto del taller.
 - El **área de producción es opcional** en este paso: se puede dejar "sin
@@ -222,7 +222,7 @@ digitalizado → en pruebas ─ aprobada ─→ producción (pendiente → en pr
 ## 4. Vistas por rol
 
 - El **ciclo de diseño se muestra únicamente a los diseñadores**.
-- Un usuario que tenga rol de diseñador **y además** un rol de producción puede
+- Un usuario que trabaje en Diseño **y además** en un área de producción puede
   **alternar entre la vista de Diseño y la de Producción**.
 - **No** hay una vista por cada área de producción. La vista de producción es
   **unificada**: muestra todas las tareas juntas, **etiquetando de qué área es

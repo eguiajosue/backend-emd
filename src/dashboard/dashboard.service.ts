@@ -5,7 +5,8 @@ import {
   ClientInsightService,
   DueClient,
 } from '../client-insight/client-insight.service';
-import { PRODUCTION_AREAS } from '../order/dto/create-order.dto';
+import { AreaService } from '../area/area.service';
+import { DESIGN_AREA, productionAreasOf } from '../area/area-access';
 import { isFullVisibilityRole } from '../order/role-stage-mapping';
 import {
   STATUS_NAME_CAMBIOS_SOLICITADOS,
@@ -29,7 +30,6 @@ import {
 } from './dashboard.rules';
 
 const DAY_MS = 86_400_000;
-const DESIGN_AREA = 'diseno';
 const ATTENTION_LIMIT = 8;
 const LIST_LIMIT = 5;
 
@@ -320,6 +320,9 @@ export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clientInsights: ClientInsightService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
   ) {
     this.statusIds = new StatusIdResolver(prisma);
   }
@@ -389,6 +392,7 @@ export class DashboardService {
     const dayStart = resolveDayStart(dayStartParam, now);
     const weekStart = new Date(dayStart.getTime() - 6 * DAY_MS);
     const s = await this.ids();
+    const productionAreas = await this.areaService.slugs('production');
 
     const [
       activeOrders,
@@ -584,7 +588,7 @@ export class DashboardService {
         now,
       ),
     };
-    const productionLoads: AreaLoad[] = PRODUCTION_AREAS.map((area) => {
+    const productionLoads: AreaLoad[] = productionAreas.map((area) => {
       const own = tasks.filter(
         (t) => t.area === area && t.status !== AreaTaskStatus.terminado,
       );
@@ -682,11 +686,9 @@ export class DashboardService {
   ): Promise<ProductionDashboard> {
     const dayStart = resolveDayStart(dayStartParam, now);
     const s = await this.ids();
-    let areas = user.roles.filter((r) =>
-      (PRODUCTION_AREAS as readonly string[]).includes(r),
-    );
+    let areas = productionAreasOf(user);
     if (areas.length === 0 && isFullVisibilityRole(user.roles))
-      areas = [...PRODUCTION_AREAS];
+      areas = await this.areaService.slugs('production');
 
     const [me, sharedAccounts, tasks, doneToday, events] = await Promise.all([
       this.prisma.user.findUnique({

@@ -25,7 +25,13 @@ import {
   type StoredBlob,
 } from 'src/storage/storage.service';
 import type { OrderFileDto } from './dto/create-order.dto';
-import { PRODUCTION_AREAS } from './dto/create-order.dto';
+import { AreaService } from 'src/area/area.service';
+import {
+  belongsToArea,
+  DESIGN_AREA,
+  EMBROIDERY_AREA,
+  productionAreasOf,
+} from 'src/area/area-access';
 import { AreaSupplyDto } from './dto/order-area-supply.dto';
 import {
   SUPPLY_TX_OPTIONS,
@@ -39,7 +45,7 @@ import {
   serializeSupply,
 } from './order-area-supply';
 import { isBranchOnlyUser } from 'src/branch/branch-access';
-import { isFullVisibilityRole, operationalRolesOf } from './role-stage-mapping';
+import { isFullVisibilityRole } from './role-stage-mapping';
 import type { RequestingUser } from './order.service';
 import {
   StatusIdResolver,
@@ -81,7 +87,7 @@ const ALLOWED_TASK_TRANSITIONS: Record<AreaTaskStatus, AreaTaskStatus[]> = {
  * Sólo Bordado pasa por las etapas previas a producción (digitalizado →
  * pruebas). WORKFLOW.md §3.1.
  */
-const PREP_STAGE_AREA = Role.BORDADO;
+const PREP_STAGE_AREA = EMBROIDERY_AREA;
 
 /** La foto de la prueba la toma el celular: PNG o JPEG, hasta 5MB. */
 const SAMPLE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
@@ -167,6 +173,8 @@ export class OrderAreaTaskService {
     // Lo inyecta siempre StorageModule (global); el default es el modo legacy
     // (todo en la DB) para quien construye el servicio a mano.
     private readonly storage: StorageService = StorageService.database(),
+    // Igual que `storage`: en la app lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
   ) {
     this.statusIds = new StatusIdResolver(this.prisma);
   }
@@ -229,7 +237,7 @@ export class OrderAreaTaskService {
     tasks: { supply?: unknown } | { supply?: unknown }[],
     requestingUser?: RequestingUser,
   ) {
-    if (!requestingUser || !isBranchOnlyUser(requestingUser.roles)) {
+    if (!requestingUser || !isBranchOnlyUser(requestingUser)) {
       return tasks;
     }
     const strip = (task: { supply?: unknown }) => {
@@ -250,18 +258,22 @@ export class OrderAreaTaskService {
     client: Pick<Prisma.TransactionClient, 'user'> = this.prisma,
   ): Promise<number | null> {
     const shared = await client.user.findFirst({
-      where: { isSharedAccount: true, roles: { some: { name: area } } },
+      where: { isSharedAccount: true, areas: { some: { slug: area } } },
       select: { id: true },
     });
     return shared?.id ?? null;
   }
 
-  private assertProductionArea(area: string): void {
-    if (!(PRODUCTION_AREAS as readonly string[]).includes(area)) {
-      throw new HttpException(
-        `"${area}" no es un área de producción válida`,
-        HttpStatus.BAD_REQUEST,
-      );
+  /** Cada área tiene que ser un destino de producción activo del catálogo. */
+  private async assertProductionAreas(areas: string[]): Promise<void> {
+    const valid = await this.areaService.slugs('production');
+    for (const area of areas) {
+      if (!valid.includes(area)) {
+        throw new HttpException(
+          `"${area}" no es un área de producción válida`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
     }
   }
 
@@ -280,7 +292,7 @@ export class OrderAreaTaskService {
   ) {
     const client = options?.tx ?? this.prisma;
     const unique = [...new Set(areas)];
-    unique.forEach((area) => this.assertProductionArea(area));
+    await this.assertProductionAreas(unique);
 
     const existing = await client.orderAreaTask.findMany({
       where: { orderId },
@@ -319,10 +331,11 @@ export class OrderAreaTaskService {
   /** Aviso de tarea nueva, dirigido sólo al área que le toca (WORKFLOW.md §3). */
   private async notifyAreaOfNewTask(orderId: number, area: string) {
     const areaUserIds = await this.notificationService.userIdsForArea(area);
+    const areaLabel = await this.areaService.labelOf(area);
     await this.notificationService.createNotificationForUsers(areaUserIds, {
       type: 'area_task_created',
-      title: `Nueva tarea de ${area}`,
-      body: `Pedido #${orderId}: hay trabajo pendiente para ${area}`,
+      title: `Nueva tarea de ${areaLabel}`,
+      body: `Pedido #${orderId}: hay trabajo pendiente para ${areaLabel}`,
       orderId,
     });
     // La fecha de entrega deja que el Modo TV elija color/animación al
@@ -333,7 +346,7 @@ export class OrderAreaTaskService {
     });
     this.notificationsGateway.notifyNewOrderToArea(area, {
       orderId,
-      description: `Nueva tarea de ${area} en el pedido #${orderId}`,
+      description: `Nueva tarea de ${areaLabel} en el pedido #${orderId}`,
       area,
       deliveryDate: order?.deliveryDate ?? null,
     });
@@ -359,9 +372,7 @@ export class OrderAreaTaskService {
     const isManager = requestingUser.roles.some((r) =>
       TASK_MANAGER_ROLES.includes(r),
     );
-    const ownAreas = requestingUser.roles.filter((role) =>
-      (PRODUCTION_AREAS as readonly string[]).includes(role),
-    );
+    const ownAreas = productionAreasOf(requestingUser);
     if (!isManager && ownAreas.length === 0) {
       return scoreboardFrom([], new Date());
     }
@@ -391,9 +402,7 @@ export class OrderAreaTaskService {
     const isManager = requestingUser.roles.some((r) =>
       TASK_MANAGER_ROLES.includes(r),
     );
-    const ownAreas = requestingUser.roles.filter((role) =>
-      (PRODUCTION_AREAS as readonly string[]).includes(role),
-    );
+    const ownAreas = productionAreasOf(requestingUser);
 
     // Un usuario sin áreas de producción ni rol de gestión no tiene tareas
     // propias que ver (ej. sólo Diseño): lista vacía en vez de todas.
@@ -410,7 +419,7 @@ export class OrderAreaTaskService {
         // trabajo (mismo criterio que `findMyTasks`).
         order: {
           statusId: { notIn: closedStatusIds },
-          NOT: { area: Role.DISENO },
+          NOT: { area: DESIGN_AREA },
         },
         OR: [
           { status: { not: AreaTaskStatus.terminado } },
@@ -461,10 +470,8 @@ export class OrderAreaTaskService {
       select: { isSharedAccount: true },
     });
     const isSharedLogin = me?.isSharedAccount === true;
-    const productionAreas = requestingUser.roles.filter((role) =>
-      (PRODUCTION_AREAS as readonly string[]).includes(role),
-    );
-    const designs = requestingUser.roles.includes(Role.DISENO);
+    const productionAreas = productionAreasOf(requestingUser);
+    const designs = belongsToArea(requestingUser, DESIGN_AREA);
 
     const sharedAccounts = await this.prisma.user.findMany({
       where: { isSharedAccount: true },
@@ -511,7 +518,7 @@ export class OrderAreaTaskService {
       const designOrders = await this.prisma.order.findMany({
         where: {
           requiresDesign: true,
-          area: Role.DISENO,
+          area: DESIGN_AREA,
           statusId: { in: designStatusIds },
         },
         select: {
@@ -526,7 +533,7 @@ export class OrderAreaTaskService {
         items.push({
           key: `design-${order.id}`,
           kind: 'design',
-          area: Role.DISENO,
+          area: DESIGN_AREA,
           taskId: null,
           status: order.status.name,
           mine: isMine(assignedUserId),
@@ -546,7 +553,7 @@ export class OrderAreaTaskService {
           order: {
             statusId: { notIn: closedStatusIds },
             // Planificadas mientras el pedido sigue en Diseño: todavía no.
-            NOT: { area: Role.DISENO },
+            NOT: { area: DESIGN_AREA },
           },
         },
         select: {
@@ -610,14 +617,14 @@ export class OrderAreaTaskService {
   async getSupplySheet(orderId: number, requestingUser?: RequestingUser) {
     let visibleAreas: string[] | null = null;
     if (requestingUser) {
-      if (isBranchOnlyUser(requestingUser.roles)) {
+      if (isBranchOnlyUser(requestingUser)) {
         throw new HttpException(
           'Sin acceso a los insumos del pedido',
           HttpStatus.FORBIDDEN,
         );
       }
       if (!isFullVisibilityRole(requestingUser.roles)) {
-        visibleAreas = operationalRolesOf(requestingUser.roles);
+        visibleAreas = requestingUser.areas ?? [];
       }
     }
     const tasks = await this.prisma.orderAreaTask.findMany({
@@ -867,7 +874,7 @@ export class OrderAreaTaskService {
     // perdería su bandeja (mismo criterio que `assign`).
     const shouldClaim =
       status === AreaTaskStatus.en_proceso &&
-      requestingUser.roles.includes(task.area) &&
+      belongsToArea(requestingUser, task.area) &&
       (await this.isUnclaimed(task.area, task.assignedUserId));
 
     const now = new Date();
@@ -1338,7 +1345,7 @@ export class OrderAreaTaskService {
     if (assignedUserId !== null) {
       const user = await this.prisma.user.findUnique({
         where: { id: assignedUserId },
-        select: { roles: { select: { name: true } } },
+        select: { areas: { select: { slug: true } } },
       });
       if (!user) {
         throw new HttpException(
@@ -1346,7 +1353,7 @@ export class OrderAreaTaskService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      if (!user.roles.some((r) => r.name === task.area)) {
+      if (!user.areas.some((a) => a.slug === task.area)) {
         throw new HttpException(
           `El usuario asignado no pertenece al área ${task.area}`,
           HttpStatus.BAD_REQUEST,
@@ -1414,7 +1421,7 @@ export class OrderAreaTaskService {
       TASK_MANAGER_ROLES.includes(r),
     );
     if (isManager) return;
-    if (!requestingUser.roles.includes(area)) {
+    if (!belongsToArea(requestingUser, area)) {
       throw new HttpException(
         `Sin permiso para trabajar tareas del área ${area}`,
         HttpStatus.FORBIDDEN,
@@ -1561,11 +1568,12 @@ export class OrderAreaTaskService {
     const receptionOwnerId = await this.orderReceptionOwnerId(orderId);
     // Nadie recibe el aviso de su propia acción.
     if (receptionOwnerId === null || receptionOwnerId === actorId) return;
+    const areaLabel = await this.areaService.labelOf(area);
     await this.notificationService.createNotification({
       userId: receptionOwnerId,
       type: 'area_task_completed',
-      title: `${area} terminó su parte`,
-      body: `Pedido #${orderId}: el área ${area} completó su tarea`,
+      title: `${areaLabel} terminó su parte`,
+      body: `Pedido #${orderId}: el área ${areaLabel} completó su tarea`,
       orderId,
     });
   }

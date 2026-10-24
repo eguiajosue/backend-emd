@@ -17,6 +17,7 @@ import { UpdateClientDto } from './dto/update-client.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { OrderService } from 'src/order/order.service';
 
@@ -39,6 +40,7 @@ export class ClientController {
     return this.clientService.create(createClientDto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -49,12 +51,7 @@ export class ClientController {
     Role.RECEPCION,
     Role.ADMIN,
     Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
+    AreaAccess.ANY,
     // Alta de pedidos desde la sucursal: elige cliente.
     Role.SUCURSAL,
   )
@@ -66,6 +63,7 @@ export class ClientController {
     return this.clientService.findAll(query, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -73,12 +71,7 @@ export class ClientController {
     Role.RECEPCION,
     Role.ADMIN,
     Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
+    AreaAccess.ANY,
     // Alta de pedidos desde la sucursal: elige cliente.
     Role.SUCURSAL,
   )
@@ -87,6 +80,7 @@ export class ClientController {
     return this.clientService.findOne(+id, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -101,6 +95,7 @@ export class ClientController {
     return this.clientService.update(+id, updateClientDto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -111,17 +106,7 @@ export class ClientController {
     return this.clientService.remove(+id);
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.ANY)
   @Get(':id/orders')
   findOrders(
     @Param('id') id: string,
@@ -131,6 +116,7 @@ export class ClientController {
     return this.orderService.findAllByClient(+id, query, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 }

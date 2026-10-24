@@ -13,6 +13,7 @@ import {
 import { PushService } from 'src/push/push.service';
 import { ExpoPushService } from 'src/push/expo-push.service';
 import { branchOrdersWhere, isBranchOnlyUser } from 'src/branch/branch-access';
+import type { AreaMember } from 'src/area/area-access';
 
 /** Datos necesarios para crear una notificación persistente. */
 export interface CreateNotificationInput {
@@ -113,6 +114,7 @@ export class NotificationService {
     | (NotificationPreferences & {
         branchId: number | null;
         roles: { name: string }[];
+        areas: { slug: string }[];
       })
     | null
   > {
@@ -125,6 +127,7 @@ export class NotificationService {
         notifyCriticalAlerts: true,
         branchId: true,
         roles: { select: { name: true } },
+        areas: { select: { slug: true } },
       },
     });
   }
@@ -139,10 +142,14 @@ export class NotificationService {
       id: number;
       branchId: number | null;
       roles: { name: string }[];
+      areas: { slug: string }[];
     },
   >(users: T[], orderId: number): Promise<T[]> {
     const branchAccounts = users.filter((u) =>
-      isBranchOnlyUser(u.roles.map((r) => r.name)),
+      isBranchOnlyUser({
+        roles: u.roles.map((r) => r.name),
+        areas: u.areas.map((a) => a.slug),
+      }),
     );
     if (branchAccounts.length === 0) return users;
     const order = await this.prisma.order.findUnique({
@@ -233,6 +240,7 @@ export class NotificationService {
         notifyCriticalAlerts: true,
         branchId: true,
         roles: { select: { name: true } },
+        areas: { select: { slug: true } },
       },
     });
     const allowedUsers =
@@ -271,13 +279,13 @@ export class NotificationService {
   }
 
   /**
-   * Ids de todos los usuarios con un rol/área determinado. Mismo criterio
-   * que usa `NotificationsGateway.notifyNewOrderToArea` (room = nombre del
-   * rol/área), replicado aquí para resolver destinatarios de la persistencia.
+   * Ids de todos los usuarios que trabajan en un área. Mismo criterio que usa
+   * `NotificationsGateway.notifyNewOrderToArea` (room = `areaRoom(área)`),
+   * replicado aquí para resolver destinatarios de la persistencia.
    */
   async userIdsForArea(area: string): Promise<number[]> {
     const users = await this.prisma.user.findMany({
-      where: { roles: { some: { name: area } } },
+      where: { areas: { some: { slug: area } } },
       select: { id: true },
     });
     return users.map((u) => u.id);
@@ -289,9 +297,9 @@ export class NotificationService {
    */
   private visibleNotificationsWhere(
     userId: number,
-    roles?: string[],
+    member?: AreaMember,
   ): Prisma.NotificationWhereInput {
-    if (!isBranchOnlyUser(roles)) return { userId };
+    if (!isBranchOnlyUser(member)) return { userId };
     return {
       userId,
       OR: [{ orderId: null }, { order: branchOrdersWhere(userId) }],
@@ -302,10 +310,10 @@ export class NotificationService {
   async findAllForUser(
     userId: number,
     query?: PaginationQueryDto,
-    roles?: string[],
+    member?: AreaMember,
   ) {
     const { enabled, page, limit, skip } = resolvePagination(query);
-    const where = this.visibleNotificationsWhere(userId, roles);
+    const where = this.visibleNotificationsWhere(userId, member);
 
     if (!enabled) {
       return this.prisma.notification.findMany({
@@ -330,10 +338,10 @@ export class NotificationService {
   /** Cantidad de notificaciones no leídas del usuario, para el badge de la campanita. */
   async unreadCount(
     userId: number,
-    roles?: string[],
+    member?: AreaMember,
   ): Promise<{ unreadCount: number }> {
     const unreadCount = await this.prisma.notification.count({
-      where: { ...this.visibleNotificationsWhere(userId, roles), read: false },
+      where: { ...this.visibleNotificationsWhere(userId, member), read: false },
     });
     return { unreadCount };
   }

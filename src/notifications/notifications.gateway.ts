@@ -18,6 +18,7 @@ import {
 } from '../common/cors-origin';
 import { PrismaService } from '../prisma/prisma.service';
 import { isBranchOnlyUser } from '../branch/branch-access';
+import { areaRoom, normalizeAccessPayload } from 'src/area/area-access';
 
 /**
  * Room de las cuentas que SÓLO son de sucursal. Los avisos de pedidos que no
@@ -161,6 +162,7 @@ export class NotificationsGateway
       ) as jwt.JwtPayload & {
         sub: number;
         roles: string[];
+        areas?: string[];
         username: string;
         type?: string;
       };
@@ -174,11 +176,13 @@ export class NotificationsGateway
         return;
       }
 
-      const roles = decoded.roles ?? [];
+      const session = normalizeAccessPayload(decoded);
+      const { roles, areas } = session;
       roles.forEach((role) => client.join(role));
+      areas.forEach((area) => client.join(areaRoom(area)));
       // Cuenta sólo-sucursal: se marca para excluirla de los broadcasts de
       // pedidos y se une al room de SU sucursal (avisos de sus pedidos).
-      if (isBranchOnlyUser(roles)) {
+      if (isBranchOnlyUser(session)) {
         client.join(BRANCH_ONLY_ROOM);
         const branchId = await this.branchIdOfUser(decoded.sub);
         if (branchId != null) client.join(branchRoom(branchId));
@@ -190,7 +194,7 @@ export class NotificationsGateway
         client.data.userId = decoded.sub;
       }
       this.logger.log(
-        `Client connected: ${decoded.username} with roles ${roles.join(', ')}`,
+        `Client connected: ${decoded.username} with roles ${roles.join(', ')} and areas ${areas.join(', ')}`,
       );
 
       // Sólo el PRIMER socket vivo de este usuario dispara "en línea": si ya
@@ -294,12 +298,12 @@ export class NotificationsGateway
 
   /**
    * Pedido creado SIN `assignedUserId`: queda disponible para cualquiera del
-   * área, se notifica a la room de rol/área correspondiente (las rooms de
-   * rol ya se unen 1:1 con el nombre del área en `handleConnection`).
+   * área, se notifica a la room del área (`areaRoom`, a la que cada socket
+   * se une con las áreas de su sesión en `handleConnection`).
    * Reutiliza el evento `newOrderNotification` existente.
    */
   notifyNewOrderToArea(area: string, order: TargetedOrderNotificationPayload) {
-    this.server.to(area).emit('newOrderNotification', order);
+    this.server.to(areaRoom(area)).emit('newOrderNotification', order);
     this.logger.log(
       `New order notification sent to area "${area}": Order ID ${order.orderId}`,
     );
@@ -347,7 +351,7 @@ export class NotificationsGateway
 
   /**
    * Nota agregada a un pedido: sólo se notifica al área del pedido (misma
-   * room de rol/área que las notificaciones de pedido nuevo) cuando el
+   * room de área que las notificaciones de pedido nuevo) cuando el
    * pedido NO tiene usuario asignado todavía. Un usuario de área operativa
    * ya asignado a un pedido no recibe esta notificación — según la regla de
    * negocio, sólo se le notifica cuando se le asigna un pedido nuevo, no en
@@ -359,7 +363,7 @@ export class NotificationsGateway
     note: OrderNoteNotificationPayload,
   ) {
     if (!target.assignedUserId && target.area) {
-      this.server.to(target.area).emit('orderNoteAdded', note);
+      this.server.to(areaRoom(target.area)).emit('orderNoteAdded', note);
     }
     this.logger.log(`Note notification sent: Order ID ${note.orderId}`);
   }

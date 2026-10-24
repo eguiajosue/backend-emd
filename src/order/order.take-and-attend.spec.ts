@@ -21,8 +21,12 @@ const ATTENDING_USER_ID = 88;
 /** Cuenta compartida del área Diseño ("Cualquier diseñador"). */
 const DESIGN_SHARED_ACCOUNT_ID = 42;
 
-const designer: RequestingUser = { userId: 5, roles: ['diseno'] };
-const otherDesigner: RequestingUser = { userId: 6, roles: ['diseno'] };
+const designer: RequestingUser = { userId: 5, roles: [], areas: ['diseno'] };
+const otherDesigner: RequestingUser = {
+  userId: 6,
+  roles: [],
+  areas: ['diseno'],
+};
 
 type OrderRow = {
   id: number;
@@ -34,6 +38,7 @@ type OrderRow = {
     id: number;
     isSharedAccount: boolean;
     roles: { name: string }[];
+    areas?: { slug: string }[];
   } | null;
 };
 
@@ -80,7 +85,8 @@ const makePrisma = (order: OrderRow) => ({
   user: {
     findUnique: jest.fn().mockResolvedValue({
       id: designer.userId,
-      roles: [{ name: 'diseno' }],
+      roles: [],
+      areas: [{ slug: 'diseno' }],
     }),
   },
   orderAuditLog: { create: jest.fn() },
@@ -93,6 +99,7 @@ describe('Recepción: atender un pedido ajeno (WORKFLOW.md §2)', () => {
     const receptionist: RequestingUser = {
       userId: ATTENDING_USER_ID,
       roles: ['recepcion'],
+      areas: [],
     };
 
     it('deja registrado quién lo atiende sin tocar al creador', async () => {
@@ -347,7 +354,7 @@ describe('OrderAreaTaskService: destinatario efectivo de los avisos a Recepción
     return { service, notificationService };
   };
 
-  const worker: RequestingUser = { userId: 33, roles: ['bordado'] };
+  const worker: RequestingUser = { userId: 33, roles: [], areas: ['bordado'] };
 
   it('sin attendedByUserId: el aviso de etapa terminada va al creador', async () => {
     const { service, notificationService } = buildAreaTaskService(null);
@@ -390,7 +397,8 @@ describe('Diseño: tomar un pedido de la cuenta compartida (WORKFLOW.md §1.a)',
     assignedUser: {
       id: DESIGN_SHARED_ACCOUNT_ID,
       isSharedAccount: true,
-      roles: [{ name: 'diseno' }],
+      roles: [],
+      areas: [{ slug: 'diseno' }],
     },
   });
 
@@ -452,7 +460,8 @@ describe('Diseño: tomar un pedido de la cuenta compartida (WORKFLOW.md §1.a)',
       assignedUser: {
         id: otherDesigner.userId,
         isSharedAccount: false,
-        roles: [{ name: 'diseno' }],
+        roles: [],
+        areas: [{ slug: 'diseno' }],
       },
     });
     const service = buildOrderService(prisma);
@@ -474,7 +483,8 @@ describe('Diseño: tomar un pedido de la cuenta compartida (WORKFLOW.md §1.a)',
       assignedUser: {
         id: designer.userId,
         isSharedAccount: false,
-        roles: [{ name: 'diseno' }],
+        roles: [],
+        areas: [{ slug: 'diseno' }],
       },
     });
     const service = buildOrderService(prisma);
@@ -489,11 +499,12 @@ describe('Diseño: tomar un pedido de la cuenta compartida (WORKFLOW.md §1.a)',
     prisma.user.findUnique.mockResolvedValue({
       id: 3,
       roles: [{ name: 'admin' }],
+      areas: [],
     });
     const service = buildOrderService(prisma);
 
     await expect(
-      service.takeDesign(1, { userId: 3, roles: ['admin'] }),
+      service.takeDesign(1, { userId: 3, roles: ['admin'], areas: [] }),
     ).rejects.toBeInstanceOf(HttpException);
     expect(prisma.order.update).not.toHaveBeenCalled();
   });
@@ -524,7 +535,8 @@ describe('Alta del pedido: archivo de recursos del cliente (rename)', () => {
       user: {
         findUnique: jest.fn().mockResolvedValue({
           id: designer.userId,
-          roles: [{ name: 'diseno' }],
+          roles: [],
+          areas: [{ slug: 'diseno' }],
         }),
       },
       status: { findUnique: jest.fn().mockResolvedValue({ id: 6 }) },
@@ -623,7 +635,8 @@ describe('Diseño: "Empezar diseño" (POST /orders/:id/start-design)', () => {
     const prisma = makePrisma(designOrder());
     prisma.user.findUnique.mockResolvedValue({
       id: designer.userId,
-      roles: [{ name: 'diseno' }],
+      roles: [],
+      areas: [{ slug: 'diseno' }],
       isSharedAccount: true,
     });
     const service = buildOrderService(prisma);

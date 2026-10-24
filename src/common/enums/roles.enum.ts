@@ -1,13 +1,12 @@
+/**
+ * Roles de usuario: QUÉ puede hacer cada quien. Las áreas de trabajo (Taller,
+ * Bordado, Diseño...) NO son roles: son filas de `Area` y en `@Auth(...)` se
+ * piden con `AreaAccess` (ver area-access.enum.ts).
+ */
 export enum Role {
   ADMIN = 'admin',
-  TALLER = 'taller',
   RECEPCION = 'recepcion',
   SUPERUSER = 'superuser',
-  DTF = 'dtf',
-  BORDADO = 'bordado',
-  DISENO = 'diseno',
-  LASER = 'laser',
-  IMPRESIONES = 'impresiones',
   /**
    * Cuenta compartida de una sucursal (ej. "Punto Madero", ver Branch). Sólo
    * levanta pedidos, usa Mockups y ve SUS pedidos (filtrados por sucursal).

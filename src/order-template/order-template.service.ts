@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AreaService } from 'src/area/area.service';
 import {
   CreateOrderTemplateDto,
   OrderTemplateMaterialDto,
@@ -53,7 +54,12 @@ const TEMPLATE_SELECT = {
  */
 @Injectable()
 export class OrderTemplateService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
+  ) {}
 
   async findByClient(clientId: number) {
     await this.assertClientExists(clientId);
@@ -85,6 +91,11 @@ export class OrderTemplateService {
   ) {
     await this.assertClientExists(clientId);
     this.assertRoute(dto.requiresDesign, dto.productionAreas ?? []);
+    await this.areaService.assertAreas(
+      dto.productionAreas,
+      'production',
+      'productionAreas',
+    );
     const count = await this.prisma.orderTemplate.count({
       where: { clientId },
     });
@@ -122,6 +133,11 @@ export class OrderTemplateService {
     this.assertRoute(
       dto.requiresDesign ?? current.requiresDesign,
       dto.productionAreas ?? current.productionAreas,
+    );
+    await this.areaService.assertAreas(
+      dto.productionAreas,
+      'production',
+      'productionAreas',
     );
 
     try {

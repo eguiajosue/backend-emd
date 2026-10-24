@@ -48,6 +48,7 @@ import { SaveAreaSuppliesDto } from './dto/order-area-supply.dto';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { toCsv } from 'src/common/utils/csv';
 import { ORDER_VIEWING_ROLES_WITH_BRANCH } from 'src/common/constants/order-viewing-roles';
@@ -77,7 +78,12 @@ export class OrderController {
     // ese valor correctamente y evita que se pueda falsear.
     return this.orderService.create(
       { ...createOrderDto, userId: user.sub },
-      { userId: user.sub, roles: user.roles, username: user.username },
+      {
+        userId: user.sub,
+        roles: user.roles,
+        areas: user.areas,
+        username: user.username,
+      },
     );
   }
 
@@ -90,6 +96,7 @@ export class OrderController {
     return this.orderService.findAll(query, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -99,17 +106,7 @@ export class OrderController {
   // puede tocar hasta 100 pedidos, así que se limita la frecuencia con la
   // que se puede disparar.
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.ANY)
   @Post('bulk-actions')
   bulkActions(
     @Body() bulkOrderActionDto: BulkOrderActionDto,
@@ -118,6 +115,7 @@ export class OrderController {
     return this.orderService.bulkUpdateStatusOrArea(bulkOrderActionDto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
       username: user.username,
     });
   }
@@ -126,17 +124,7 @@ export class OrderController {
   // NOTA: este endpoint es el tablero histórico de pedidos (misma visibilidad
   // por área/rol que `findAll`), no el log de auditoría de cambios — por eso
   // mantiene acceso también para los roles operativos.
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.ANY)
   @Get('history')
   findHistory(
     @Query() query: OrderHistoryQueryDto,
@@ -145,6 +133,7 @@ export class OrderController {
     return this.orderService.findHistory(query, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -153,42 +142,25 @@ export class OrderController {
    * etiquetada con la suya (WORKFLOW.md §4). Definido antes de ':id' para que
    * "my-area-tasks" no se interprete como un id de pedido.
    */
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.PRODUCTION)
   @Get('my-area-tasks')
   getMyAreaTasks(@ActiveUser() user: AccessTokenPayload) {
     return this.orderAreaTaskService.findForUser({
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
   /** Marcador del Modo TV: lo terminado hoy/semana, a tiempo y la racha. */
-  @Auth(
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.RECEPCION,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.ADMIN, Role.SUPERUSER, Role.RECEPCION, AreaAccess.PRODUCTION)
   @Get('area-scoreboard')
   getAreaScoreboard(
     @ActiveUser() user: AccessTokenPayload,
     @Query('area') area?: string,
   ) {
     return this.orderAreaTaskService.scoreboard(
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       area,
     );
   }
@@ -196,20 +168,13 @@ export class OrderController {
    * Bandeja "Tareas asignadas" de Diseño y Producción: una entrada por tarea,
    * sólo lo propio y lo libre de las áreas del usuario.
    */
-  @Auth(
-    Role.DISENO,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.LASER,
-    Role.IMPRESIONES,
-    Role.SUPERUSER,
-  )
+  @Auth(AreaAccess.ANY, Role.SUPERUSER)
   @Get('my-tasks')
   getMyTasks(@ActiveUser() user: AccessTokenPayload) {
     return this.orderAreaTaskService.findMyTasks({
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -229,7 +194,7 @@ export class OrderController {
         area: query.area,
         clientId: query.clientId,
       },
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
     );
 
     const csv = toCsv(
@@ -277,20 +242,11 @@ export class OrderController {
     return this.orderService.findOne(+id, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.ANY)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -300,6 +256,7 @@ export class OrderController {
     return this.orderService.update(+id, updateOrderDto, user.sub, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
       username: user.username,
     });
   }
@@ -329,6 +286,7 @@ export class OrderController {
     return this.orderService.takeReception(+id, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
       username: user.username,
     });
   }
@@ -347,7 +305,7 @@ export class OrderController {
    * Desde la cuenta compartida pide el nombre de quien lo empieza.
    */
   @HttpCode(HttpStatus.OK)
-  @Auth(Role.DISENO, Role.SUPERUSER)
+  @Auth(AreaAccess.DESIGN, Role.SUPERUSER)
   @Post(':id/start-design')
   startDesign(
     @Param('id') id: string,
@@ -357,32 +315,24 @@ export class OrderController {
     return this.orderService.startDesign(+id, dto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
       username: user.username,
     });
   }
 
   @HttpCode(HttpStatus.OK)
-  @Auth(Role.DISENO, Role.SUPERUSER)
+  @Auth(AreaAccess.DESIGN, Role.SUPERUSER)
   @Post(':id/take-design')
   takeDesign(@Param('id') id: string, @ActiveUser() user: AccessTokenPayload) {
     return this.orderService.takeDesign(+id, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
       username: user.username,
     });
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.ANY)
   @Post(':id/notes')
   createNote(
     @Param('id') id: string,
@@ -392,20 +342,11 @@ export class OrderController {
     return this.orderService.createNote(+id, createOrderNoteDto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.ANY)
   @Get(':id/notes')
   getNotes(
     @Param('id') id: string,
@@ -414,7 +355,7 @@ export class OrderController {
   ) {
     return this.orderService.getNotes(
       +id,
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       query,
     );
   }
@@ -429,7 +370,7 @@ export class OrderController {
   ) {
     return this.orderService.getAuditLog(
       +id,
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       query,
     );
   }
@@ -438,7 +379,7 @@ export class OrderController {
   // Sube un archivo (base64, hasta 5MB): throttle más estricto que el
   // default global.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @Auth(Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Auth(AreaAccess.DESIGN, Role.ADMIN, Role.SUPERUSER)
   @Post(':id/design-revisions')
   createDesignRevision(
     @Param('id') id: string,
@@ -448,6 +389,7 @@ export class OrderController {
     return this.orderService.createDesignRevision(+id, dto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -461,6 +403,7 @@ export class OrderController {
     return this.orderService.getDesignRevisions(+id, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -474,6 +417,7 @@ export class OrderController {
     return this.orderService.getDesignRevisionMontageFile(+id, +revisionId, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -487,6 +431,7 @@ export class OrderController {
     return this.orderService.getDesignRevisionFeedbackFile(+id, +revisionId, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -506,6 +451,7 @@ export class OrderController {
     return this.orderService.getDesignRevisionFile(+id, +revisionId, +fileId, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -524,6 +470,7 @@ export class OrderController {
     return this.orderService.addDesignFeedback(+id, +revisionId, dto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -543,6 +490,7 @@ export class OrderController {
     return this.orderService.approveDesignRevision(+id, +revisionId, dto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -560,31 +508,24 @@ export class OrderController {
     await this.orderService.assertOrderAccess(+id, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
     return this.orderAreaTaskService.findByOrder(+id, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
   /** Suma áreas al pedido. Recepción al crear, Diseño al autorizar. */
-  @Auth(Role.RECEPCION, Role.DISENO, Role.ADMIN, Role.SUPERUSER)
+  @Auth(Role.RECEPCION, AreaAccess.DESIGN, Role.ADMIN, Role.SUPERUSER)
   @Post(':id/area-tasks')
   addAreaTasks(@Param('id') id: string, @Body() dto: SetOrderAreasDto) {
     return this.orderAreaTaskService.createTasksForAreas(+id, dto.areas);
   }
 
   /** Avance de una tarea. Sólo el área dueña (o Recepción/admin). */
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.PRODUCTION)
   @Patch(':id/area-tasks/:taskId/status')
   updateAreaTaskStatus(
     @Param('id') id: string,
@@ -595,7 +536,7 @@ export class OrderController {
     return this.orderAreaTaskService.updateStatus(
       +taskId,
       dto.status,
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       +id,
     );
   }
@@ -606,7 +547,7 @@ export class OrderController {
    */
   // Sube una foto (base64, hasta 5MB): throttle más estricto que el default.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.BORDADO)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.EMBROIDERY)
   @Post(':id/area-tasks/:taskId/send-to-test')
   sendAreaTaskToTest(
     @Param('id') id: string,
@@ -617,14 +558,14 @@ export class OrderController {
     return this.orderAreaTaskService.sendToTest(
       +taskId,
       dto.notes,
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       +id,
       dto.photo,
     );
   }
 
   /** Foto de una prueba de bordado (para revisarla y autorizarla). */
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.BORDADO)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.EMBROIDERY)
   @Get(':id/area-tasks/:taskId/tests/:testId/photo')
   getAreaTaskTestPhoto(
     @Param('id') id: string,
@@ -638,7 +579,7 @@ export class OrderController {
    * Bordado: registra si la prueba abierta se aprobó (pasa a producción) o se
    * rechazó (vuelve a digitalizado). WORKFLOW.md §3.1.
    */
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.BORDADO)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.EMBROIDERY)
   @Post(':id/area-tasks/:taskId/test-result')
   decideAreaTaskTest(
     @Param('id') id: string,
@@ -650,22 +591,13 @@ export class OrderController {
       +taskId,
       dto.result,
       dto.notes,
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       +id,
     );
   }
 
   /** Reasigna una tarea (o alguien del área se la toma). */
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.PRODUCTION)
   @Patch(':id/area-tasks/:taskId/assign')
   assignAreaTask(
     @Param('id') id: string,
@@ -676,7 +608,7 @@ export class OrderController {
     return this.orderAreaTaskService.assign(
       +taskId,
       dto.assignedUserId ?? null,
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       +id,
     );
   }
@@ -691,7 +623,7 @@ export class OrderController {
   ) {
     return this.orderAreaTaskService.remove(
       +taskId,
-      { userId: user.sub, roles: user.roles },
+      { userId: user.sub, roles: user.roles, areas: user.areas },
       +id,
     );
   }
@@ -701,23 +633,17 @@ export class OrderController {
    * el montaje; aquí se consulta con su estado (apartado/descontado) y los
    * movimientos de inventario que generó.
    */
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.ANY)
   @Get(':id/area-supplies')
   async getAreaSupplies(
     @Param('id') id: string,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    const requestingUser = { userId: user.sub, roles: user.roles };
+    const requestingUser = {
+      userId: user.sub,
+      roles: user.roles,
+      areas: user.areas,
+    };
     // Sucursal: 403 (sin insumos); áreas: sólo sus hojas (ver `getSupplySheet`).
     await this.orderService.assertOrderAccess(+id, requestingUser);
     return this.orderAreaTaskService.getSupplySheet(+id, requestingUser);
@@ -735,7 +661,11 @@ export class OrderController {
     @Param('area') area: string,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    const requestingUser = { userId: user.sub, roles: user.roles };
+    const requestingUser = {
+      userId: user.sub,
+      roles: user.roles,
+      areas: user.areas,
+    };
     await this.orderService.assertOrderAccess(+id, requestingUser);
     return this.orderAreaTaskService.discountPending(+id, area, requestingUser);
   }
@@ -748,7 +678,11 @@ export class OrderController {
     @Body() dto: SaveAreaSuppliesDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
-    const requestingUser = { userId: user.sub, roles: user.roles };
+    const requestingUser = {
+      userId: user.sub,
+      roles: user.roles,
+      areas: user.areas,
+    };
     await this.orderService.assertOrderAccess(+id, requestingUser);
     return this.orderAreaTaskService.saveSupplies(
       +id,
@@ -762,17 +696,7 @@ export class OrderController {
    * bloquea autorizar: el origen de insumos por área se captura al autorizar
    * (ver `area-supplies`). Se conserva para lo que hay que comprar.
    */
-  @Auth(
-    Role.RECEPCION,
-    Role.ADMIN,
-    Role.SUPERUSER,
-    Role.TALLER,
-    Role.DTF,
-    Role.BORDADO,
-    Role.DISENO,
-    Role.LASER,
-    Role.IMPRESIONES,
-  )
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.ANY)
   @Get(':id/materials')
   async getMaterialItems(
     @Param('id') id: string,
@@ -781,6 +705,7 @@ export class OrderController {
     await this.orderService.assertOrderAccess(+id, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
     return this.orderMaterialItemService.findByOrder(+id);
   }

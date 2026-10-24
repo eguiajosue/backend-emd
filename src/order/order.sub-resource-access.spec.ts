@@ -6,7 +6,7 @@ import { OrderController } from './order.controller';
  * la misma visibilidad por área que GET /orders/:id (assertOrderAccess).
  */
 describe('OrderController sub-resource access', () => {
-  const user = { sub: 7, username: 'taller1', roles: ['taller'] };
+  const user = { sub: 7, username: 'taller1', roles: [], areas: ['taller'] };
   let orderService: { assertOrderAccess: jest.Mock };
   let areaTasks: { findByOrder: jest.Mock };
   let materials: { findByOrder: jest.Mock };
@@ -33,7 +33,8 @@ describe('OrderController sub-resource access', () => {
     });
     expect(orderService.assertOrderAccess).toHaveBeenCalledWith(42, {
       userId: 7,
-      roles: ['taller'],
+      roles: [],
+      areas: ['taller'],
     });
     expect(areaTasks.findByOrder).not.toHaveBeenCalled();
   });

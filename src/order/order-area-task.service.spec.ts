@@ -208,8 +208,8 @@ describe('OrderAreaTaskService', () => {
   });
 
   describe('etapas de Bordado: digitalizado → pruebas → producción', () => {
-    const bordador = { userId: 3, roles: ['bordado'] };
-    const dtfUser = { userId: 4, roles: ['dtf'] };
+    const bordador = { userId: 3, roles: [], areas: ['bordado'] };
+    const dtfUser = { userId: 4, roles: [], areas: ['dtf'] };
 
     const taskAt = (
       prepStage: EmbroideryPrepStage | null,
@@ -325,6 +325,7 @@ describe('OrderAreaTaskService', () => {
       await service.sendToTest(10, undefined, {
         userId: 3,
         roles: ['recepcion'],
+        areas: [],
       });
 
       expect(notificationService.createNotification).not.toHaveBeenCalled();
@@ -588,13 +589,14 @@ describe('OrderAreaTaskService', () => {
         service.sendToTest(10, undefined, {
           userId: 1,
           roles: ['recepcion'],
+          areas: [],
         }),
       ).rejects.toThrow(/Sólo Bordado/);
     });
   });
 
   describe('updateStatus', () => {
-    const manager = { userId: 1, roles: ['recepcion'] };
+    const manager = { userId: 1, roles: ['recepcion'], areas: [] };
 
     beforeEach(() => {
       // La tarea ya está en curso: el ciclo sólo avanza de a un paso, así que
@@ -664,7 +666,8 @@ describe('OrderAreaTaskService', () => {
       await expect(
         service.updateStatus(10, AreaTaskStatus.terminado, {
           userId: 2,
-          roles: ['dtf'],
+          roles: [],
+          areas: ['dtf'],
         }),
       ).rejects.toThrow(HttpException);
     });
@@ -673,7 +676,8 @@ describe('OrderAreaTaskService', () => {
       await expect(
         service.updateStatus(10, AreaTaskStatus.terminado, {
           userId: 2,
-          roles: ['bordado'],
+          roles: [],
+          areas: ['bordado'],
         }),
       ).resolves.toBeDefined();
     });
@@ -720,7 +724,7 @@ describe('OrderAreaTaskService', () => {
     });
 
     describe('tomar la tarea al empezarla (WORKFLOW.md §3)', () => {
-      const worker = { userId: 33, roles: ['bordado'] };
+      const worker = { userId: 33, roles: [], areas: ['bordado'] };
       const pendingTask = (assignedUserId: number | null) =>
         prisma.orderAreaTask.findUnique.mockResolvedValue({
           id: 10,
@@ -857,6 +861,7 @@ describe('OrderAreaTaskService', () => {
         await service.updateStatus(10, AreaTaskStatus.en_proceso, {
           userId: 2,
           roles: ['admin'],
+          areas: [],
         });
 
         const data = prisma.orderAreaTask.update.mock.calls.at(-1)?.[0]
@@ -869,7 +874,8 @@ describe('OrderAreaTaskService', () => {
 
         await service.updateStatus(10, AreaTaskStatus.en_proceso, {
           userId: 8,
-          roles: ['admin', 'bordado'],
+          roles: ['admin'],
+          areas: ['bordado'],
         });
 
         expect(prisma.orderAreaTask.update).toHaveBeenCalledWith(
@@ -939,6 +945,7 @@ describe('OrderAreaTaskService', () => {
         await service.updateStatus(10, AreaTaskStatus.terminado, {
           userId: 77,
           roles: ['recepcion'],
+          areas: [],
         });
 
         expect(notificationService.createNotification).not.toHaveBeenCalled();
@@ -998,7 +1005,11 @@ describe('OrderAreaTaskService', () => {
 
   describe('findForUser', () => {
     it('un empleado ve sólo las tareas de sus propias áreas', async () => {
-      await service.findForUser({ userId: 3, roles: ['bordado', 'laser'] });
+      await service.findForUser({
+        userId: 3,
+        roles: [],
+        areas: ['bordado', 'laser'],
+      });
 
       expect(prisma.orderAreaTask.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1010,7 +1021,7 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('Recepción ve las tareas de todas las áreas', async () => {
-      await service.findForUser({ userId: 1, roles: ['recepcion'] });
+      await service.findForUser({ userId: 1, roles: ['recepcion'], areas: [] });
 
       const args = prisma.orderAreaTask.findMany.mock.calls.at(-1)?.[0] as {
         where: Record<string, unknown>;
@@ -1019,7 +1030,7 @@ describe('OrderAreaTaskService', () => {
     });
 
     it('deja fuera pedidos cerrados y los que siguen en Diseño', async () => {
-      await service.findForUser({ userId: 3, roles: ['dtf'] });
+      await service.findForUser({ userId: 3, roles: [], areas: ['dtf'] });
 
       expect(prisma.orderAreaTask.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1035,7 +1046,7 @@ describe('OrderAreaTaskService', () => {
 
     it('sólo trae terminadas de las últimas 24 h', async () => {
       const before = Date.now();
-      await service.findForUser({ userId: 3, roles: ['dtf'] });
+      await service.findForUser({ userId: 3, roles: [], areas: ['dtf'] });
 
       const args = prisma.orderAreaTask.findMany.mock.calls.at(-1)?.[0] as {
         where: { OR: [unknown, { completedAt: { gte: Date } }] };
@@ -1051,7 +1062,8 @@ describe('OrderAreaTaskService', () => {
     it('sin áreas de producción ni gestión, no hay bandeja', async () => {
       const result = await service.findForUser({
         userId: 4,
-        roles: ['diseno'],
+        roles: [],
+        areas: ['diseno'],
       });
 
       expect(result).toEqual([]);
@@ -1059,7 +1071,7 @@ describe('OrderAreaTaskService', () => {
   });
 
   describe('remove', () => {
-    const manager = { userId: 1, roles: ['recepcion'] };
+    const manager = { userId: 1, roles: ['recepcion'], areas: [] };
 
     beforeEach(() => {
       prisma.orderAreaTask.findUnique.mockResolvedValue({ orderId: 5 });
@@ -1093,7 +1105,7 @@ describe('OrderAreaTaskService', () => {
 
     it('sólo Recepción/admin pueden quitar un área', async () => {
       await expect(
-        service.remove(10, { userId: 3, roles: ['bordado'] }),
+        service.remove(10, { userId: 3, roles: [], areas: ['bordado'] }),
       ).rejects.toThrow(HttpException);
     });
   });
@@ -1105,27 +1117,31 @@ describe('OrderAreaTaskService', () => {
         area: 'bordado',
       });
       prisma.user.findUnique.mockResolvedValue({
-        roles: [{ name: 'bordado' }],
+        roles: [],
+        areas: [{ slug: 'bordado' }],
       });
     });
 
     it('deja que alguien del área se tome la tarea', async () => {
       await expect(
-        service.assign(10, 3, { userId: 3, roles: ['bordado'] }),
+        service.assign(10, 3, { userId: 3, roles: [], areas: ['bordado'] }),
       ).resolves.toBeDefined();
     });
 
     it('impide asignarle la tarea a otra persona sin ser Recepción', async () => {
       await expect(
-        service.assign(10, 99, { userId: 3, roles: ['bordado'] }),
+        service.assign(10, 99, { userId: 3, roles: [], areas: ['bordado'] }),
       ).rejects.toThrow(HttpException);
     });
 
     it('rechaza a un usuario que no pertenece al área', async () => {
-      prisma.user.findUnique.mockResolvedValue({ roles: [{ name: 'dtf' }] });
+      prisma.user.findUnique.mockResolvedValue({
+        roles: [],
+        areas: [{ slug: 'dtf' }],
+      });
 
       await expect(
-        service.assign(10, 99, { userId: 1, roles: ['recepcion'] }),
+        service.assign(10, 99, { userId: 1, roles: ['recepcion'], areas: [] }),
       ).rejects.toThrow(HttpException);
     });
   });
@@ -1177,7 +1193,8 @@ describe('OrderAreaTaskService', () => {
 
       const items = await service.findMyTasks({
         userId: ME,
-        roles: ['taller'],
+        roles: [],
+        areas: ['taller'],
       });
 
       expect(items.map((i) => [i.taskId, i.mine])).toEqual([
@@ -1200,7 +1217,8 @@ describe('OrderAreaTaskService', () => {
 
       const items = await service.findMyTasks({
         userId: ME,
-        roles: ['diseno', 'dtf'],
+        roles: [],
+        areas: ['diseno', 'dtf'],
       });
 
       expect(items.map((i) => i.key)).toEqual(['design-50', 'task-5']);
@@ -1219,7 +1237,8 @@ describe('OrderAreaTaskService', () => {
 
       const items = await service.findMyTasks({
         userId: SHARED_TALLER,
-        roles: ['taller'],
+        roles: [],
+        areas: ['taller'],
       });
 
       expect(items).toHaveLength(1);
@@ -1244,7 +1263,8 @@ describe('OrderAreaTaskService', () => {
 
       const items = await service.findMyTasks({
         userId: ME,
-        roles: ['bordado'],
+        roles: [],
+        areas: ['bordado'],
       });
 
       expect(items[0]).toMatchObject({
@@ -1262,6 +1282,7 @@ describe('OrderAreaTaskService', () => {
       const items = await service.findMyTasks({
         userId: ME,
         roles: ['recepcion'],
+        areas: [],
       });
       expect(items).toEqual([]);
       expect(prisma.orderAreaTask.findMany).not.toHaveBeenCalled();
@@ -1269,7 +1290,7 @@ describe('OrderAreaTaskService', () => {
   });
 
   describe('la tarea debe ser del pedido de la URL', () => {
-    const manager = { userId: 1, roles: ['recepcion'] };
+    const manager = { userId: 1, roles: ['recepcion'], areas: [] };
     const statusOf = async (fn: () => Promise<unknown>) => {
       try {
         await fn();

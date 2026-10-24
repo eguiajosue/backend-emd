@@ -3,12 +3,11 @@ import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
-  IsIn,
   IsInt,
   IsPositive,
   ValidateIf,
 } from 'class-validator';
-import { ORDER_AREAS } from './create-order.dto';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 
 /**
  * Cuerpo de POST /orders/bulk-actions. Requiere `orderIds` + al menos uno de
@@ -34,6 +33,6 @@ export class BulkOrderActionDto {
   statusId?: number;
 
   @ValidateIf((dto: BulkOrderActionDto) => dto.area !== undefined)
-  @IsIn(ORDER_AREAS)
-  area?: (typeof ORDER_AREAS)[number];
+  @IsAreaSlug()
+  area?: string;
 }

@@ -13,7 +13,7 @@ import {
 const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const PNG_DATA_URL = `data:image/png;base64,${PNG}`;
-const RECEPCION = { userId: 5, roles: ['recepcion'] };
+const RECEPCION = { userId: 5, roles: ['recepcion'], areas: [] };
 
 /** Adjuntos del chat con almacenamiento de objetos (driver db y s3). */
 describe('ChatService - adjuntos en el almacenamiento (R2/S3)', () => {

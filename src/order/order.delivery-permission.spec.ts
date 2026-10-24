@@ -20,8 +20,12 @@ describe('OrderService - quién puede marcar ENTREGADO', () => {
   let orderService: OrderService;
   let prisma: any;
 
-  const bordador: RequestingUser = { userId: 3, roles: ['bordado'] };
-  const receptionist: RequestingUser = { userId: 1, roles: ['recepcion'] };
+  const bordador: RequestingUser = { userId: 3, roles: [], areas: ['bordado'] };
+  const receptionist: RequestingUser = {
+    userId: 1,
+    roles: ['recepcion'],
+    areas: [],
+  };
 
   beforeEach(() => {
     prisma = {

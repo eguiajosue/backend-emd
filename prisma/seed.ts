@@ -1,34 +1,21 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcryptjs from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
+import { DEFAULT_AREAS } from '../src/area/default-areas';
 
 const prisma = new PrismaClient();
 
-// Nombres de roles usados en los controllers via @Auth(...) (ver src/common/enums/roles.enum.ts)
-const ROLE_NAMES = [
-  'admin',
-  'taller',
-  'recepcion',
-  'superuser',
-  'dtf',
-  'bordado',
-  'diseno',
-  'laser',
-  'impresiones',
-  'sucursal',
-];
+// Nombres de roles usados en los controllers via @Auth(...) (ver
+// src/common/enums/roles.enum.ts). Las áreas de trabajo NO son roles: viven
+// en la tabla Area (ver AREA_SEEDS).
+const ROLE_NAMES = ['admin', 'recepcion', 'superuser', 'sucursal'];
 
-// Roles operativos que participan del flujo de producción de pedidos
-// (ver src/order/role-stage-mapping.ts). Cada uno tiene una configuración
-// de visibilidad general en AreaVisibilitySetting.
-const OPERATIONAL_ROLE_NAMES = [
-  'taller',
-  'dtf',
-  'bordado',
-  'diseno',
-  'laser',
-  'impresiones',
-];
+/**
+ * Las seis áreas de siempre (ver model Area y src/area/default-areas.ts). Se
+ * crean sólo si no existen: el nombre, ícono, color y visibilidad se
+ * administran desde Configuración y el seed nunca los pisa.
+ */
+const AREA_SEEDS = DEFAULT_AREAS;
 
 /**
  * Cuentas compartidas de área (`isSharedAccount`).
@@ -38,19 +25,15 @@ const OPERATIONAL_ROLE_NAMES = [
  * pedido con montaje no ofrece "Cualquier diseñador" y las tareas nacen sin
  * responsable (ver WORKFLOW.md §1 y §3).
  *
- * El `username` es el nombre del rol, igual que espera
+ * El `username` es el slug del área, igual que espera
  * GenerateUsernameMiddleware para este tipo de cuenta. El nombre visible va
  * sin prefijo: el frontend ya antepone "Área:" al mostrarlas.
  */
-const AREA_ACCOUNT_SEEDS: { role: string; username: string; label: string }[] =
-  [
-    { role: 'diseno', username: 'diseno', label: 'Diseño' },
-    { role: 'taller', username: 'taller', label: 'Taller' },
-    { role: 'dtf', username: 'dtf', label: 'DTF' },
-    { role: 'bordado', username: 'bordado', label: 'Bordado' },
-    { role: 'laser', username: 'laser', label: 'Láser' },
-    { role: 'impresiones', username: 'impresiones', label: 'Impresiones' },
-  ];
+const AREA_ACCOUNT_SEEDS = AREA_SEEDS.map(({ slug, name }) => ({
+  area: slug,
+  username: slug,
+  label: name,
+}));
 
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
@@ -226,6 +209,18 @@ async function main() {
     console.log(`  role "${name}" ready (id=${role.id})`);
   }
 
+  console.log('Seeding areas...');
+  const areas: Record<string, { id: number }> = {};
+  for (const area of AREA_SEEDS) {
+    const row = await prisma.area.upsert({
+      where: { slug: area.slug },
+      update: {},
+      create: { ...area, isProductionDestination: !area.isDesign },
+    });
+    areas[area.slug] = row;
+    console.log(`  area "${area.slug}" ready (id=${row.id})`);
+  }
+
   console.log('Seeding admin user...');
   const hashedPassword = await bcryptjs.hash(ADMIN_PASSWORD, 10);
 
@@ -263,17 +258,17 @@ async function main() {
   // contraseña conocida dejaría seis credenciales adivinables en producción.
   // Si alguien necesita entrar como el área, se le asigna una desde Usuarios.
   const areaPasswordFromEnv = process.env.SEED_AREA_PASSWORD;
-  for (const { role, username, label } of AREA_ACCOUNT_SEEDS) {
+  for (const { area, username, label } of AREA_ACCOUNT_SEEDS) {
     const existing = await prisma.user.findUnique({ where: { username } });
 
     if (existing) {
-      // Idempotente y no destructivo: sólo garantiza la marca y el rol, nunca
+      // Idempotente y no destructivo: sólo garantiza la marca y el área, nunca
       // pisa la contraseña ni el nombre que alguien haya editado a mano.
       await prisma.user.update({
         where: { username },
         data: {
           isSharedAccount: true,
-          roles: { connect: [{ id: roles[role].id }] },
+          areas: { connect: [{ id: areas[area].id }] },
         },
       });
       console.log(`  area account "${username}" ready (id=${existing.id})`);
@@ -290,7 +285,7 @@ async function main() {
         username,
         password,
         isSharedAccount: true,
-        roles: { connect: [{ id: roles[role].id }] },
+        areas: { connect: [{ id: areas[area].id }] },
       },
     });
     console.log(`  area account "${username}" created (id=${created.id})`);
@@ -313,18 +308,6 @@ async function main() {
   await prisma.$executeRawUnsafe(
     `SELECT setval(pg_get_serial_sequence('"Status"', 'id'), (SELECT COALESCE(MAX("id"), 1) FROM "Status"))`,
   );
-
-  console.log('Seeding area visibility settings...');
-  for (const role of OPERATIONAL_ROLE_NAMES) {
-    const setting = await prisma.areaVisibilitySetting.upsert({
-      where: { role },
-      update: {},
-      create: { role, generalViewEnabled: true },
-    });
-    console.log(
-      `  area visibility for "${role}" ready (generalViewEnabled=${setting.generalViewEnabled})`,
-    );
-  }
 
   console.log('Seeding branches...');
   for (const name of BRANCH_NAMES) {

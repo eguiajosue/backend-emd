@@ -4,7 +4,6 @@ import {
   ArrayNotEmpty,
   IsArray,
   IsEnum,
-  IsIn,
   IsInt,
   IsOptional,
   IsPositive,
@@ -13,15 +12,16 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { PRODUCTION_AREAS, OrderFileDto } from './create-order.dto';
+import { MAX_ORDER_AREAS, OrderFileDto } from './create-order.dto';
+import { IsAreaSlug } from 'src/area/is-area-slug.decorator';
 
 /** Áreas de producción que van a trabajar un pedido (WORKFLOW.md §3). */
 export class SetOrderAreasDto {
   @IsArray()
   @ArrayNotEmpty()
-  @ArrayMaxSize(PRODUCTION_AREAS.length)
-  @IsIn(PRODUCTION_AREAS, { each: true })
-  areas: (typeof PRODUCTION_AREAS)[number][];
+  @ArrayMaxSize(MAX_ORDER_AREAS)
+  @IsAreaSlug({ each: true })
+  areas: string[];
 }
 
 /** Avance de una tarea: pendiente → en_proceso → terminado. */

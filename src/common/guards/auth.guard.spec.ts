@@ -58,3 +58,31 @@ describe('AuthGuard', () => {
     ).resolves.toBe(true);
   });
 });
+
+describe('AuthGuard: tokens emitidos antes de separar áreas y roles', () => {
+  it('pasa las áreas que venían dentro de `roles` a `areas`', async () => {
+    const jwtService = {
+      verifyAsync: jest
+        .fn()
+        .mockResolvedValue({ sub: 3, username: 'ana', roles: ['bordado'] }),
+    } as unknown as JwtService;
+    const guard = new AuthGuard(jwtService, {
+      get: jest.fn().mockReturnValue('test-secret'),
+    } as unknown as ConfigService);
+    const request: { headers: object; user?: unknown } = {
+      headers: { authorization: 'Bearer viejo' },
+    };
+    const context = {
+      switchToHttp: () => ({ getRequest: () => request }),
+    } as unknown as ExecutionContext;
+
+    await guard.canActivate(context);
+
+    expect(request.user).toEqual({
+      sub: 3,
+      username: 'ana',
+      roles: [],
+      areas: ['bordado'],
+    });
+  });
+});

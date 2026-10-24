@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { PRODUCTION_AREAS } from 'src/order/dto/create-order.dto';
+import { AreaService } from 'src/area/area.service';
+import { DESIGN_AREA } from 'src/area/area-access';
 import {
   StatusIdResolver,
   STATUS_NAME_AUTORIZADO,
@@ -29,7 +30,12 @@ const STAGE_WINDOW_DAYS = 30;
 export class CoordinationService {
   private readonly statusIds: StatusIdResolver;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    // Default sólo para los tests que construyen el service a mano: en la app
+    // lo inyecta AreaModule (global).
+    private readonly areaService: AreaService = AreaService.inMemory(),
+  ) {
     this.statusIds = new StatusIdResolver(prisma);
   }
 
@@ -39,19 +45,20 @@ export class CoordinationService {
       this.statusIds.idFor(STATUS_NAME_CANCELADO),
     ]);
     const closed = [entregado, cancelado];
+    const areas = await this.areaService.slugs('production');
     const [load, stageTimes, overdue] = await Promise.all([
-      this.load(closed, now),
-      this.stageTimes(now),
+      this.load(closed, now, areas),
+      this.stageTimes(now, areas),
       this.overdue(closed, now),
     ]);
     return { generatedAt: now.toISOString(), load, stageTimes, overdue };
   }
 
-  private async load(closed: number[], now: Date) {
+  private async load(closed: number[], now: Date, areas: string[]) {
     const tasks = await this.prisma.orderAreaTask.findMany({
       where: {
         status: { not: 'terminado' },
-        order: { statusId: { notIn: closed }, NOT: { area: 'diseno' } },
+        order: { statusId: { notIn: closed }, NOT: { area: DESIGN_AREA } },
       },
       select: {
         area: true,
@@ -77,7 +84,7 @@ export class CoordinationService {
         deliveryDate: t.order.deliveryDate,
       })),
       now,
-      PRODUCTION_AREAS,
+      areas,
     );
   }
 
@@ -87,7 +94,7 @@ export class CoordinationService {
    * en cada área (autorizado/asignado → la empiezan), producción por área
    * (empieza → termina) y entrega (listo → entregado).
    */
-  private async stageTimes(now: Date) {
+  private async stageTimes(now: Date, areas: string[]) {
     const since = new Date(now.getTime() - STAGE_WINDOW_DAYS * 86_400_000);
     const [esperando, autorizado, terminado, entregado] = await Promise.all(
       [
@@ -187,7 +194,7 @@ export class CoordinationService {
         },
         { key: 'entrega', label: 'Listo → entregado', ...summarize(handover) },
       ],
-      areas: PRODUCTION_AREAS.map((area) => ({
+      areas: areas.map((area) => ({
         area,
         espera: summarize(queue.get(area) ?? []),
         produccion: summarize(work.get(area) ?? []),

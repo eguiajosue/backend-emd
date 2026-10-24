@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
 import { Role } from 'src/common/enums/roles.enum';
+import { AreaAccess } from 'src/common/enums/area-access.enum';
 import { ORDER_VIEWING_ROLES_WITH_BRANCH } from 'src/common/constants/order-viewing-roles';
 import { AccessTokenPayload } from 'src/auth/auth.service';
 import { CreateOrderMockupDto } from './dto/create-order-mockup.dto';
@@ -41,6 +42,7 @@ export class OrderMockupController {
     return this.orderMockupService.findAll(orderId, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -54,6 +56,7 @@ export class OrderMockupController {
     return this.orderMockupService.findOne(orderId, mockupId, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
@@ -61,7 +64,13 @@ export class OrderMockupController {
   // global, igual que las demás subidas de archivos del pedido.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   // La sucursal adjunta mockups a SUS pedidos (assertOrderAccess).
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO, Role.SUCURSAL)
+  @Auth(
+    Role.RECEPCION,
+    Role.ADMIN,
+    Role.SUPERUSER,
+    AreaAccess.DESIGN,
+    Role.SUCURSAL,
+  )
   @Post()
   create(
     @Param('id', ParseIntPipe) orderId: number,
@@ -71,10 +80,11 @@ export class OrderMockupController {
     return this.orderMockupService.create(orderId, dto, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 
-  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, Role.DISENO)
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.DESIGN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':mockupId')
   remove(
@@ -85,6 +95,7 @@ export class OrderMockupController {
     return this.orderMockupService.remove(orderId, mockupId, {
       userId: user.sub,
       roles: user.roles,
+      areas: user.areas,
     });
   }
 }
