@@ -18,7 +18,17 @@ import {
 } from './area-access';
 import { AREA_SELECT, AreaService, type AreaView } from './area.service';
 import { assertValidStageList, stageKeyFor } from './area-stages';
-import { CreateAreaDto, SetAreaStagesDto } from './dto/create-area.dto';
+import {
+  assertValidFieldList,
+  assertValidMachineList,
+  type FieldDraft,
+} from './area-config';
+import {
+  CreateAreaDto,
+  SetAreaFieldsDto,
+  SetAreaMachinesDto,
+  SetAreaStagesDto,
+} from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 
 /** Estados con los que un pedido ya no es trabajo en curso. */
@@ -114,6 +124,18 @@ export class AreaAdminService {
       throw new BadRequestException('Un área nueva no tiene etapas existentes');
     }
     assertValidStageList(stages);
+    const machines = dto.machines ?? [];
+    const fields = dto.fields ?? [];
+    if (
+      machines.some((m) => m.id !== undefined) ||
+      fields.some((f) => f.id !== undefined)
+    ) {
+      throw new BadRequestException(
+        'Un área nueva no tiene máquinas ni datos existentes',
+      );
+    }
+    assertValidMachineList(machines);
+    assertValidFieldList(fields);
 
     await this.assertNameFree(name, slug);
     if (sharedAccount) await this.assertUsernameFree(slug);
@@ -146,7 +168,22 @@ export class AreaAdminService {
             generalViewEnabled: dto.generalViewEnabled ?? true,
             inventoryCategories: dto.inventoryCategories ?? [],
             inventoryUnits: dto.inventoryUnits ?? [],
+            capacity: dto.capacity ?? null,
+            turnaroundHours: dto.turnaroundHours ?? null,
             sortOrder: (_max.sortOrder ?? 0) + 10,
+            ...(machines.length > 0 && {
+              machines: {
+                create: machines.map((m, index) => ({
+                  name: m.name.trim(),
+                  sortOrder: (index + 1) * 10,
+                })),
+              },
+            }),
+            ...(fields.length > 0 && {
+              fields: {
+                create: this.newFields(fields, new Set()),
+              },
+            }),
             ...(stages.length > 0 && {
               stages: {
                 create: this.newStages(stages, new Set()),
@@ -184,6 +221,8 @@ export class AreaAdminService {
           sharedAccountId: created.sharedAccountId,
           userIds,
           stages: stages.map((stage) => stage.name),
+          machines: machines.map((m) => m.name),
+          fields: fields.map((f) => f.label),
         },
       });
       return {
@@ -262,6 +301,10 @@ export class AreaAdminService {
         inventoryUnits: dto.inventoryUnits,
       }),
       ...(dto.active !== undefined && { active: dto.active }),
+      ...(dto.capacity !== undefined && { capacity: dto.capacity }),
+      ...(dto.turnaroundHours !== undefined && {
+        turnaroundHours: dto.turnaroundHours,
+      }),
     };
 
     try {
@@ -388,6 +431,214 @@ export class AreaAdminService {
     return this.prisma.area.findUniqueOrThrow({
       where: { id },
       select: AREA_SELECT,
+    });
+  }
+
+  /**
+   * Reemplaza las máquinas del área: las que traen `id` se renombran y
+   * reordenan, las nuevas se crean y las que ya no vienen se desactivan. Una
+   * máquina con tareas abiertas asignadas no se puede quitar.
+   */
+  async setMachines(
+    id: number,
+    dto: SetAreaMachinesDto,
+    actorUserId: number,
+  ): Promise<AreaView> {
+    const area = await this.prisma.area.findUnique({
+      where: { id },
+      select: {
+        slug: true,
+        isDesign: true,
+        machines: { select: { id: true, name: true, active: true } },
+      },
+    });
+    if (!area) throw new NotFoundException('El área no existe');
+    if (area.isDesign) {
+      throw new BadRequestException('Diseño no lleva máquinas');
+    }
+    assertValidMachineList(dto.machines);
+    const kept = this.keptIds(
+      dto.machines.map((m) => ({ id: m.id, label: m.name })),
+      area.machines,
+      'La máquina',
+    );
+    const removed = area.machines.filter((m) => m.active && !kept.has(m.id));
+    for (const machine of removed) {
+      const tasks = await this.prisma.orderAreaTask.count({
+        where: {
+          machineId: machine.id,
+          status: { not: AreaTaskStatus.terminado },
+          order: { status: { name: { notIn: CLOSED_STATUS_NAMES } } },
+        },
+      });
+      if (tasks > 0) {
+        throw new ConflictException(
+          `No se puede quitar la máquina "${machine.name}": tiene ${tasks} tarea${tasks === 1 ? '' : 's'} asignada${tasks === 1 ? '' : 's'}. Reasígnalas primero`,
+        );
+      }
+    }
+    await this.prisma.$transaction(async (tx) => {
+      for (const [index, draft] of dto.machines.entries()) {
+        const data = { name: draft.name.trim(), sortOrder: (index + 1) * 10 };
+        if (draft.id !== undefined) {
+          await tx.areaMachine.update({ where: { id: draft.id }, data });
+        } else {
+          await tx.areaMachine.create({ data: { ...data, areaId: id } });
+        }
+      }
+      for (const machine of removed) {
+        await tx.areaMachine.update({
+          where: { id: machine.id },
+          data: { active: false },
+        });
+      }
+    });
+    return this.afterConfigChange(id, actorUserId, 'area.machines', {
+      slug: area.slug,
+      machines: dto.machines.map((m) => m.name),
+      removed: removed.map((m) => m.name),
+    });
+  }
+
+  /**
+   * Reemplaza los datos propios del área. El tipo de uno que ya existe no
+   * cambia; al quitarlo se desactiva y los valores ya capturados se conservan.
+   */
+  async setFields(
+    id: number,
+    dto: SetAreaFieldsDto,
+    actorUserId: number,
+  ): Promise<AreaView> {
+    const area = await this.prisma.area.findUnique({
+      where: { id },
+      select: {
+        slug: true,
+        isDesign: true,
+        fields: {
+          select: {
+            id: true,
+            key: true,
+            label: true,
+            type: true,
+            active: true,
+          },
+        },
+      },
+    });
+    if (!area) throw new NotFoundException('El área no existe');
+    if (area.isDesign) {
+      throw new BadRequestException('Diseño no lleva datos propios');
+    }
+    assertValidFieldList(dto.fields);
+    const kept = this.keptIds(
+      dto.fields.map((f) => ({ id: f.id, label: f.label })),
+      area.fields,
+      'El dato',
+    );
+    const known = new Map(area.fields.map((f) => [f.id, f]));
+    for (const draft of dto.fields) {
+      const current = draft.id === undefined ? undefined : known.get(draft.id);
+      if (current && current.type !== draft.type) {
+        throw new BadRequestException(
+          `El tipo de "${current.label}" no se puede cambiar: crea un dato nuevo`,
+        );
+      }
+    }
+    const removed = area.fields.filter((f) => f.active && !kept.has(f.id));
+    await this.prisma.$transaction(async (tx) => {
+      const taken = new Set(area.fields.map((f) => f.key));
+      for (const [index, draft] of dto.fields.entries()) {
+        const sortOrder = (index + 1) * 10;
+        if (draft.id !== undefined) {
+          await tx.areaField.update({
+            where: { id: draft.id },
+            data: {
+              label: draft.label.trim(),
+              required: draft.required ?? false,
+              options: (draft.options ?? []).map((o) => o.trim()),
+              unit: draft.unit?.trim() || null,
+              sortOrder,
+            },
+          });
+        } else {
+          const [created] = this.newFields([draft], taken, sortOrder);
+          taken.add(created.key);
+          await tx.areaField.create({ data: { ...created, areaId: id } });
+        }
+      }
+      for (const field of removed) {
+        await tx.areaField.update({
+          where: { id: field.id },
+          data: { active: false },
+        });
+      }
+    });
+    return this.afterConfigChange(id, actorUserId, 'area.fields', {
+      slug: area.slug,
+      fields: dto.fields.map((f) => f.label),
+      removed: removed.map((f) => f.key),
+    });
+  }
+
+  /** Ids que siguen en la lista; 400 si traen uno ajeno, desactivado o repetido. */
+  private keptIds(
+    drafts: readonly { id?: number; label: string }[],
+    current: readonly { id: number; active: boolean }[],
+    what: string,
+  ): Set<number> {
+    const known = new Map(current.map((c) => [c.id, c]));
+    const kept = new Set<number>();
+    for (const draft of drafts) {
+      if (draft.id === undefined) continue;
+      const found = known.get(draft.id);
+      if (!found?.active || kept.has(draft.id)) {
+        throw new BadRequestException(
+          `${what} "${draft.label}" no existe en esta área`,
+        );
+      }
+      kept.add(draft.id);
+    }
+    return kept;
+  }
+
+  private async afterConfigChange(
+    id: number,
+    actorUserId: number,
+    action: string,
+    metadata: Record<string, unknown>,
+  ): Promise<AreaView> {
+    this.areaService.invalidate();
+    await this.auditLog.record({
+      actorUserId,
+      action,
+      entityType: 'area',
+      entityId: id,
+      metadata,
+    });
+    return this.prisma.area.findUniqueOrThrow({
+      where: { id },
+      select: AREA_SELECT,
+    });
+  }
+
+  /** Filas de datos nuevos, con clave estable que no choca con `taken`. */
+  private newFields(
+    drafts: readonly FieldDraft[],
+    taken: Set<string>,
+    firstSortOrder = 10,
+  ) {
+    return drafts.map((draft, index) => {
+      const key = stageKeyFor(draft.label, taken);
+      taken.add(key);
+      return {
+        key,
+        label: draft.label.trim(),
+        type: draft.type,
+        required: draft.required ?? false,
+        options: (draft.options ?? []).map((o) => o.trim()),
+        unit: draft.unit?.trim() || null,
+        sortOrder: firstSortOrder + index * 10,
+      };
     });
   }
 

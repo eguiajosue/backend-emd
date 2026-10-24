@@ -20,7 +20,12 @@ import { AccessTokenPayload } from 'src/auth/auth.service';
 import { isFullVisibilityRole } from 'src/order/role-stage-mapping';
 import { AreaService } from './area.service';
 import { AreaAdminService } from './area-admin.service';
-import { CreateAreaDto, SetAreaStagesDto } from './dto/create-area.dto';
+import {
+  CreateAreaDto,
+  SetAreaFieldsDto,
+  SetAreaMachinesDto,
+  SetAreaStagesDto,
+} from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 
 @ApiTags('areas')
@@ -84,5 +89,27 @@ export class AreaController {
     @ActiveUser() user: AccessTokenPayload,
   ) {
     return this.areaAdminService.setStages(id, dto, user.sub);
+  }
+
+  /** Reemplaza las máquinas o equipos del área. */
+  @Auth(Role.ADMIN, Role.SUPERUSER)
+  @Put(':id/machines')
+  setMachines(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetAreaMachinesDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.areaAdminService.setMachines(id, dto, user.sub);
+  }
+
+  /** Reemplaza los datos propios que se capturan en cada tarea del área. */
+  @Auth(Role.ADMIN, Role.SUPERUSER)
+  @Put(':id/fields')
+  setFields(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetAreaFieldsDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.areaAdminService.setFields(id, dto, user.sub);
   }
 }

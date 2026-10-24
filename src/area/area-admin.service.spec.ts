@@ -570,4 +570,203 @@ describe('AreaAdminService', () => {
       });
     });
   });
+
+  describe('capacidad, máquinas y datos propios', () => {
+    beforeEach(() => {
+      prisma.area.findUniqueOrThrow = jest.fn().mockResolvedValue(area());
+      tx.areaMachine = {
+        update: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({}),
+      };
+      tx.areaField = {
+        update: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({}),
+      };
+    });
+
+    it('crear un área guarda capacidad, tiempos, máquinas y datos', async () => {
+      await service.create(
+        dto({
+          capacity: 6,
+          turnaroundHours: 4,
+          machines: [{ name: 'Impresora 1' }, { name: 'Impresora 2' }],
+          fields: [
+            {
+              label: 'Material',
+              type: 'select',
+              options: ['PLA', 'ABS'],
+              required: true,
+            },
+            { label: 'Alto', type: 'number', unit: 'cm' },
+          ],
+        }),
+        5,
+      );
+      const { data } = tx.area.create.mock.calls[0][0];
+      expect(data).toMatchObject({ capacity: 6, turnaroundHours: 4 });
+      expect(data.machines.create).toEqual([
+        { name: 'Impresora 1', sortOrder: 10 },
+        { name: 'Impresora 2', sortOrder: 20 },
+      ]);
+      expect(data.fields.create).toEqual([
+        {
+          key: 'material',
+          label: 'Material',
+          type: 'select',
+          required: true,
+          options: ['PLA', 'ABS'],
+          unit: null,
+          sortOrder: 10,
+        },
+        {
+          key: 'alto',
+          label: 'Alto',
+          type: 'number',
+          required: false,
+          options: [],
+          unit: 'cm',
+          sortOrder: 20,
+        },
+      ]);
+    });
+
+    it('sin capacidad ni nada de esto el área nace limpia', async () => {
+      await service.create(dto(), 5);
+      const { data } = tx.area.create.mock.calls[0][0];
+      expect(data).toMatchObject({ capacity: null, turnaroundHours: null });
+      expect(data).not.toHaveProperty('machines');
+      expect(data).not.toHaveProperty('fields');
+    });
+
+    it('editar capacidad y tiempos (null los borra)', async () => {
+      prisma.area.findUnique.mockResolvedValue({ ...area(), id: 1 });
+      await service.update(1, { capacity: 4, turnaroundHours: null }, 5);
+      expect(prisma.area.update.mock.calls[0][0].data).toMatchObject({
+        capacity: 4,
+        turnaroundHours: null,
+      });
+    });
+
+    describe('setMachines', () => {
+      const stored = (over: Record<string, unknown> = {}) => ({
+        slug: 'laser',
+        isDesign: false,
+        machines: [
+          { id: 1, name: 'Láser A', active: true },
+          { id: 2, name: 'Láser B', active: true },
+        ],
+        ...over,
+      });
+      beforeEach(() => prisma.area.findUnique.mockResolvedValue(stored()));
+
+      it('renombra, agrega y desactiva las que ya no vienen', async () => {
+        await service.setMachines(
+          5,
+          { machines: [{ id: 1, name: 'Láser CO2' }, { name: 'Láser C' }] },
+          9,
+        );
+        expect(tx.areaMachine.update).toHaveBeenCalledWith({
+          where: { id: 1 },
+          data: { name: 'Láser CO2', sortOrder: 10 },
+        });
+        expect(tx.areaMachine.create).toHaveBeenCalledWith({
+          data: { name: 'Láser C', sortOrder: 20, areaId: 5 },
+        });
+        expect(tx.areaMachine.update).toHaveBeenCalledWith({
+          where: { id: 2 },
+          data: { active: false },
+        });
+        expect(areaService.invalidate).toHaveBeenCalled();
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'area.machines' }),
+        );
+      });
+
+      it('no quita una máquina con tareas abiertas asignadas', async () => {
+        prisma.orderAreaTask.count.mockResolvedValue(2);
+        await expect(
+          service.setMachines(5, { machines: [{ id: 1, name: 'Láser A' }] }, 9),
+        ).rejects.toThrow(/quitar la máquina "Láser B".*2 tareas asignadas/);
+        expect(tx.areaMachine.update).not.toHaveBeenCalled();
+      });
+
+      it('rechaza ids ajenos y Diseño', async () => {
+        await expect(
+          service.setMachines(5, { machines: [{ id: 99, name: 'Otra' }] }, 9),
+        ).rejects.toThrow(/no existe/);
+        prisma.area.findUnique.mockResolvedValue(stored({ isDesign: true }));
+        await expect(
+          service.setMachines(4, { machines: [] }, 9),
+        ).rejects.toThrow(/Diseño/);
+      });
+    });
+
+    describe('setFields', () => {
+      const stored = () => ({
+        slug: 'impresion-3d',
+        isDesign: false,
+        fields: [
+          {
+            id: 1,
+            key: 'material',
+            label: 'Material',
+            type: 'select',
+            active: true,
+          },
+          { id: 2, key: 'alto', label: 'Alto', type: 'number', active: true },
+        ],
+      });
+      beforeEach(() => prisma.area.findUnique.mockResolvedValue(stored()));
+
+      it('edita, agrega y desactiva; el valor ya capturado no se toca', async () => {
+        await service.setFields(
+          5,
+          {
+            fields: [
+              {
+                id: 1,
+                label: 'Filamento',
+                type: 'select',
+                options: ['PLA', 'PETG'],
+                required: true,
+              },
+              { label: 'Color', type: 'text' },
+            ],
+          },
+          9,
+        );
+        expect(tx.areaField.update).toHaveBeenCalledWith({
+          where: { id: 1 },
+          data: {
+            label: 'Filamento',
+            required: true,
+            options: ['PLA', 'PETG'],
+            unit: null,
+            sortOrder: 10,
+          },
+        });
+        expect(tx.areaField.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            key: 'color',
+            areaId: 5,
+            sortOrder: 20,
+          }),
+        });
+        expect(tx.areaField.update).toHaveBeenCalledWith({
+          where: { id: 2 },
+          data: { active: false },
+        });
+      });
+
+      it('el tipo de un dato existente no cambia', async () => {
+        await expect(
+          service.setFields(
+            5,
+            { fields: [{ id: 2, label: 'Alto', type: 'text' }] },
+            9,
+          ),
+        ).rejects.toThrow(/no se puede cambiar/);
+      });
+    });
+  });
 });

@@ -37,6 +37,8 @@ import {
   SendToTestDto,
   SampleTestResultDto,
   AssignAreaTaskDto,
+  SetAreaTaskFieldsDto,
+  SetAreaTaskMachineDto,
 } from './dto/order-area-task.dto';
 import { OrderAreaTaskService } from './order-area-task.service';
 import {
@@ -599,6 +601,40 @@ export class OrderController {
       +taskId,
       dto.result,
       dto.notes,
+      { userId: user.sub, roles: user.roles, areas: user.areas },
+      +id,
+    );
+  }
+
+  /** Asigna la máquina del área que trabaja la tarea. */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.PRODUCTION)
+  @Patch(':id/area-tasks/:taskId/machine')
+  setAreaTaskMachine(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Body() dto: SetAreaTaskMachineDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderAreaTaskService.setMachine(
+      +taskId,
+      dto.machineId ?? null,
+      { userId: user.sub, roles: user.roles, areas: user.areas },
+      +id,
+    );
+  }
+
+  /** Captura los datos propios del área en la tarea. */
+  @Auth(Role.RECEPCION, Role.ADMIN, Role.SUPERUSER, AreaAccess.PRODUCTION)
+  @Patch(':id/area-tasks/:taskId/fields')
+  setAreaTaskFields(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Body() dto: SetAreaTaskFieldsDto,
+    @ActiveUser() user: AccessTokenPayload,
+  ) {
+    return this.orderAreaTaskService.setFieldValues(
+      +taskId,
+      dto.values,
       { userId: user.sub, roles: user.roles, areas: user.areas },
       +id,
     );

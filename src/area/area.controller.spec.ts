@@ -19,14 +19,18 @@ describe('AreaController: permisos', () => {
     expect(rolesFor('findAll')).toBeUndefined();
   });
 
-  it.each(['overview', 'create', 'update', 'setStages'] as const)(
-    '%s sólo para admin y superuser',
-    (method) => {
-      expect([...rolesFor(method)].sort()).toEqual(
-        [Role.ADMIN, Role.SUPERUSER].sort(),
-      );
-    },
-  );
+  it.each([
+    'overview',
+    'create',
+    'update',
+    'setStages',
+    'setMachines',
+    'setFields',
+  ] as const)('%s sólo para admin y superuser', (method) => {
+    expect([...rolesFor(method)].sort()).toEqual(
+      [Role.ADMIN, Role.SUPERUSER].sort(),
+    );
+  });
 });
 
 describe('CreateAreaDto', () => {

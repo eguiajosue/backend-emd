@@ -64,12 +64,23 @@ export class CoordinationService {
         area: true,
         status: true,
         assignedUserId: true,
+        machineId: true,
         assignedUser: {
           select: { firstName: true, lastName: true, isSharedAccount: true },
         },
         order: { select: { deliveryDate: true } },
       },
     });
+    const settings = new Map(
+      (await this.areaService.findAll()).map((a) => [
+        a.slug,
+        {
+          capacity: a.capacity,
+          turnaroundHours: a.turnaroundHours,
+          machines: a.machines,
+        },
+      ]),
+    );
     return loadByArea(
       tasks.map((t) => ({
         area: t.area,
@@ -82,9 +93,11 @@ export class CoordinationService {
           : null,
         sharedAccount: !!t.assignedUser?.isSharedAccount,
         deliveryDate: t.order.deliveryDate,
+        machineId: t.machineId,
       })),
       now,
       areas,
+      settings,
     );
   }
 
