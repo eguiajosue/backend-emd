@@ -2,7 +2,7 @@ import {
   normalizeSizeBreakdown,
   sizeBreakdownTotal,
 } from 'src/common/garment-sizes';
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { assertBase64FileValid } from 'src/common/file-validation';
 import {
   OrderListQueryDto,
@@ -81,6 +81,17 @@ export interface RequestingUser {
  * diseño.
  */
 const MAX_ORDER_FILE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Tope de seguridad para `findAll` cuando el cliente NO pide paginación
+ * (`?page/?limit`): sin esto la consulta trae TODOS los pedidos visibles sin
+ * techo, y la latencia/memoria crecen sin límite con el tamaño de la tabla.
+ * No es paginación real (el contrato sigue siendo el array plano de siempre);
+ * es un techo para el peor caso. Ordenado por id/fecha desc, así que al tocar
+ * el tope se quedan los más recientes (lo relevante para el tablero en vivo) y
+ * se registra un warning para que se adopte la paginación opt-in.
+ */
+export const UNPAGINATED_ORDER_CAP = 1000;
 
 /**
  * Tope AGREGADO de una ronda de diseño: 5MB por archivo está bien para un
@@ -200,6 +211,8 @@ const ORDER_WRITE_INCLUDE = {
 
 @Injectable()
 export class OrderService {
+  private readonly logger = new Logger(OrderService.name);
+
   /** Resolución de ids de Status por nombre, con cache (ver `resolveStatusIdByName`). */
   private readonly statusIds: StatusIdResolver;
 
@@ -1109,11 +1122,23 @@ export class OrderService {
       }
 
       if (!enabled) {
+        // Sin paginación explícita se conserva el array plano (contrato del
+        // frontend), pero acotado por un tope de seguridad: se piden CAP+1
+        // para detectar si hay más y, en ese caso, se recorta y se avisa.
         const orders = await this.prisma.order.findMany({
           where,
           select,
           orderBy,
+          take: UNPAGINATED_ORDER_CAP + 1,
         });
+        if (orders.length > UNPAGINATED_ORDER_CAP) {
+          this.logger.warn(
+            `GET /orders sin paginación devolvió el tope de ${UNPAGINATED_ORDER_CAP} ` +
+              `pedidos (hay más). El cliente debería pedir paginación (?page=&limit=). ` +
+              `Se recorta a los ${UNPAGINATED_ORDER_CAP} más recientes.`,
+          );
+          orders.length = UNPAGINATED_ORDER_CAP;
+        }
         return orders.map(this.toListItem);
       }
 
