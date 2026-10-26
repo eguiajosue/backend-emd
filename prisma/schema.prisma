@@ -86,6 +86,7 @@ model User {
   inventoryMovements      InventoryMovement[]      @relation("InventoryMovementCreatedBy") // Entradas/salidas/ajustes de inventario registrados por este usuario.
   restockRequests         RestockRequest[]         @relation("RestockRequestRequestedBy") // Avisos de reabasto que levantó.
   restockRequestsHandled  RestockRequest[]         @relation("RestockRequestHandledBy") // Avisos de reabasto que atendió (Recepción/admin).
+  productionFilesUploaded OrderProductionFile[]    @relation("ProductionFileUploadedBy") // Archivos de producción que subió este usuario.
   orderMockupsCreated     OrderMockup[]            @relation("OrderMockupCreatedBy") // Mockups 3D (playera/gorra) que este usuario adjuntó a un pedido.
   mockupTemplatesCreated  MockupTemplate[]         @relation("MockupTemplateCreatedBy") // Plantillas de mockup (compartidas por la empresa) que guardó este usuario.
   mockupLogosCreated      MockupLogo[]             @relation("MockupLogoCreatedBy") // Logos de la biblioteca de mockups (compartida por la empresa) que subió este usuario.
@@ -169,6 +170,7 @@ model Order {
   notifications      Notification[] // Notificaciones persistentes que referencian este pedido.
   designRevisions    DesignRevision[] // Rondas de montaje/feedback/autorización de la fase de Diseño.
   chatMessages       ChatMessage[] // Mensajes del chat interno que referencian este pedido como contexto.
+  productionFiles    OrderProductionFile[] // Archivos finales para producción (zip/eps/svg/dxf/imágenes) subidos por Diseño directo al bucket.
   areaTasks          OrderAreaTask[] // Trabajo de producción por área; varias áreas avanzan en paralelo (ver WORKFLOW.md §3).
   calendarTasks      CalendarTask[] // Tareas pendientes del calendario de equipo vinculadas a este pedido (opcional, ej. "confirmar medidas").
   calendarEvents     CalendarEvent[] // Eventos del calendario de equipo vinculados a este pedido (instalación, compra de materiales, etc.).
@@ -1330,4 +1332,31 @@ model ClientDesignResponse {
 
   @@index([orderId, status])
   @@index([revisionId])
+}
+
+/// Archivo final para producción de un pedido (.zip/.eps/.svg/.dxf/imágenes), de
+/// hasta varios GB. NUNCA pasa por el backend: el navegador lo sube por partes
+/// (multipart) directo al bucket con URLs firmadas y aquí sólo queda el registro.
+/// Requiere STORAGE_DRIVER=s3. Ver docs/production-files.md.
+model OrderProductionFile {
+  id           Int       @id @default(autoincrement())
+  orderId      Int // Pedido al que pertenece.
+  objectKey    String    @unique // Clave del objeto en el bucket.
+  fileName     String // Nombre original (se usa al descargar).
+  mimeType     String // Mime declarado por el navegador.
+  sizeBytes    BigInt // Tamaño declarado al iniciar; se verifica contra el bucket al completar.
+  status       String    @default("uploading") // uploading | ready | deleted.
+  uploadId     String? // UploadId del multipart mientras status = uploading.
+  version      Int // Versión dentro del pedido (1, 2, ...): subir otra no pisa la anterior.
+  notes        String? // Nota opcional de Diseño para producción.
+  uploadedById Int
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime? // Cuándo quedó lista para descargar.
+  deletedAt    DateTime?
+
+  order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  uploadedBy User  @relation("ProductionFileUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([orderId, status])
+  @@index([status, createdAt])
 }

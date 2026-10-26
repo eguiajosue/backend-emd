@@ -1,6 +1,6 @@
 import { InternalServerErrorException, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { ObjectStore, StoredObject } from './object-store';
+import { MultipartPart, ObjectStore, StoredObject } from './object-store';
 
 /**
  * Dónde se guardan los archivos NUEVOS:
@@ -159,6 +159,51 @@ export class StorageService {
   /** URL GET firmada (por defecto 5 minutos). */
   async getSignedUrl(key: string, expiresInSeconds = 300): Promise<string> {
     return this.requireStore().getSignedUrl(key, expiresInSeconds);
+  }
+
+  /** URL GET firmada que fuerza la descarga con el nombre dado (por defecto 15 min). */
+  async getSignedDownloadUrl(
+    key: string,
+    fileName: string,
+    expiresInSeconds = 900,
+  ): Promise<string> {
+    return this.requireStore().getSignedDownloadUrl(
+      key,
+      fileName,
+      expiresInSeconds,
+    );
+  }
+
+  // ─── Subida por partes (archivos de varios GB, directo al bucket) ──────
+
+  createMultipartUpload(key: string, contentType: string): Promise<string> {
+    return this.requireStore().createMultipartUpload(key, contentType);
+  }
+
+  signUploadPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    expiresInSeconds = 3600,
+  ): Promise<string> {
+    return this.requireStore().signUploadPart(
+      key,
+      uploadId,
+      partNumber,
+      expiresInSeconds,
+    );
+  }
+
+  completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: MultipartPart[],
+  ): Promise<void> {
+    return this.requireStore().completeMultipartUpload(key, uploadId, parts);
+  }
+
+  abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    return this.requireStore().abortMultipartUpload(key, uploadId);
   }
 
   // ─── Archivos de las filas (base64 legacy ↔ objeto) ────────────────────

@@ -9,6 +9,8 @@ import { AreaVisibilityModule } from 'src/area-visibility/area-visibility.module
 import { OrderProductPresetModule } from 'src/order-product-preset/order-product-preset.module';
 import { NotificationModule } from 'src/notification/notification.module';
 import { AuditLogModule } from 'src/audit-log/audit-log.module';
+import { ProductionFileController } from './production-files/production-file.controller';
+import { ProductionFileService } from './production-files/production-file.service';
 import { CalendarEventModule } from 'src/calendar-event/calendar-event.module';
 
 @Module({
@@ -20,11 +22,12 @@ import { CalendarEventModule } from 'src/calendar-event/calendar-event.module';
     AuditLogModule,
     CalendarEventModule,
   ],
-  controllers: [OrderController],
+  controllers: [OrderController, ProductionFileController],
   providers: [
     OrderService,
     OrderAreaTaskService,
     OrderMaterialItemService,
+    ProductionFileService,
     NotificationsGateway,
   ],
   exports: [OrderService, OrderAreaTaskService, OrderMaterialItemService],

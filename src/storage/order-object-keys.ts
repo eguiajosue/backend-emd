@@ -4,8 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 /**
  * Claves de TODOS los objetos del bucket que cuelgan de los pedidos que
  * cumplen `where`: archivo del cliente, archivos de cada ronda de diseño
- * (y sus escalares legacy, que comparten objeto), mockups y fotos de las
- * pruebas de bordado.
+ * (y sus escalares legacy, que comparten objeto), mockups, archivos de
+ * producción y fotos de las pruebas de bordado.
  *
  * Hay que llamarlo ANTES de borrar los pedidos: el borrado en cascada de la
  * DB se lleva las filas con las claves, pero no toca el bucket. Los adjuntos
@@ -27,6 +27,7 @@ export async function collectOrderObjectKeys(
         },
       },
       mockups: { select: { imageKey: true } },
+      productionFiles: { select: { objectKey: true } },
       areaTasks: {
         select: { sampleTests: { select: { photoKey: true } } },
       },
@@ -45,6 +46,7 @@ export async function collectOrderObjectKeys(
       for (const file of revision.files ?? []) add(file.dataKey);
     }
     for (const mockup of order.mockups ?? []) add(mockup.imageKey);
+    for (const file of order.productionFiles ?? []) add(file.objectKey);
     for (const task of order.areaTasks ?? []) {
       for (const test of task.sampleTests ?? []) add(test.photoKey);
     }

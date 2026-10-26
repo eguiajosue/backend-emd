@@ -1,12 +1,21 @@
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { ObjectNotFoundError, ObjectStore, StoredObject } from './object-store';
+import {
+  MultipartPart,
+  ObjectNotFoundError,
+  ObjectStore,
+  StoredObject,
+} from './object-store';
 
 /** Configuración del driver S3 (Cloudflare R2 o cualquier S3 compatible). */
 export interface S3ObjectStoreConfig {
@@ -108,5 +117,94 @@ export class S3ObjectStore implements ObjectStore {
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       { expiresIn: expiresInSeconds },
     );
+  }
+
+  async getSignedDownloadUrl(
+    key: string,
+    fileName: string,
+    expiresInSeconds: number,
+  ): Promise<string> {
+    // `filename*` (RFC 5987) para nombres con acentos o espacios; `filename`
+    // queda como respaldo ASCII.
+    const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+    return getSignedUrl(
+      this.client,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ResponseContentDisposition: `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      }),
+      { expiresIn: expiresInSeconds },
+    );
+  }
+
+  async createMultipartUpload(
+    key: string,
+    contentType: string,
+  ): Promise<string> {
+    const result = await this.client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ContentType: contentType,
+      }),
+    );
+    if (!result.UploadId) {
+      throw new Error('El bucket no devolvió UploadId');
+    }
+    return result.UploadId;
+  }
+
+  async signUploadPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    expiresInSeconds: number,
+  ): Promise<string> {
+    return getSignedUrl(
+      this.client,
+      new UploadPartCommand({
+        Bucket: this.bucket,
+        Key: key,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+      }),
+      { expiresIn: expiresInSeconds },
+    );
+  }
+
+  async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: MultipartPart[],
+  ): Promise<void> {
+    await this.client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: this.bucket,
+        Key: key,
+        UploadId: uploadId,
+        MultipartUpload: {
+          Parts: [...parts]
+            .sort((a, b) => a.partNumber - b.partNumber)
+            .map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+        },
+      }),
+    );
+  }
+
+  async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    try {
+      await this.client.send(
+        new AbortMultipartUploadCommand({
+          Bucket: this.bucket,
+          Key: key,
+          UploadId: uploadId,
+        }),
+      );
+    } catch (error) {
+      // Abortar una subida que ya no existe no es un error.
+      if (error?.name === 'NoSuchUpload' || isNotFound(error)) return;
+      throw error;
+    }
   }
 }
