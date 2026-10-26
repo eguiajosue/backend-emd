@@ -55,7 +55,7 @@
     "socket.io": "^4.8.1",
     "uuid": "^14.0.2",
     "web-push": "^3.6.7",
-    "zod": "^4.5.4"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",
@@ -108,6 +108,10 @@
     "seed": "ts-node --transpile-only prisma/seed.ts"
   },
   "overrides": {
-    "js-yaml@5": "^5.4.3"
+    "js-yaml@5": "^5.4.3",
+    "fast-uri": "^3.1.9",
+    "undici": "^7.30.1",
+    "body-parser": "^2.4.0",
+    "multer": "^2.5.0"
   }
 }
