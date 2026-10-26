@@ -1,4 +1,4 @@
-import { OrderService } from './order.service';
+import { OrderService, UNPAGINATED_ORDER_CAP } from './order.service';
 import { OrderAreaTaskService } from './order-area-task.service';
 import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -346,5 +346,72 @@ describe('OrderService - findHistory con filtros', () => {
       },
     });
     expect(count).toHaveBeenCalledWith({ where });
+  });
+});
+
+describe('OrderService - findAll sin paginación: tope de seguridad', () => {
+  function buildService(findMany: jest.Mock) {
+    const prisma = { order: { findMany } };
+    return new OrderService(
+      prisma as unknown as PrismaService,
+      {} as NotificationsGateway,
+      {} as AreaVisibilityService,
+      {} as OrderProductPresetService,
+      {} as NotificationService,
+      {} as AuditLogService,
+      {} as OrderAreaTaskService,
+      {} as CalendarEventService,
+    );
+  }
+
+  it('pide CAP+1 y recorta al tope cuando hay más pedidos que el tope', async () => {
+    // El mock respeta `take` como lo haría Prisma.
+    const findMany = jest.fn(({ take }: any = {}) => {
+      const rows = Array.from(
+        { length: UNPAGINATED_ORDER_CAP + 50 },
+        (_, i) => ({
+          id: i + 1,
+          clientResourceFileName: null,
+        }),
+      );
+      return Promise.resolve(
+        typeof take === 'number' ? rows.slice(0, take) : rows,
+      );
+    });
+    const service = buildService(findMany);
+
+    const result = (await service.findAll(undefined, {
+      userId: 99,
+      roles: ['admin'],
+      areas: [],
+    })) as any[];
+
+    // Devuelve array plano (contrato del frontend), acotado al tope.
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveLength(UNPAGINATED_ORDER_CAP);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: UNPAGINATED_ORDER_CAP + 1 }),
+    );
+  });
+
+  it('no recorta cuando hay menos pedidos que el tope', async () => {
+    const findMany = jest.fn(({ take }: any = {}) => {
+      const rows = Array.from({ length: 3 }, (_, i) => ({
+        id: i + 1,
+        clientResourceFileName: null,
+      }));
+      return Promise.resolve(
+        typeof take === 'number' ? rows.slice(0, take) : rows,
+      );
+    });
+    const service = buildService(findMany);
+
+    const result = (await service.findAll(undefined, {
+      userId: 99,
+      roles: ['admin'],
+      areas: [],
+    })) as any[];
+
+    expect(result).toHaveLength(3);
   });
 });
