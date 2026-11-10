@@ -8,6 +8,7 @@ import {
 import { Request, Response } from 'express';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { redactSecretsInUrl } from 'src/common/redact-url';
 import { recordRequestDuration } from 'src/common/metrics/request-latency.tracker';
 
 /**
@@ -45,7 +46,7 @@ export class LoggingInterceptor implements NestInterceptor {
     const duration = Date.now() - start;
     recordRequestDuration(duration);
     this.logger.log(
-      `[${request.id ?? '-'}] ${request.method} ${request.originalUrl} ${statusCode} ${duration}ms`,
+      `[${request.id ?? '-'}] ${request.method} ${redactSecretsInUrl(request.originalUrl)} ${statusCode} ${duration}ms`,
     );
   }
 }

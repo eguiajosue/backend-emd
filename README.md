@@ -22,8 +22,9 @@ inmediatamente con un mensaje claro en vez de arrancar rota.
 `GET /api/docs` (Swagger UI) y `GET /api/docs-json` (OpenAPI JSON).
 
 Si se definen `SWAGGER_USER` y `SWAGGER_PASSWORD` quedan protegidos con basic
-auth; si no, son públicos. En producción conviene definirlas: la doc no expone
-datos, pero sí el mapa completo de endpoints.
+auth. Sin ellas, la doc es pública en desarrollo y **no se publica en
+producción** (`NODE_ENV=production`): define las dos variables en Render para
+verla, ya que expone el mapa completo de endpoints.
 
 ## Health checks
 

@@ -1,4 +1,5 @@
 import type { ErrorEvent, NodeOptions } from '@sentry/nestjs';
+import { redactSecretsInUrl } from '../redact-url';
 
 /** Headers que nunca salen hacia Sentry (credenciales y sesión). */
 const SENSITIVE_HEADERS = new Set([
@@ -22,7 +23,7 @@ export function scrubSentryEvent<T extends ErrorEvent>(event: T): T {
     // La query puede llevar tokens (p. ej. `?token=` del push de Expo).
     delete event.request.query_string;
     if (event.request.url) {
-      event.request.url = event.request.url.split('?')[0];
+      event.request.url = redactSecretsInUrl(event.request.url.split('?')[0]);
     }
     if (event.request.headers) {
       for (const name of Object.keys(event.request.headers)) {

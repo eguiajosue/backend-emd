@@ -172,14 +172,14 @@ export class AuthService {
     };
   }
 
-  async register(registerDto: RegisterDto) {
+  async register(registerDto: RegisterDto, actor?: { roles: string[] }) {
     const user = await this.userService.findOneByUsername(registerDto.username);
 
     if (user) {
       throw new HttpException('El usuario ya existe', HttpStatus.CONFLICT);
     }
 
-    return await this.userService.create(registerDto);
+    return await this.userService.create(registerDto, actor);
   }
 
   async profile(user: { username: string }) {

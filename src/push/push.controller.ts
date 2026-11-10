@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { PushService, SubscribeInput } from './push.service';
+import { PushService } from './push.service';
+import { PushSubscribeDto } from './dto/push-subscribe.dto';
 import { ExpoPushService } from './expo-push.service';
 import { Auth } from 'src/common/decorators/auth.decorator';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
@@ -37,7 +38,7 @@ export class PushController {
   @Auth(Role.ADMIN, Role.RECEPCION, Role.SUPERUSER, AreaAccess.ANY)
   @Post('subscribe')
   subscribe(
-    @Body() body: SubscribeInput,
+    @Body() body: PushSubscribeDto,
     @ActiveUser() user: AccessTokenPayload,
   ) {
     return this.pushService.subscribe(user.sub, body);

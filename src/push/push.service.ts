@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as webpush from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
+import { isAllowedPushEndpoint } from './push-endpoint';
 
 /** Datos que manda el navegador al suscribirse (`PushSubscriptionJSON`). */
 export interface SubscribeInput {
@@ -133,6 +134,14 @@ export class PushService {
     payload: PushNotificationPayload,
   ): Promise<PushSendResult> {
     if (!this.enabled) return 'disabled';
+    // Defensa en profundidad: las filas guardadas antes de validar el
+    // endpoint al suscribir tampoco deben provocar un POST a un host ajeno.
+    if (!isAllowedPushEndpoint(subscription.endpoint)) {
+      this.logger.warn(
+        `Suscripción ${subscription.id ?? '(sin id)'} con endpoint fuera de los servicios de push conocidos: no se envía`,
+      );
+      return 'failed';
+    }
     try {
       await webpush.sendNotification(
         {
@@ -146,7 +155,7 @@ export class PushService {
       const statusCode = (error as { statusCode?: number }).statusCode;
       if (statusCode === 404 || statusCode === 410) return 'gone';
       this.logger.warn(
-        `Fallo enviando push a la suscripción ${subscription.id ?? subscription.endpoint}: ${
+        `Fallo enviando push a la suscripción ${subscription.id ?? '(sin id)'}: ${
           (error as Error).message
         }`,
       );

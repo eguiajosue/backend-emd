@@ -11,6 +11,12 @@ import { Prisma } from '@prisma/client';
 import * as bcryptjs from 'bcryptjs';
 import { StorageService } from '../storage/storage.service';
 import { collectOrderObjectKeys } from '../storage/order-object-keys';
+import { Role } from '../common/enums/roles.enum';
+
+/** Quién pide el alta/cambio/baja de un usuario (roles de su sesión). */
+export interface UserAdminActor {
+  roles: string[];
+}
 
 /**
  * Campos que se devuelven al cliente. Excluye `password` explícitamente:
@@ -96,6 +102,51 @@ export class UserService {
   }
 
   /**
+   * El rol superusuario sólo lo administra otro superusuario: sin esto un
+   * admin podía dárselo a sí mismo (o a otra cuenta), o cambiarle la
+   * contraseña a un superusuario y entrar con ella. Sin `actor` (llamadas
+   * internas: seed, tests) no se restringe.
+   */
+  private async assertCanManageSuperuser(
+    actor: UserAdminActor | undefined,
+    change: { roleIds?: number[]; targetUserId?: number },
+  ) {
+    if (!actor) return;
+    const isSuperuser = actor.roles.some(
+      (role) => role.toLowerCase() === Role.SUPERUSER,
+    );
+    if (isSuperuser) return;
+    const superuserRole = {
+      name: { equals: Role.SUPERUSER, mode: 'insensitive' as const },
+    };
+
+    if (change.roleIds && change.roleIds.length > 0) {
+      const granted = await this.prisma.role.findFirst({
+        where: { id: { in: change.roleIds }, ...superuserRole },
+        select: { id: true },
+      });
+      if (granted) {
+        throw new HttpException(
+          'Sólo un superusuario puede asignar el rol de superusuario',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+    }
+    if (change.targetUserId !== undefined) {
+      const target = await this.prisma.user.findFirst({
+        where: { id: change.targetUserId, roles: { some: superuserRole } },
+        select: { id: true },
+      });
+      if (target) {
+        throw new HttpException(
+          'Sólo un superusuario puede modificar o eliminar a otro superusuario',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+    }
+  }
+
+  /**
    * Las áreas que se asignan a alguien tienen que existir y estar activas: un
    * área desactivada no se ofrece ni da acceso.
    */
@@ -133,7 +184,7 @@ export class UserService {
     }
   }
 
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto, actor?: UserAdminActor) {
     try {
       const {
         roleIds = [],
@@ -148,6 +199,7 @@ export class UserService {
           HttpStatus.BAD_REQUEST,
         );
       }
+      await this.assertCanManageSuperuser(actor, { roleIds });
       await this.assertBranchForRoles(roleIds, branchId);
       await this.assertAssignableAreas(areaIds);
       const hashedPassword = await bcryptjs.hash(password, 10);
@@ -250,7 +302,11 @@ export class UserService {
     }
   }
 
-  async update(id: number, updateUserDto: UpdateUserDto) {
+  async update(
+    id: number,
+    updateUserDto: UpdateUserDto,
+    actor?: UserAdminActor,
+  ) {
     try {
       const {
         roleIds,
@@ -261,6 +317,8 @@ export class UserService {
         branchId,
         ...rest
       } = updateUserDto;
+
+      await this.assertCanManageSuperuser(actor, { roleIds, targetUserId: id });
 
       // Obtiene el usuario actual si firstName o lastName no están definidos
       let currentUser;
@@ -381,8 +439,9 @@ export class UserService {
     }
   }
 
-  async remove(id: number) {
+  async remove(id: number, actor?: UserAdminActor) {
     try {
+      await this.assertCanManageSuperuser(actor, { targetUserId: id });
       // Las cuentas de sucursal son COMPARTIDAS: `Order.userId` de todos los
       // pedidos de la sucursal es esa cuenta, así que borrarla se llevaría el
       // historial completo de la sucursal. Se rechaza (hay que renombrarla o

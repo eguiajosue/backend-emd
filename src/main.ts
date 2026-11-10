@@ -7,12 +7,14 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as compression from 'compression';
 import helmet from 'helmet';
+import { timingSafeEqual } from 'crypto';
 import { json, urlencoded, NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { Env } from './config/env.validation';
+import { redactSecretsInUrl } from './common/redact-url';
 import {
   buildCorsOriginCallback,
   isOriginAllowed,
@@ -21,10 +23,17 @@ import {
 
 /** Basic auth mínimo para /api/docs cuando SWAGGER_USER/SWAGGER_PASSWORD existen. */
 function basicAuth(user: string, password: string) {
-  const expected =
-    'Basic ' + Buffer.from(`${user}:${password}`).toString('base64');
+  const expected = Buffer.from(
+    'Basic ' + Buffer.from(`${user}:${password}`).toString('base64'),
+  );
   return (req: Request, res: Response, next: NextFunction) => {
-    if (req.headers.authorization === expected) {
+    const received = Buffer.from(req.headers.authorization ?? '');
+    // Comparación en tiempo constante: `===` filtra por tiempo cuántos
+    // caracteres del header coinciden.
+    if (
+      received.length === expected.length &&
+      timingSafeEqual(received, expected)
+    ) {
       return next();
     }
     res.setHeader('WWW-Authenticate', 'Basic realm="API docs"');
@@ -92,7 +101,7 @@ async function bootstrap() {
     if (!origin || isOriginAllowed(origin, allowedOrigins)) return next();
 
     logger.warn(
-      `CORS: origin no permitido "${origin}" (${req.method} ${req.originalUrl}). ` +
+      `CORS: origin no permitido "${origin}" (${req.method} ${redactSecretsInUrl(req.originalUrl)}). ` +
         `Agrégalo a FRONTEND_URL (lista separada por comas). Permitidos: ${
           allowedOrigins.join(', ') || '(ninguno)'
         } + *.vercel.app del proyecto.`,
@@ -148,27 +157,37 @@ async function bootstrap() {
     );
   }
 
-  // Documentación OpenAPI.
+  // Documentación OpenAPI. En producción sólo se publica con basic auth: sin
+  // SWAGGER_USER/SWAGGER_PASSWORD el esquema completo de la API (rutas, DTOs,
+  // roles) quedaba público y le ahorra el reconocimiento a quien ataque.
   const swaggerUser = config.get('SWAGGER_USER', { infer: true });
   const swaggerPassword = config.get('SWAGGER_PASSWORD', { infer: true });
-  if (swaggerUser && swaggerPassword) {
-    app.use('/api/docs', basicAuth(swaggerUser, swaggerPassword));
-    app.use('/api/docs-json', basicAuth(swaggerUser, swaggerPassword));
-  }
+  const swaggerProtected = Boolean(swaggerUser && swaggerPassword);
+  if (isProduction && !swaggerProtected) {
+    logger.warn(
+      'Swagger (/api/docs) desactivado en producción: define SWAGGER_USER y ' +
+        'SWAGGER_PASSWORD para publicarlo con basic auth.',
+    );
+  } else {
+    if (swaggerProtected) {
+      app.use('/api/docs', basicAuth(swaggerUser!, swaggerPassword!));
+      app.use('/api/docs-json', basicAuth(swaggerUser!, swaggerPassword!));
+    }
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('EMD Bordados API')
-    .setDescription(
-      'API de gestión de pedidos y producción de EMD Bordados. ' +
-        'Los endpoints de listado soportan paginación opt-in (?page=&limit=).',
-    )
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document, {
-    jsonDocumentUrl: 'api/docs-json',
-  });
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('EMD Bordados API')
+      .setDescription(
+        'API de gestión de pedidos y producción de EMD Bordados. ' +
+          'Los endpoints de listado soportan paginación opt-in (?page=&limit=).',
+      )
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document, {
+      jsonDocumentUrl: 'api/docs-json',
+    });
+  }
 
   const port =
     config.get('PORT', { infer: true }) ??

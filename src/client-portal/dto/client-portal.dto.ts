@@ -2,11 +2,11 @@ import {
   IsIn,
   IsOptional,
   IsString,
-  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsPushServiceEndpoint } from 'src/push/push-endpoint';
 import { TrimString } from 'src/common/transformers/empty-to-undefined';
 import { CLIENT_RESPONSE_KINDS } from '../client-portal.service';
 
@@ -39,7 +39,7 @@ class PortalPushKeysDto {
 export class PortalPushSubscribeDto {
   @IsString()
   @MaxLength(1000)
-  @Matches(/^https:\/\//, { message: 'Suscripción inválida' })
+  @IsPushServiceEndpoint()
   endpoint: string;
 
   @ValidateNested()

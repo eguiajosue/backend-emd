@@ -50,8 +50,11 @@ export class UserController {
 
   @Auth(Role.ADMIN, Role.SUPERUSER)
   @Post()
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.userService.create(createUserDto);
+  create(
+    @Body() createUserDto: CreateUserDto,
+    @ActiveUser() actor: AccessTokenPayload,
+  ) {
+    return this.userService.create(createUserDto, actor);
   }
 
   // Lectura abierta a todos los roles que pueden ver pedidos: recepción
@@ -79,13 +82,17 @@ export class UserController {
 
   @Auth(Role.ADMIN, Role.SUPERUSER)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.userService.update(+id, updateUserDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateUserDto: UpdateUserDto,
+    @ActiveUser() actor: AccessTokenPayload,
+  ) {
+    return this.userService.update(+id, updateUserDto, actor);
   }
 
   @Auth(Role.ADMIN, Role.SUPERUSER)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.userService.remove(+id);
+  remove(@Param('id') id: string, @ActiveUser() actor: AccessTokenPayload) {
+    return this.userService.remove(+id, actor);
   }
 }
