@@ -123,6 +123,8 @@ describe('Visibilidad de sucursales: superficie de rutas', () => {
       'PushController.getVapidPublicKey',
       'SettingsController.findOne',
       'UserController.getMyPreferences',
+      // Sortea el avatar propio: no toca pedidos, igual que las preferencias.
+      'UserController.rerollMyAvatar',
       'UserController.updateMyPreferences',
     ]);
   });

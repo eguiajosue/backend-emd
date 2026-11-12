@@ -157,6 +157,7 @@ const ASSIGNED_USER_SELECT = {
     lastName: true,
     username: true,
     isSharedAccount: true,
+    avatarSeed: true,
   },
 } satisfies { select: Prisma.UserSelect };
 
