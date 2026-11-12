@@ -48,6 +48,13 @@ export class UserController {
     );
   }
 
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard)
+  @Patch('me/avatar')
+  rerollMyAvatar(@ActiveUser() user: AccessTokenPayload) {
+    return this.userService.rerollAvatar(user.sub);
+  }
+
   @Auth(Role.ADMIN, Role.SUPERUSER)
   @Post()
   create(@Body() createUserDto: CreateUserDto) {
