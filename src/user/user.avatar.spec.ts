@@ -11,6 +11,34 @@ function makePrisma() {
   } as any;
 }
 
+describe('UserService.getAvatar', () => {
+  it('devuelve solo la semilla del propio usuario', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({ avatarSeed: 'abc123' }),
+      },
+    } as any;
+
+    await expect(new UserService(prisma).getAvatar(7)).resolves.toEqual({
+      avatarSeed: 'abc123',
+    });
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({
+      where: { id: 7 },
+      select: { avatarSeed: true },
+    });
+  });
+
+  it('un usuario inexistente devuelve semilla null', async () => {
+    const prisma = {
+      user: { findUnique: jest.fn().mockResolvedValue(null) },
+    } as any;
+
+    await expect(new UserService(prisma).getAvatar(7)).resolves.toEqual({
+      avatarSeed: null,
+    });
+  });
+});
+
 describe('UserService.rerollAvatar', () => {
   it('guarda y devuelve una semilla hex de 12 caracteres', async () => {
     const prisma = makePrisma();

@@ -50,6 +50,13 @@ export class UserController {
 
   @ApiBearerAuth()
   @UseGuards(AuthGuard)
+  @Get('me/avatar')
+  getMyAvatar(@ActiveUser() user: AccessTokenPayload) {
+    return this.userService.getAvatar(user.sub);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard)
   @Patch('me/avatar')
   rerollMyAvatar(@ActiveUser() user: AccessTokenPayload) {
     return this.userService.rerollAvatar(user.sub);

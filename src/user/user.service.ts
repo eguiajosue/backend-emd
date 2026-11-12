@@ -68,6 +68,15 @@ export class UserService {
     private readonly storage: StorageService = StorageService.database(),
   ) {}
 
+  /** Semilla del avatar propio. Es una ruta aparte de `auth/profile`, que es solo de admin. */
+  async getAvatar(userId: number): Promise<{ avatarSeed: string | null }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { avatarSeed: true },
+    });
+    return { avatarSeed: user?.avatarSeed ?? null };
+  }
+
   /** Sortea y guarda un avatar nuevo. La semilla la genera el servidor, nunca el cliente. */
   rerollAvatar(userId: number): Promise<{ avatarSeed: string }> {
     return this.prisma.user.update({
