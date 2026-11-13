@@ -9,6 +9,7 @@ import {
 } from './json-preferences';
 import { Prisma } from '@prisma/client';
 import * as bcryptjs from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { StorageService } from '../storage/storage.service';
 import { collectOrderObjectKeys } from '../storage/order-object-keys';
 
@@ -66,6 +67,24 @@ export class UserService {
     // lo inyecta siempre StorageModule (global).
     private readonly storage: StorageService = StorageService.database(),
   ) {}
+
+  /** Semilla del avatar propio. Es una ruta aparte de `auth/profile`, que es solo de admin. */
+  async getAvatar(userId: number): Promise<{ avatarSeed: string | null }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { avatarSeed: true },
+    });
+    return { avatarSeed: user?.avatarSeed ?? null };
+  }
+
+  /** Sortea y guarda un avatar nuevo. La semilla la genera el servidor, nunca el cliente. */
+  rerollAvatar(userId: number): Promise<{ avatarSeed: string }> {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarSeed: randomBytes(6).toString('hex') },
+      select: { avatarSeed: true },
+    }) as Promise<{ avatarSeed: string }>;
+  }
 
   async usernameExists(username: string): Promise<boolean> {
     const user = await this.prisma.user.findUnique({

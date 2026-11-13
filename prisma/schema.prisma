@@ -55,6 +55,7 @@ model User {
   password        String // Contraseña del usuario.
   isSharedAccount Boolean   @default(false) // Cuenta compartida por varias personas de un área (ej. "Taller"), en vez de una persona.
   branchId        Int? // Sucursal a la que pertenece la cuenta (sólo rol 'sucursal'; ej. "Punto Madero"). Null = usuario de la matriz.
+  avatarSeed      String? // Semilla del avatar generado (ver UserService.rerollAvatar). Null = se usa el id como semilla.
   lastSeenAt      DateTime? // Última vez que se desconectó el último socket vivo de este usuario (ver NotificationsGateway.handleDisconnect). Null si nunca se conectó por WebSocket.
 
   roles                   Role[] // Relación muchos a muchos con Role: un usuario puede tener uno o más roles.

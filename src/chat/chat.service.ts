@@ -95,6 +95,7 @@ const USER_SUMMARY_SELECT = {
   username: true,
   firstName: true,
   lastName: true,
+  avatarSeed: true,
 } as const;
 
 const USER_SUMMARY_WITH_PRESENCE_SELECT = {
@@ -862,6 +863,7 @@ export class ChatService {
       username: u.username,
       firstName: u.firstName,
       lastName: u.lastName,
+      avatarSeed: u.avatarSeed,
       roles: u.roles.map((r) => r.name),
       areas: u.areas.map((a) => a.slug),
       isOnline: this.notificationsGateway.isUserOnline(u.id),
